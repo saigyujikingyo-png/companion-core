@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "author": "actual Claude Opus CLI",
+  "model": [
+    "claude-opus-5-5"
+  ],
+  "sourceEvidence": "C:\\Users\\saigy\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\CompanionCoreLab\\dsh-coupling-20261025-v1\\opus-session-status-repaired-05c05b26-9fb8-42b8-b526-364180004b69\\author-success.json",
+  "safeReceiptSha256": "9a30211132e22829663870e1b1a8a5926b43ad60d522e38f3edf3ab10d40be6d",
+  "rawResultSha256": "7d9354cf8d16ba5a6e73866fd56956040708c447dcfcb9a3900f31d112ed5613",
+  "canonicalSourceSha256": "34a9523bff9b300b106f9d8642821db23fad70e6eaefa74ec95eb80cd3ee67c0",
+  "integratorLogicChanges": "none; mechanical SDK packaging only",
+  "previousTimerOnlySource": {
+    "version": 2,
+    "author": "actual Claude Opus CLI",
+    "model": [
+      "claude-opus-5-5"
+    ],
+    "sourceEvidence": "C:\\Users\\saigy\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\CompanionCoreLab\\dsh-coupling-20261025-v1\\opus-session-status-repaired-e1e68f39-6a95-4575-852e-f6e0d0237f1c\\author-success.json",
+    "safeReceiptSha256": "bd7af7f62b977856b6ee0c81763116ff021901d0cdfadd0ca247e7877adee320",
+    "rawResultSha256": "0b8bc606ffd50bc23dade1f0e783e394c179a4c58f78172030075c81083e773f",
+    "canonicalSourceSha256": "e23a15a7a45965c47d7cc87509ee9081abe95d9f55b15b974911901d7a557f11",
+    "integratorLogicChanges": "none; mechanical SDK packaging only",
+    "initialUnboundedSource": {
+      "version": 1,
+      "author": "actual Claude Opus CLI",
+      "model": [
+        "claude-opus-5-5"
+      ],
+      "sourceEvidence": "C:\\Users\\saigy\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\CompanionCoreLab\\dsh-coupling-20261025-v1\\opus-session-status-repaired-edcb2d78-e977-413e-a025-c6bfc902e7ae\\author-success.json",
+      "safeReceiptSha256": "9f37f81253f35724e997a60944f0fca57e315db99b284c95ad0f994d22db719a",
+      "rawResultSha256": "e8ffaacbd5c21d91b9eb6da8e0eaf45e56b24f2b1c04ec6854912dbedd411f6e",
+      "canonicalSourceSha256": "1081b63e52a74389e1cc4db5d17a4c72f44addf252e8803a358e78c42fa03ccb",
+      "integratorLogicChanges": "none; mechanical lazy-CJS and fixed public target only",
+      "previousAttempt": "AUTHOR_OUTPUT_LOST; no automatic retry; explicit Root admitted replacement attempt"
+    },
+    "initialSourcePreserved": "src/client.initial.opus.js",
+    "deadline": "one trusted click 10s local only; no remote cancellation"
+  },
+  "previousSourcePreserved": "src/client.timer-only.opus.js",
+  "deadline": "fixed monotonic10s; pre-invoke/post-await/pre-publish checks; timer wakes only; no remote cancellation"
+}

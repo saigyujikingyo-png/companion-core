@@ -1,0 +1,3 @@
+- insert:
+    - id: companion-session-status
+      name: '@companion/dsh-session-status'
