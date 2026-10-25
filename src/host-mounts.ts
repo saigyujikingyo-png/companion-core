@@ -25,3 +25,32 @@ export function mountDshHost(ctx: DshEventContext, service: HostMemoryService, b
   });
   return () => { if (!mounted) return; mounted = false; try { off(); } finally { service.unbind(binding); } };
 }
+
+export type CodexEventContext = {
+  onNotification(callback: (notification: unknown) => void): () => void;
+};
+/** Mount only a trusted, explicitly selected thread. This does not authenticate a
+ * remote peer, approve tools, or turn assistant output into a user's statement. */
+export function mountCodexHost(ctx: CodexEventContext, service: HostMemoryService, binding: HostBinding,
+  options: { threadId: string; onReceipt: (receipt: Receipt) => void; onError: (error: ReturnType<typeof publicError>) => void }): () => void {
+  let mounted = true;
+  const off = ctx.onNotification(notification => {
+    if (!mounted || typeof notification !== 'object' || notification === null) return;
+    const n = notification as Record<string, unknown>;
+    if (n.method !== 'item/completed' || typeof n.params !== 'object' || n.params === null) return;
+    const p = n.params as Record<string, unknown>;
+    if (p.threadId !== options.threadId || typeof p.item !== 'object' || p.item === null) return;
+    const item = p.item as Record<string, unknown>;
+    if (item.type !== 'userMessage') return;
+    void Promise.resolve().then(() => {
+      if (!mounted) return;
+      // Transport-only metadata is projected, not trusted as core identity.
+      return service.extract(binding, JSON.stringify({ version:1, operation:'extract_memory', event:{
+        method:'item/completed', params:{ threadId:p.threadId, turnId:p.turnId, completedAtMs:p.completedAtMs,
+          item:{ type:item.type, id:item.id, content:item.content, ...(item.clientId === undefined ? {} : { clientId:item.clientId }) } }
+      } }));
+    }).then(receipt => { if (mounted && receipt) options.onReceipt(receipt); },
+      error => { if (mounted) options.onError(publicError(error)); }).catch(() => { /* callback failures stay local */ });
+  });
+  return () => { if (!mounted) return; mounted = false; try { off(); } finally { service.unbind(binding); } };
+}
