@@ -1,5 +1,15 @@
 # 0.1 初始切片验证
 
+**最新背景状态切片（2026-10-25）：** 完整 `npm run check` 退出0，strict typecheck、94/94测试（无跳过）和七步合成回放通过。包含原76项和新增18项；schema1、Node24.16.0/SQLite3.53.0，回放库为TEMP `companion-core-replay-aylJOL`。原生API/Codex没有新增调用，下文各阶段历史证据继续保留。新来源API只读，不改变既有存储入口行为。
+
+独立Astra max对冻结版本复跑18/18，并执行185.5ms纯内存边界探针：根事件多次发布/再提炼/重叠引用不能重复刺激；15,000ms起拒绝appraisal，调用前过期不启动evaluator；非合作raw promise跨reset保留许可；context/consent ABA、purge和来源到期拒绝旧结果。分段与单次推进最大latent差1.11e-16、nextWake差1.46e-11ms；精确阈值无重复意图。两个P2（派生来源重放和无新事件时迟到解释）均关闭，无新P1/P2。
+
+真实时钟的有限120秒对照已执行，使用独立临时合成库、两进程部分时间重叠：事件模式1次调度检查、1个影子意图，进程CPU 47ms；10Hz模式1,144次检查、1个影子意图，进程CPU 1,844ms。事件模式RSS64,114,688bytes，tick69,029,888bytes；这不是模型内存净增量或电能。原始结果TEMP `companion-background-state-UbhToA/result.json`（SHA256 68341f6da33904c03dc4b63339bba869be183ce7befc4e9f6eb6e335eec1baca）和 `companion-background-state-QfHFwX/result.json`（1e0769ad0ebbb495e45ec2d50c63b4f6f7cda1abac09a355ce5f0a13f4deebc1）均由Root重新读取并核对源hash。没有真实模型/发言/GPU调用，过程退出0。首次应用沙箱试跑也退出0，但沙箱临时产物之后不可访问，故不将其作为可重新核验的保存证据；随后相同源码在普通用户TEMP重跑并保留上述文件。
+
+有限功耗实验另在同级维护研究目录 `2026-10-25-background-state`。10个条件在535.406秒内完成，4组CPU/CUDA调度状态parity通过；GPU能量有读数但全部差异INCONCLUSIVE，CPU计数在该次因元数据解析问题NOT_MEASURED。不能把本节的调度次数或CPU时间当作省电百分比。真实连接组算子仍是独立实验，未与此状态层在线连接；物理睡眠恢复、全天常驻、真实交互质量、跨重启状态和十年记忆仍未验收。
+
+核心验收SHA256：background-state `141681d77b66418f54f0d779288a3f52bde2e57c9227d28d9df382c5fcf7089f`；store `bd76459ddb0b782f7b764e865c0be876225a1440877da3cfda4f952f3ad6740c`；probe `3831ed176d59b41caecd45d8e86092af0a000f8747942ffed45903d5f9569b80`。旧三份neural执行源码hash未变，未重复训练。
+
 日期：2026-10-25。范围为 Windows 本机临时 SQLite / 合成身份与文字，不包含生产、真实模型或社交交付。
 
 | 检查 | 实际结果 |

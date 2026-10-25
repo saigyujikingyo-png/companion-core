@@ -313,6 +313,20 @@ export class MemoryStore {
     v.timestamp(asOf); v.refs([ref]);
     return this.#tx(() => this.#record(this.#epoch(epoch), ref, asOf), true);
   }
+  /** Read-only provenance for currently visible published memories. No source text.
+   * Multiple publications/derived memories from the same interaction share its event ref.
+   */
+  publishedEventSources(epoch: Epoch, sourceRefs: SourceRef[]): SourceRef[] {
+    const requested = v.refs(sourceRefs);
+    return this.#tx(() => {
+      const scope = this.#epoch(epoch), asOf = this.#clock.wall();
+      for (const ref of requested) if (!this.#record(scope, ref, asOf)) v.fail('SOURCE_NOT_PUBLISHED');
+      const events = this.#ancestry(scope, requested).filter(row => row.type === 'event')
+        .map(row => ({ id: row.id as string, revision: row.revision as number }));
+      if (events.length === 0) v.fail('EVENT_PROVENANCE_REQUIRED');
+      return events.sort((a, b) => a.id.localeCompare(b.id));
+    }, true);
+  }
   search(epoch: Epoch, query: string, limit = 20, asOf = this.#clock.wall()): MemoryRecord[] {
     v.text(query, 256); v.timestamp(asOf);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) v.fail('INVALID_INPUT');
