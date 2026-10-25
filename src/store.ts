@@ -178,6 +178,30 @@ export class MemoryStore {
     if (!job) v.fail('JOB_NOT_FOUND');
     return job;
   }
+  /** One durable extraction operation per selected event revision.
+   * A terminal failure is never replayed by duplicate ingress. Pending work from
+   * a crash is deliberately not auto-restarted by a host message. */
+  beginSelectedExtraction(epoch: Epoch, ref: SourceRef): { job: Job } | { receipt: Receipt } {
+    const refs = v.refs([ref]);
+    return this.#tx(() => {
+      const scope = this.#epoch(epoch); this.#validateRefs(scope, refs);
+      if (this.#node(scope.id, ref.id).type !== 'event') v.fail('INVALID_INPUT');
+      // Scope/source revisions already identify the frozen evidence. Do not add
+      // current consent here: reauthentication must not restart a failed job.
+      const id = `selected-v1:${this.#digest([scope.id,refs])}`;
+      const existing = this.#one('SELECT * FROM jobs WHERE id=?', id);
+      if (existing) {
+        if (existing.result_id !== null) {
+          const result = this.#node(scope.id, existing.result_id as string);
+          return { receipt:{ id:result.id as string, currentStatus:result.status as 'active' | 'revoked' } };
+        }
+        v.fail(existing.status === 'pending' ? 'EXTRACTION_IN_PROGRESS' : 'EXTRACTION_TERMINATED');
+      }
+      this.#run("INSERT INTO jobs(id,scope_id,kind,generation,consent_revision,refs,status) VALUES (?,?,'memory',?,?,?,'pending')",
+        id, scope.id, scope.generation, scope.consentRevision, JSON.stringify(refs));
+      return { job:{ id, epoch:{ id:scope.id, generation:scope.generation, consentRevision:scope.consentRevision }, sourceRefs:refs } };
+    });
+  }
   #jobGuard(job: Row): Scope {
     const scope = this.#epoch(this.#epochFrom(job));
     if (job.status !== 'pending') v.fail('JOB_NOT_PENDING');
@@ -201,6 +225,19 @@ export class MemoryStore {
   #lease(job: Row, token: string): void {
     if (job.lease_owner !== this.#owner || job.lease_token !== token) v.fail('LEASE_LOST');
     if (job.lease_deadline === null || this.#clock.monotonic() >= (job.lease_deadline as number)) v.fail('LEASE_EXPIRED');
+  }
+  /** Terminal cleanup uses the frozen epoch even after a purge. An expired
+   * worker can clean up its lease, but never a replacement owner's lease. */
+  abandonJob(job: Job, token?: string): boolean {
+    return this.#tx(() => {
+      const row = this.#one('SELECT * FROM jobs WHERE id=? AND scope_id=?', job.id, job.epoch.id);
+      if (!row || row.status !== 'pending' || row.generation !== job.epoch.generation ||
+        row.consent_revision !== job.epoch.consentRevision) return false;
+      if (token === undefined ? row.lease_token !== null :
+        row.lease_token !== token || row.lease_owner !== this.#owner) return false;
+      this.#run("UPDATE jobs SET status='revoked',draft=NULL,lease_owner=NULL,lease_token=NULL,lease_deadline=NULL WHERE id=?", job.id);
+      return true;
+    });
   }
   jobEvidence(epoch: Epoch, id: string, token: string): Evidence[] {
     return this.#tx(() => {

@@ -1,0 +1,22 @@
+{
+  "dsh": {
+    "version": 1,
+    "operation": "extract_memory",
+    "event": {
+      "sessionId": "dsh-synthetic-session",
+      "event": {
+        "type": "user/message", "seq": 3, "time": 1792886400000, "surfaceOp": "append",
+        "data": { "id": "dsh-user-1", "role": "user", "content": [{ "type": "text", "text": "I prefer blue." }], "source": { "kind": "user", "rpcId": "synthetic-r1" } }
+      }
+    }
+  },
+  "codex": {
+    "version": 1,
+    "operation": "extract_memory",
+    "event": {
+      "method": "item/completed",
+      "params": { "threadId": "codex-synthetic-thread", "turnId": "codex-synthetic-turn", "completedAtMs": 1792886400000,
+        "item": { "type": "userMessage", "id": "codex-user-1", "content": [{ "type": "text", "text": "I prefer blue.", "text_elements": [] }] } }
+    }
+  }
+}
