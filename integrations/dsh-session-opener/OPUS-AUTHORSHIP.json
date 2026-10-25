@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "author": "actual Claude Opus CLI",
+  "model": "claude-opus-5-5",
+  "cliResultSha256": "d2c67793bfa12f2d8bd03a3f9026ee494054ddd723ae60c95bda09921d290db8",
+  "sourceChangesByIntegrator": "none; SDK mechanical lazy-CJS build and public target injection only",
+  "runtimeSideEffects": "only trusted user click opens one compiled owned SID; no automatic navigation or model call",
+  "sourceEvidence": "C:\\Users\\saigy\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\CompanionCoreLab\\dsh-coupling-20261025-v1\\opus-session-opener-33c7819d-f677-4f1e-9dbb-82d5a88bc329\\claude-result.json",
+  "canonicalLfClientSourceSha256": "e61587d2a055d22e113ab86f73af4e7ed2c0686f16c9704b0b9dd9d0a991ee41",
+  "observedWindowsWorkingCopySha256": "ed89019e254b6739751553bf4491f0707c331e71947ba209410cce9f6c2bd1cf",
+  "lineEndingNote": "Opus lines unchanged; Windows working copy uses CRLF; canonical LF digest identifies the authored text."
+}

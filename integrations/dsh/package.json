@@ -1,0 +1,11 @@
+{
+  "name": "@companion/dsh-coupled-session",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./cordis.patch.yml": "./cordis.patch.yml" },
+  "engines": { "node": ">=24.16.0 <25", "dsh": "0.2.1-rc.3" },
+  "peerDependencies": { "@deepseek-ai/dsh-llm": "0.2.1-rc.3" },
+  "dsh": { "manifestVersion": 1, "bundle": { "patch": "./cordis.patch.yml" } }
+}

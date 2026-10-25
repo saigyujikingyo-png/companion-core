@@ -1,0 +1,3 @@
+- insert:
+    - id: companion-coupled-session
+      name: '@companion/dsh-coupled-session'

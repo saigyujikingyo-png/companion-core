@@ -1,0 +1,3 @@
+- insert:
+    - id: companion-session-opener
+      name: '@companion/dsh-session-opener'
