@@ -7,6 +7,7 @@ import type { InteractionProvider, PriorAdapter } from './interaction.ts';
 import { JsonlPriorAdapter } from './jsonl-prior.ts';
 import type { JsonlPriorConfig, PriorCloseResult } from './jsonl-prior.ts';
 import { MemoryStore } from './store.ts';
+import { DurableMemory } from './durable-memory.ts';
 import { CoreError, fail, text } from './validation.ts';
 import { fields } from './wire.ts';
 
@@ -20,7 +21,10 @@ const safeCodes=new Set(['INVALID_INPUT','INVALID_WIRE_SHAPE','INVALID_JSON','BO
   'SUBMIT_IN_PROGRESS','MANAGEMENT_IN_PROGRESS','COMMAND_ID_REUSED','COMMAND_CAPACITY','UNKNOWN_COMMAND','INPUT_LIMIT',
   'TRUNCATED_INPUT','STOPPING','NEURAL_NOT_CONFIGURED','NEURAL_SWITCH_LIMIT','NEURAL_SWITCH_CANCELLED','NEURAL_CLOSE_PARTIAL',
   'NEURAL_BINDING_REUSE_FORBIDDEN','NEURAL_PROCESS_CLOSED','NEURAL_RESIDENT_LIMIT','NEURAL_READY_FAILED','NEURAL_READY_TIMEOUT',
-  'NEURAL_READY_INVALID','NEURAL_SOURCE_MISMATCH','NEURAL_ABORTED','NEURAL_DEADLINE','BACKEND_UNAVAILABLE']);
+  'NEURAL_READY_INVALID','NEURAL_SOURCE_MISMATCH','NEURAL_ABORTED','NEURAL_DEADLINE','BACKEND_UNAVAILABLE',
+  'DURABLE_CONFIG','DURABLE_UNSUPPORTED','DURABLE_KEY_INVALID','DURABLE_INCOMPLETE','DURABLE_CORRUPT','DURABLE_LOCKED',
+  'DURABLE_IDENTITY_MISMATCH','DURABLE_BUDGET_MISMATCH','DURABLE_LIMIT','DURABLE_WRITE_FAILED','DURABLE_UNAVAILABLE',
+  'DURABLE_CLOCK_ROLLBACK','DURABLE_REQUEST_REQUIRED','DURABLE_DELIVERY_CONFLICT']);
 function safeError(error:unknown):string {
   if(error instanceof CoreError&&safeCodes.has(error.code))return error.code;
   if(error instanceof Error&&error.name==='AbortError')return 'ABORTED';
@@ -34,7 +38,7 @@ export type TrustedStdioOptions={input:Readable;output:Writable;clock?:()=>numbe
   providerFactory?:(config:{apiKey:string;model:string},resources:InteractionResources)=>InteractionProvider;
   priorFactory?:(config:JsonlPriorConfig)=>Promise<OwnedPrior>};
 
-/** Private parent-owned stdio only. No listening socket, disk state or credentials discovery. */
+/** Private parent-owned stdio only. Optional encrypted vault; no listening socket or credentials discovery. */
 export function runTrustedStdio(options:TrustedStdioOptions):Promise<StdioExit> {
   return new StdioHost(options).run();
 }
@@ -42,6 +46,7 @@ export function runTrustedStdio(options:TrustedStdioOptions):Promise<StdioExit> 
 class StdioHost {
   readonly #options:TrustedStdioOptions;readonly #clock:()=>number;
   #store:MemoryStore|null=null;#session:CoupledSession|null=null;#resources:InteractionResources|null=null;
+  #durable:DurableMemory|null=null;
   #maxCalls=0;#booted=false;#stopping=false;#finished=false;#outputFailed=false;#partial=false;#controlVersion=0;
   #buffer=Buffer.alloc(0);#seen=new Set<string>();#pendingBytes=0;#flushWaiters:Array<()=>void>=[];
   #submitting:Promise<void>|null=null;#management:Promise<unknown>|null=null;
@@ -115,7 +120,7 @@ class StdioHost {
     return fields(request,['id','command',...required],['version',...optional]);
   }
   #boot(request:Record<string,unknown>):void{
-    this.#shape(request,[],['apiKey','model','maxCalls','neuralConfig']);
+    this.#shape(request,[],['apiKey','model','maxCalls','neuralConfig','persistence']);
     const maxCalls=request.maxCalls??0,model=request.model??'deepseek-flash';
     if(!Number.isSafeInteger(maxCalls)||(maxCalls as number)<0||(maxCalls as number)>32)fail('INVALID_INPUT');
     text(model,128);if(!/^[a-zA-Z0-9._-]+$/.test(model))fail('INVALID_INPUT');
@@ -130,16 +135,25 @@ class StdioHost {
       this.#neuralConfig=structuredClone(n) as JsonlPriorConfig;
     }
     this.#maxCalls=maxCalls as number;
-    const budget=new RequestBudget({total:Math.max(1,this.#maxCalls),hourly:Math.max(1,Math.min(8,this.#maxCalls)),daily:Math.max(1,this.#maxCalls)},this.#clock);
+    if(request.persistence!==undefined){
+      const p=fields(request.persistence,['directory','identity','keyBase64']);
+      text(p.directory,4096);text(p.identity,128);text(p.keyBase64,128);
+      if(p.keyBase64===request.apiKey)fail('DURABLE_KEY_INVALID');
+      this.#durable=new DurableMemory({directory:p.directory,identity:p.identity,keyBase64:p.keyBase64},this.#maxCalls,
+        {clock:{wall:this.#options.wallClock??Date.now,monotonic:this.#clock}});
+      this.#store=this.#durable.store;
+    }
+    const budget=new RequestBudget({total:Math.max(1,this.#maxCalls),hourly:Math.max(1,Math.min(8,this.#maxCalls)),daily:Math.max(1,this.#maxCalls)},this.#clock,
+      this.#durable?{initialTotal:this.#durable.reserved,reserve:id=>this.#durable!.reserve(id)}:undefined);
     const resources=new InteractionResources(budget);this.#resources=resources;
     // Zero-call boot neither loads a key nor constructs an HTTP provider.
     const provider:InteractionProvider=this.#maxCalls===0?{interact:async()=>fail('BUDGET_DISABLED')}:
       (this.#options.providerFactory??((config,shared)=>new HttpInteractionProvider({transport:'cloud_https',
         endpoint:'https://api.deepseek.com/chat/completions',model:config.model},shared,{apiKey:config.apiKey})))
         ({apiKey:request.apiKey as string,model},resources);
-    this.#store=new MemoryStore(':memory:',{clock:{wall:this.#options.wallClock??(()=>Date.now()),monotonic:this.#clock}});
+    this.#store??=new MemoryStore(':memory:',{clock:{wall:this.#options.wallClock??(()=>Date.now()),monotonic:this.#clock}});
     const scope=this.#store.ensureScope({tenantId:'trusted-stdio-local',subjectId:'local-user',personaId:'companion',relationshipId:'local-session'});
-    this.#session=new CoupledSession(this.#store,scope,{provider,resources,clock:this.#clock});this.#booted=true;
+    this.#session=new CoupledSession(this.#store,scope,{provider,resources,clock:this.#clock,...(this.#durable?{durable:this.#durable}:{})});this.#booted=true;
   }
   #status(){
     const status=this.#session?.status,usage=this.#resources?.budget.usage;
@@ -149,7 +163,11 @@ class StdioHost {
       requests:{total:usage?.total??0,hour:usage?.hour??0,day:usage?.day??0},submitting:this.#submitting!==null,
       managementBusy:this.#management!==null,workerResident:this.#worker!==null,workerStarts:this.#workerStarts,
       rawCallsActive:status?.rawActive??false,rawTransportActive:status?.transportActive??false,
-      scheduled:this.#scheduleQuery!==null,stopping:this.#stopping,sessionOnly:true,personalPersistence:false};
+      scheduled:this.#scheduleQuery!==null,stopping:this.#stopping,sessionOnly:!this.#durable,personalPersistence:!!this.#durable,
+      stateResetOnRestore:!!this.#durable,persistence:this.#durable?.status??null,
+      lastSourceRef:status?.lastSourceRef??null,lastAcknowledgedDeliveryId:status?.lastAcknowledgedDeliveryId??null,
+      lastMemoryRef:status?.lastMemoryRef??null,requestAudit:status?.requestAudit??null,
+      background:status&&!status.paused&&!status.invalidated?this.#session!.background():null};
   }
   #requireSession(request:Record<string,unknown>):void{
     if(request.sessionId!==this.#session!.sessionId)fail('SESSION_TOKEN_MISMATCH');
@@ -194,6 +212,7 @@ class StdioHost {
       }
       case 'take':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.takeDelivery(request.deliveryId);
       case 'ack':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.acknowledgeDelivery(request.deliveryId);
+      case 'feedback-check':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);session.validateFeedback(request.deliveryId);return {valid:true};
       case 'reset':this.#shape(request,['sessionId']);this.#requireSession(request);this.#controlVersion++;session.reset();return this.#status();
       case 'revoke':
       case 'purge':{
@@ -254,7 +273,7 @@ class StdioHost {
     try{this.#session?.pause();}catch{this.#partial=true;}this.#session?.stopScheduler();this.#scheduleQuery=null;
     this.#shutdown=(async()=>{
       await this.#submitting;await this.#management?.catch(()=>{});await this.#closeWorker();
-      try{this.#store?.close();this.#store=null;}catch{this.#partial=true;}
+      try{if(this.#durable)this.#durable.close();else this.#store?.close();this.#store=null;}catch{this.#partial=true;}
       const rawCallsActive=this.#resources?.calls.active??false,rawTransportActive=this.#resources?.transport.active??false,
         rawNeuralActive=this.#resources?.neural.active??false;
       const result:StdioExit={status:this.#partial||this.#worker!==null||rawCallsActive||rawTransportActive||rawNeuralActive?'partial':'closed',

@@ -1,5 +1,7 @@
 # Dedicated DSH coupled session
 
+New optional source mode: [M2a encrypted restart boundary](M2-DURABLE.md). With `launcher.persistence`, a vault lock and durable quota replace only the new mode's one-shot boot claim; startup requires explicit native resume. `nativeSessionMode` explicitly selects create or resume, and the identity-scoped provider avoids the RAM provider name. Native `companion-feedback` selects current-binding feedback for the next real input; `companion-revoke` commits source revocation. Private `companion-inspect` adds safe request/ref/score JSON metadata; `companion-status` retains its short compatible text. The RAM behavior and actual desktop checkpoint below describe the preserved historical deployment; this source change does not update or qualify that live snapshot.
+
 ## Current native status acceptance
 
 **CONTROL_PASS**: the user clicked **Companion Core 状态** and saw `Companion: baseline; paused=true; available=false; calls=0/32.`, target SID `cc3b37e9-4c26-400e-ace0-7995a9785b76` and commandId `cmd-8e0637d9-2`. That commandId is user-provided UI evidence. Independent own safe audit contains four events: two initial ready events and **two** command-status events for the exact SID, baseline/paused/unavailable, all request/provider/synthetic/real counters0 and knownusage=true. The audit has no commandId; no one-to-one correlation is claimed. See [layered receipt](../../dsh-plugin-maintenance/research/2026-10-25-coupling/DSH-CONTROL-PASS.json).

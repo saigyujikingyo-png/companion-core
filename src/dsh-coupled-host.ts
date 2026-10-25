@@ -9,27 +9,31 @@ import { DshCoupledBridge } from './dsh-coupled.ts';
 import { fail } from './validation.ts';
 
 export type DshPluginConfig={auditId:string;sessionId:string;model?:'coupled';cwd:string;enableProactive?:boolean;parentControl?:boolean;
-  initialBackend?:'baseline'|'no-state'|'flywire';auditFile?:boolean;
+  initialBackend?:'baseline'|'no-state'|'flywire';auditFile?:boolean;nativeSessionMode?:'create'|'resume';
   launcher:DshBackendConfig;acceptanceInput?:{text:string;rpcId:string}};
 const plain=(value:unknown):value is Record<string,any>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 const uuid=(value:unknown)=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const absolute=(value:unknown)=>typeof value==='string'&&value.length<=4096&&isAbsolute(value);
 export function validateDshConfig(value:unknown):DshPluginConfig{
-  if(!plain(value)||Object.keys(value).some(key=>!['auditId','sessionId','model','cwd','enableProactive','parentControl','initialBackend','auditFile','launcher','acceptanceInput'].includes(key))
+  if(!plain(value)||Object.keys(value).some(key=>!['auditId','sessionId','model','cwd','enableProactive','parentControl','initialBackend','auditFile','launcher','acceptanceInput','nativeSessionMode'].includes(key))
     ||!uuid(value.auditId)||!uuid(value.sessionId)||!absolute(value.cwd)||!plain(value.launcher))fail('DSH_CONFIG_INVALID');
   const launcher=value.launcher;
-  if(Object.keys(launcher).some(key=>!['mode','pythonPath','scriptPath','corePath','nodePath','runtimeRoot','maxCalls','allowExistingDpapi','neuralRuntime','credentialRoot'].includes(key))
+  if(Object.keys(launcher).some(key=>!['mode','pythonPath','scriptPath','corePath','nodePath','runtimeRoot','maxCalls','allowExistingDpapi','neuralRuntime','credentialRoot','persistence'].includes(key))
     ||!['resident','synthetic'].includes(launcher.mode)||![launcher.corePath,launcher.nodePath,launcher.runtimeRoot].every(absolute)
     ||!Number.isSafeInteger(launcher.maxCalls)||launcher.maxCalls<0||launcher.maxCalls>32)fail('DSH_CONFIG_INVALID');
   if(launcher.mode==='resident'&&(!absolute(launcher.pythonPath)||!absolute(launcher.scriptPath)
     ||(launcher.maxCalls>0&&launcher.allowExistingDpapi!==true)))fail('DSH_CONFIG_INVALID');
   if(launcher.mode==='synthetic'&&(launcher.allowExistingDpapi||launcher.neuralRuntime||launcher.credentialRoot!==undefined))fail('DSH_CONFIG_INVALID');
   if(launcher.neuralRuntime!==undefined&&!absolute(launcher.neuralRuntime))fail('DSH_CONFIG_INVALID');
+  if(launcher.persistence!==undefined){const p=launcher.persistence;
+    if(launcher.mode!=='resident'||!plain(p)||Object.keys(p).some(k=>!['directory','identity'].includes(k))||!absolute(p.directory)
+      ||typeof p.identity!=='string'||!p.identity.trim()||p.identity.length>128)fail('DSH_CONFIG_INVALID');}
   if(launcher.credentialRoot!==undefined){
     if(!absolute(launcher.credentialRoot))fail('DSH_CONFIG_INVALID');
     try{if(!statSync(launcher.credentialRoot).isDirectory())fail('DSH_CONFIG_INVALID');}catch{fail('DSH_CONFIG_INVALID');}
   }
   if(value.model!==undefined&&value.model!=='coupled')fail('DSH_CONFIG_INVALID');
+  if(value.nativeSessionMode!==undefined&&(!['create','resume'].includes(value.nativeSessionMode)||(value.nativeSessionMode==='resume'&&!launcher.persistence)))fail('DSH_CONFIG_INVALID');
   if(value.initialBackend!==undefined&&!['baseline','no-state','flywire'].includes(value.initialBackend))fail('DSH_CONFIG_INVALID');
   for(const key of ['enableProactive','parentControl','auditFile'])
     if(value[key]!==undefined&&typeof value[key]!=='boolean')fail('DSH_CONFIG_INVALID');
@@ -62,7 +66,8 @@ const safeKeys=new Set(['auditId','kind','status','code','sessionId','provider',
 
 /** Exact SDK entrypoints are supplied by the installed plugin; tests inject synthetic objects. */
 export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,dependencies:Dependencies={}){
-  const config=validateDshConfig(inputConfig),provider='companion-core',model='coupled';
+  const config=validateDshConfig(inputConfig),provider=config.launcher.persistence
+    ?`companion-core-${createHash('sha256').update(config.launcher.persistence.identity).digest('hex').slice(0,12)}`:'companion-core',model='coupled';
   if(ctx.agents.get(config.sessionId)||ctx.sessions.get(config.sessionId))fail('DSH_DEDICATED_ID_ALREADY_LIVE');
   const input=dependencies.input??process.stdin,output=dependencies.output??process.stdout;
   let backend:DshCoupledBackend|undefined,bridge:DshCoupledBridge|undefined,handle:any;
@@ -136,7 +141,7 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
     dependencies.onCleanupReady?.(cleanup);
     // Assign ownership before activating any input callback.
     startup=(async()=>{
-      if(config.launcher.mode==='resident')await claimResidentBoot(config);
+      if(config.launcher.mode==='resident'&&!config.launcher.persistence)await claimResidentBoot(config);
       if(disposed)fail('DSH_START_CANCELLED');
       return (dependencies.startBackend??DshStdioBackend.start)(config.launcher);
     })();
@@ -147,6 +152,10 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
       if(input.readableEnded||input.destroyed)void shutdown();
     }
     backend=await startup;if(disposed){await cleanup();return {cleanup,bridge,backend};}
+    const bootState=config.launcher.persistence?await backend.command('status'):null;
+    if(config.launcher.persistence&&(!bootState?.personalPersistence||!Number.isSafeInteger(bootState.requests?.total)
+      ||bootState.requests.total<0||bootState.requests.total>config.launcher.maxCalls||bootState.paused!==true||bootState.available!==false
+      ||bootState.persistence?.identity!==config.launcher.persistence.identity))fail('DSH_BACKEND_BOOT_FAILED');
     class CompanionAdapter extends sdk.LlmAdapter{
       providerInfo(id:string){if(id!==provider)fail('DSH_AUTHORITY_MISMATCH');return {id,name:'Companion Core (session-only)'};}
       async listModels(id:string){if(id!==provider)fail('DSH_AUTHORITY_MISMATCH');return [{provider:id,id:model,name:'Companion coupled session'}];}
@@ -155,10 +164,13 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
       async *stream(options:any){if(disposed||!bridge)fail('DSH_NOT_READY');yield* bridge.stream(options);}
     }
     offs.push(ctx.llm.registerAdapter([provider],new CompanionAdapter()));
-    creating=ctx.agents.create({sessionId:config.sessionId,agentOptions:{provider,model},meta:{cwd:config.cwd}});
+    creating=config.nativeSessionMode==='resume'
+      ?ctx.agents.resume({resumeSessionId:config.sessionId,agentOptions:{provider,model}})
+      :ctx.agents.create({sessionId:config.sessionId,agentOptions:{provider,model},meta:{cwd:config.cwd}});
     handle=await creating;if(disposed){await cleanup();return {cleanup,bridge,backend};}
     const agent=handle.agent;
-    bridge=new DshCoupledBridge(backend,{sessionId:config.sessionId,provider,model,onEvent:emit,realProvider:config.launcher.mode==='resident',
+    bridge=new DshCoupledBridge(backend,{sessionId:config.sessionId,provider,model,onEvent:emit,realProvider:config.launcher.mode==='resident',requireManualResume:!!config.launcher.persistence,
+      initialConsumedRequests:bootState?.requests.total??0,
       ...(config.enableProactive?{publishPrepared:async(deliveryId:string,attach:(id:string)=>boolean)=>{
         if(disposed)return false;try{return await agent.runMaintenance((signal:AbortSignal)=>{
           if(signal.aborted||disposed)return false;const message=sdk.createUserMessage({content:[{type:'text',text:bridge!.preparedNotice(deliveryId)}],
@@ -175,30 +187,46 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
     // is never parsed as management authority. This adds no frontend bundle.
     agent.ctx.inject(['commands'],(commandCtx:any)=>{
       if(disposed)return;
-      for(const action of ['pause','resume','status','switch']){
+      for(const action of ['pause','resume','status','switch','feedback','revoke','inspect']){
         const off=commandCtx.commands.register({name:`companion-${action}`,description:`Companion Core ${action}`,recordInput:false,
-          ...(action==='switch'?{input:{hint:'baseline|no-state|flywire'}}:{}),
+          ...(['switch','feedback','revoke'].includes(action)?{input:{hint:action==='switch'?'baseline|no-state|flywire':action==='feedback'?'<deliveryId> engaged|declined|neutral':'<sourceId> <revision>'}}:{}),
           handler:async(invocation:any)=>{
             if(disposed||invocation?.agent!==agent||typeof invocation.rawInput!=='string'||invocation.rawInput.length>128
               ||!invocation.signal||invocation.signal.aborted||(invocation.attachments?.length??0)>0)
               return {kind:'error',text:'Companion control rejected.'};
             const argument=invocation.rawInput.trim();
-            if(action==='switch'?!['baseline','no-state','flywire'].includes(argument):argument!=='')
+            const parts=argument.split(/\s+/);
+            const valid=action==='switch'?['baseline','no-state','flywire'].includes(argument):action==='feedback'
+              ?parts.length===2&&uuid(parts[0])&&['engaged','declined','neutral'].includes(parts[1]!)
+              :action==='revoke'?parts.length===2&&uuid(parts[0])&&/^[1-9][0-9]{0,8}$/.test(parts[1]!):argument==='';
+            if(!valid)
               return {kind:'error',text:'Companion control argument rejected.'};
             if(controlPending>=(action==='pause'?8:4))return {kind:'error',text:'Companion control is busy.'};
-            controlPending++;const onAbort=()=>{void bridge!.manualPause();};invocation.signal.addEventListener('abort',onAbort,{once:true});
+            const readOnly=action==='status'||action==='inspect';
+            controlPending++;const onAbort=()=>{if(!readOnly)void bridge!.manualPause();};invocation.signal.addEventListener('abort',onAbort,{once:true});
             try{
               if(action==='pause'){manualRequested=true;const pausing=bridge!.manualPause();await cancel();await pausing;}
               if(action==='resume'){await bridge!.manualResume();manualRequested=false;}
               if(action==='switch'){manualRequested=true;const switching=bridge!.switchBackend(argument as 'baseline'|'no-state'|'flywire');await cancel();await switching;}
+              if(action==='feedback')await bridge!.selectFeedback(parts[0]!,parts[1] as 'engaged'|'declined'|'neutral');
+              if(action==='revoke'){manualRequested=true;const revoking=bridge!.revoke({id:parts[0]!,revision:Number(parts[1])});await cancel();await revoking;}
               if(disposed||invocation.signal.aborted)throw new Error('DSH_CONTROL_CANCELLED');
               const state=await status(`command-${action}`);
               if(!state||disposed||invocation.signal.aborted)throw new Error('DSH_CONTROL_UNAVAILABLE');
               const backendName=['baseline','no-state','flywire'].includes(state.backend)?state.backend:'unknown';
               const calls=Number.isSafeInteger(state.requests?.total)&&state.requests.total>=0?state.requests.total:'unknown';
+              if(action==='inspect'){
+                const metadata=JSON.stringify({version:1,backend:backendName,paused:state.paused===true,available:state.available===true,
+                  runtimeBindingHash:typeof state.sessionId==='string'?createHash('sha256').update(state.sessionId).digest('hex'):null,
+                  calls,maxCalls:config.launcher.maxCalls,personalPersistence:state.personalPersistence,stateResetOnRestore:state.stateResetOnRestore,
+                  persistence:state.persistence,lastSourceRef:state.lastSourceRef,lastMemoryRef:state.lastMemoryRef,lastAcknowledgedDeliveryId:state.lastAcknowledgedDeliveryId,
+                  pendingFeedback:bridge!.status.pendingFeedback,background:state.background,requestAudit:state.requestAudit});
+                if(Buffer.byteLength(metadata)>32768)throw new Error('DSH_INSPECT_LIMIT');
+                return {kind:'success',text:metadata};
+              }
               return {kind:'success',text:`Companion: ${backendName}; paused=${state.paused===true}; available=${state.available===true}; calls=${calls}/${config.launcher.maxCalls}.`};
-            }catch{emit({kind:`command-${action}`,status:'rejected',code:'DSH_CONTROL_REJECTED'});await bridge!.pause();
-              return {kind:'error',text:'Companion control failed; output is paused.'};}
+            }catch{emit({kind:`command-${action}`,status:'rejected',code:'DSH_CONTROL_REJECTED'});if(!readOnly)await bridge!.pause();
+              return {kind:'error',text:readOnly?'Companion inspection unavailable.':'Companion control failed; output is paused.'};}
             finally{controlPending--;invocation.signal.removeEventListener('abort',onAbort);}
           }});
         if(typeof off==='function')offs.push(off);
@@ -207,7 +235,8 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
     if(manualRequested)await bridge.manualPause();
     if(config.initialBackend&&config.initialBackend!=='baseline')await bridge.switchBackend(config.initialBackend);
     if(disposed){await cleanup();return {cleanup,bridge,backend};}
-    emit({kind:'plugin-ready',status:config.launcher.mode,provider,model,backend:config.initialBackend??'baseline',requests:0,corePaused:true,available:false,realModelCalls:0});
+    emit({kind:'plugin-ready',status:config.launcher.mode,provider,model,backend:config.initialBackend??'baseline',requests:bootState?.requests.total??0,
+      corePaused:true,available:false,realModelCalls:bootState?.requests.total??0});
     if(config.acceptanceInput){
       const claimed=await claimAcceptance(config);
       if(claimed&&!disposed){const message=sdk.createUserMessage({content:[{type:'text',text:config.acceptanceInput.text}],

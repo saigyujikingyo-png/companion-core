@@ -4,6 +4,10 @@ import type { TestContext } from 'node:test';
 import { PassThrough, Writable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { runTrustedStdio } from '../src/coupled-stdio.ts';
 import type { TrustedStdioOptions } from '../src/coupled-stdio.ts';
 import type { InteractionRequest, InteractionResponse } from '../src/interaction.ts';
@@ -13,6 +17,27 @@ const tick=()=>new Promise<void>(resolve=>setImmediate(resolve));
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 const neuralConfig={pythonPath:'C:\\synthetic\\python.exe',workerPath:'C:\\synthetic\\worker.py',workerSha256:'a'.repeat(64),
   graphPath:'C:\\synthetic\\graph.npz',graphSha256:'b'.repeat(64),structuralSha256:'c'.repeat(64)};
+
+test('private durable boot preserves memory quota and ingress across fresh stdio hosts, with new paused token',async t=>{
+  const persistence={directory:mkdtempSync(join(tmpdir(),'companion-stdio-m2-')),identity:'synthetic-stdio',keyBase64:randomBytes(32).toString('base64')};
+  let calls=0;const providerFactory:NonNullable<TrustedStdioOptions['providerFactory']>=(_config,resources)=>({interact:async input=>{
+    resources.budget.reserve(input.requestId);calls++;return response;}});
+  const h=fixture(t,{providerFactory}),token=await activate(h,4,{persistence});
+  const submit=await h.send('submit',{sessionId:token,messageId:'stable-native-id',selectedText:'SYNTHETIC_M2_STDIO_SECRET'});assert.equal(submit.ok,true);
+  const status=await h.send('status');assert.equal(status.result.personalPersistence,true);assert.equal(status.result.requests.total,1);
+  assert.ok(status.result.lastSourceRef.id);assert.ok(status.result.lastMemoryRef.id);
+  assert.equal((await h.send('stop')).ok,true);await h.run;
+  const next=fixture(t,{providerFactory});const boot=await next.send('boot',{maxCalls:4,apiKey:'SYNTHETIC_DIFFERENT_API_KEY',persistence});
+  assert.equal(boot.ok,true);assert.notEqual(boot.result.sessionId,token);assert.equal(boot.result.paused,true);assert.equal(boot.result.available,false);
+  assert.equal(boot.result.personalPersistence,true);assert.equal(boot.result.stateResetOnRestore,true);assert.equal(boot.result.persistence.restored,true);
+  assert.equal(boot.result.persistence.unknownRequests,1);assert.equal(boot.result.requests.total,1);
+  assert.equal((await next.send('resume',{sessionId:token})).error.code,'SESSION_TOKEN_MISMATCH');
+  const sessionId=boot.result.sessionId;await next.send('resume',{sessionId});await next.send('context',{sessionId,quiet:false,available:true,ttlMs:30000});
+  assert.equal((await next.send('submit',{sessionId,messageId:'stable-native-id',selectedText:'SYNTHETIC_M2_STDIO_SECRET'})).error.code,'INTERACTION_TERMINATED');
+  assert.equal((await next.send('take',{sessionId,deliveryId:submit.result.deliveryId})).error.code,'DELIVERY_STALE');assert.equal(calls,1);
+  assert.equal(JSON.stringify([...h.frames,...next.frames]).includes(persistence.keyBase64),false);
+  assert.equal(JSON.stringify([...h.frames,...next.frames]).includes('SYNTHETIC_M2_STDIO_SECRET'),false);
+});
 function fakePrior(onClose=()=>{},graceful=true){return {manifest:{implementation:'synthetic',sourceHash:'d'.repeat(64),biologicalClaim:'none' as const},
   step:async()=>({social:.2,novelty:.1,disengagement:0}),reset:async()=>{},close:async()=>{onClose();return {
     closed:true as const,graceful,exitCode:graceful?0:1,signal:null,forced:false,residualBytes:0};}};}

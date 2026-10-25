@@ -2,6 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { Writable } from 'node:stream';
 import { finished } from 'node:stream/promises';
+import { createHash } from 'node:crypto';
 
 export const AUDIT_MAX_BYTES=512*1024;
 const prefix='COMPANION_COUPLED_EVENT:';
@@ -14,6 +15,8 @@ const idKeys=new Set(['messageId','deliveryId']);
 // Only the mount's already filtered event protocol may enter this private file.
 // Never capture host stdout/stderr, console, prompt text or exception messages.
 function checkedLine(chunk,config){
+  const provider=config.launcher.persistence
+    ?`companion-core-${createHash('sha256').update(config.launcher.persistence.identity).digest('hex').slice(0,12)}`:'companion-core';
   const line=Buffer.isBuffer(chunk)?chunk.toString('utf8'):String(chunk);
   if(Buffer.byteLength(line)>4096||!line.startsWith(prefix)||!line.endsWith('\n')||line.slice(0,-1).includes('\n'))
     throw new Error('COMPANION_AUDIT_PROTOCOL');
@@ -27,7 +30,7 @@ function checkedLine(chunk,config){
       :idKeys.has(key)?typeof item==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(item)
       :tokenKeys.has(key)?typeof item==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(item)
       :key==='replySha256'?typeof item==='string'&&/^[a-f0-9]{64}$/.test(item)
-      :key==='provider'?item==='companion-core'
+      :key==='provider'?item===provider
       :key==='model'?item==='coupled'
       :key==='backend'?['baseline','no-state','flywire'].includes(item):false;
     if(!valid)throw new Error('COMPANION_AUDIT_PROTOCOL');

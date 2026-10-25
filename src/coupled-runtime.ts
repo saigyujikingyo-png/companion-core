@@ -7,6 +7,7 @@ import { bounded, timeoutMs } from './runtime.ts';
 import { CoreError, fail, text } from './validation.ts';
 import { InteractionResources, interactionResponse, validatePrior } from './interaction.ts';
 import type { BackendMode, InteractionProvider, Prior, PriorAdapter, RecallAudit } from './interaction.ts';
+import type { DurableMemory } from './durable-memory.ts';
 
 export type UserInteraction = { sessionId: string; id: string; selectedText: string; recallQuery?: string;
   feedback?: { deliveryId: string; outcome: 'engaged' | 'declined' | 'neutral' } };
@@ -46,13 +47,16 @@ export function rankLegalMemories(records: MemoryRecord[], prior: Prior, neural:
   return scores.map((entry,i) => ({...entry,afterRank:i+1}));
 }
 
-/** Trusted, session-only coordinator. No persistent state, automatic rebind,
- * social transport or credential access. Acknowledgement is never engagement. */
+/** Trusted coordinator with optional durable memory/safety authority. Runtime
+ * bindings stay ephemeral; no automatic rebind or credential access. ACK is not engagement. */
 export class CoupledSession {
   readonly sessionId = randomUUID();
   readonly #store: MemoryStore; readonly #ticket: RunTicket; readonly #clock: () => number;
   readonly #provider: InteractionProvider; readonly #resources: InteractionResources;
   readonly #duration: number; readonly #maxEntries: number;
+  readonly #durable: DurableMemory | undefined;
+  #lastSourceRef: SourceRef | null = null; #lastAcknowledgedDeliveryId: string | null = null;
+  #lastMemoryRef: SourceRef | null = null;
   #state: BackgroundState; #backend: BackendMode; #adapter: PriorAdapter | undefined;
   #adapterNeedsReset = true; #neuralRefs = new Map<string,SourceRef>();
   #last = 0; #lastNeural = 0; #generation = 1; #contextRevision = 0; #paused = true; #invalid = false;
@@ -63,7 +67,8 @@ export class CoupledSession {
   #scheduler: { recallQuery:string; onReady:(result:InteractionResult) => void; onError:(code:string) => void;
     refreshContext:() => {quiet:boolean;available:boolean;ttlMs:number} } | undefined;
   constructor(store: MemoryStore, epoch: Epoch, options: { provider: InteractionProvider; resources: InteractionResources;
-    backend?: BackendMode; priorAdapter?: PriorAdapter; clock?: () => number; timeoutMs?: number; maxEntries?: number }) {
+    backend?: BackendMode; priorAdapter?: PriorAdapter; clock?: () => number; timeoutMs?: number; maxEntries?: number; durable?: DurableMemory }) {
+    this.#durable = options.durable;
     this.#store = store; this.#ticket = Object.freeze({...store.beginRun(epoch)}); store.validateRun(this.#ticket);
     this.#clock = options.clock ?? (() => performance.now()); this.#provider = options.provider; this.#resources = options.resources;
     this.#duration = timeoutMs(options.timeoutMs ?? 30_000); this.#maxEntries = options.maxEntries ?? 128;
@@ -96,6 +101,7 @@ export class CoupledSession {
   }
   #invalidate(): void { this.#invalid = true; this.#paused = true; this.#cancel(); this.#poisonAdapter(); }
   #guard(requireContext = false, allowPaused = false): number {
+    if (this.#durable) void this.#durable.status;
     if (this.#invalid) fail('SESSION_REBIND_REQUIRED');
     const now = this.#now();
     try { this.#store.validateRun(this.#ticket); this.#state.read(); }
@@ -157,7 +163,14 @@ export class CoupledSession {
   setLearningConsent(allowed: boolean): void { this.#guard(false,true); this.#store.setLearningConsent(this.#ticket,allowed); this.#invalidate(); }
   get status() { return {sessionId:this.sessionId,backend:this.#backend,paused:this.#paused,invalidated:this.#invalid,
     entries:this.#inputs.size,deliveries:this.#deliveries.size,rawActive:this.#resources.calls.active,
-    transportActive:this.#resources.transport.active,budget:this.#resources.budget.usage}; }
+    transportActive:this.#resources.transport.active,budget:this.#resources.budget.usage,
+    lastSourceRef:this.#lastSourceRef??this.#durable?.status.lastSourceRef??null,lastMemoryRef:this.#lastMemoryRef,
+    lastAcknowledgedDeliveryId:this.#lastAcknowledgedDeliveryId,requestAudit:this.#resources.lastRequestAudit}; }
+  validateFeedback(deliveryId: string): void {
+    const entry = this.#delivery(deliveryId);
+    if (entry.status !== 'acknowledged') fail('FEEDBACK_REQUIRES_DELIVERED_RECEIPT');
+    if (entry.feedbackId !== null) fail('DELIVERY_FEEDBACK_ALREADY_CONSUMED');
+  }
   background(): BackgroundView { this.#guard(); return this.#state.read(); }
   recall(query: string): RecallAudit[] {
     this.#guard(); text(query,256);
@@ -179,6 +192,7 @@ export class CoupledSession {
       return {...structuredClone(previous.result),status:entry.status as InteractionResult['status']};
     }
     if (this.#inputs.size >= this.#maxEntries || this.#deliveries.size >= this.#maxEntries) fail('SESSION_CAPACITY_REACHED');
+    this.#durable?.claim(input.id,fingerprint);
     const ledger: PendingInput = {hash:fingerprint,failed:false}; this.#inputs.set(input.id,ledger);
     try {
       if (this.#pending || this.#resources.calls.active || this.#resources.neural.active) fail('INTERACTION_BACKPRESSURE');
@@ -189,18 +203,21 @@ export class CoupledSession {
         if (feedback.feedbackId !== null) fail('DELIVERY_FEEDBACK_ALREADY_CONSUMED');
       }
       const scope = this.#store.scope(this.#ticket.id);
-      const event = this.#store.acceptEvent(this.#ticket,{source:`coupled:${this.sessionId}`,eventKey:input.id,evidence:{
+      const event = this.#store.acceptEvent(this.#ticket,{source:this.#durable?'coupled:durable-v1':`coupled:${this.sessionId}`,eventKey:input.id,evidence:{
         speakerId:scope.subjectId,speakerRole:'subject',mode:'self_report',selectedText:input.selectedText,occurredAt:null}});
       const anchor = this.#publish([event],{kind:'episode',basis:'self_report',statement:input.selectedText,validFrom:null,validTo:null});
+      this.#lastSourceRef = {id:event.id,revision:event.revision}; this.#lastMemoryRef=anchor; this.#durable?.source(this.#lastSourceRef);
       this.#state.observe({id:`observe:${input.id}`,refs:[anchor],novelty:0,socialRelevance:0,demand:0});
       if (feedback && input.feedback) {
+        this.#durable?.consumeFeedback(input.feedback.deliveryId);
+        this.#guard(true);
         this.#state.recordOutcome({id:`feedback:${input.id}`,ref:anchor,origin:'external-observation',outcome:input.feedback.outcome});
         feedback.feedbackId = input.id;
       }
       const result = await this.#perform({requestId:input.id,selectedText:input.selectedText,query:input.recallQuery,
         anchor,event,kind:'user',motive:null});
       ledger.result = result; return structuredClone(result);
-    } catch(error) { ledger.failed = true; throw error; }
+    } catch(error) { ledger.failed = true; this.#durable?.terminal(input.id,'failed'); throw error; }
     finally { this.#arm(); }
   }
   considerShadow(): ShadowIntent | null { this.#guard(true); return this.#state.consider().intent; }
@@ -216,7 +233,10 @@ export class CoupledSession {
     if (this.#intents.size >= this.#maxEntries || this.#deliveries.size >= this.#maxEntries) fail('SESSION_CAPACITY_REACHED');
     this.#intents.add(intent.id); // Single acceptance while the original five-second seal is still valid.
     if (intent.motive === 'withdrawal') { this.#arm(); return null; } // Reduce engagement without generating another message.
-    try { return await this.#perform({requestId:`proactive:${intent.id}`,selectedText:null,query,kind:'proactive',motive:intent.motive,schedulerVersion}); }
+    const requestId = `proactive:${intent.id}`;
+    this.#durable?.claim(requestId,hash([query,intent.id]));
+    try { return await this.#perform({requestId,selectedText:null,query,kind:'proactive',motive:intent.motive,schedulerVersion}); }
+    catch (error) { this.#durable?.terminal(requestId,'failed'); throw error; }
     finally { this.#arm(); }
   }
   async #perform(input: {requestId:string;selectedText:string|null;query:string|undefined;anchor?:SourceRef;event?:SourceRef;
@@ -254,7 +274,7 @@ export class CoupledSession {
       const remaining = Math.max(1,Math.floor(deadline-this.#now())); valid();
       const response = bounded(controller.signal,remaining,signal => this.#resources.calls.run(signal,() => this.#provider.interact({
         sessionId:this.sessionId,requestId:input.requestId,kind:input.kind,selectedText:input.selectedText,recalled:structuredClone(recall),
-        engineeredPrior:{background:this.#backend === 'no-state' ? null:structuredClone(background),neural,backend:this.#backend},motive:input.motive,signal}))).then(interactionResponse);
+        engineeredPrior:{background:this.#backend === 'no-state' ? null:structuredClone(background),neural,backend:this.#backend},motive:input.motive,signal,validateBeforeSend:valid}))).then(interactionResponse);
       // Only a fresh user stimulus can produce a new appraisal. Recalled/generated text never rewards itself.
       const appraisal = input.anchor ? this.#state.appraise({id:`appraise:${input.requestId}`,refs:[input.anchor],
         conditioningRefs:refs},async () => (await response).appraisal)
@@ -269,6 +289,8 @@ export class CoupledSession {
       const delivery: LocalDelivery = {sessionId:this.sessionId,deliveryId,requestId:input.requestId,kind:input.kind,text:value.responseText,
         sourceRefs:refs,recall,appraisalStatus,memoryRef:null,memoryCandidate:value.memoryProposal,
         backend:this.#backend,expiresAtMonotonicMs:deadline};
+      this.#durable?.terminal(input.requestId,'ready',deliveryId);
+      valid(); this.#validateRefs(refs);
       this.#deliveries.set(deliveryId,{value:delivery,generation,contextRevision,status:'ready',feedbackId:null,schedulerVersion:input.schedulerVersion??null});
       return {sessionId:this.sessionId,requestId:input.requestId,deliveryId,status:'ready',recall,appraisalStatus};
     } catch(error) { if (this.#backend === 'flywire') this.#adapterNeedsReset = true; throw error; }
@@ -284,13 +306,17 @@ export class CoupledSession {
   }
   takeDelivery(id: string): LocalDelivery {
     const entry = this.#delivery(id); if (entry.status !== 'ready') fail('DELIVERY_ALREADY_CONSUMED');
+    this.#durable?.terminal(entry.value.requestId,'taken',id);
+    this.#delivery(id); // Slow synchronous fsync cannot extend the original TTL.
     entry.status = 'taken'; return structuredClone(entry.value);
   }
   acknowledgeDelivery(id: string): {deliveryId:string;status:'acknowledged'|'duplicate'} {
     const entry = this.#delivery(id);
     if (entry.status === 'acknowledged') return {deliveryId:id,status:'duplicate'};
     if (entry.status !== 'taken') fail('DELIVERY_NOT_TAKEN');
-    entry.status = 'acknowledged'; return {deliveryId:id,status:'acknowledged'};
+    this.#durable?.terminal(entry.value.requestId,'acknowledged',id);
+    this.#delivery(id);
+    entry.status = 'acknowledged'; this.#lastAcknowledgedDeliveryId=id; return {deliveryId:id,status:'acknowledged'};
   }
   startScheduler(options: NonNullable<CoupledSession['schedulerOptions']>): void {
     text(options.recallQuery,256);

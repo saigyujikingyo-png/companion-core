@@ -38,15 +38,18 @@ export class DshCoupledBridge {
   #prepared=new Map<string,Prepared>();#preparedDeliveries=new Set<string>();#publishing=false;
   #pausing:Promise<void>|null=null;#close:Promise<DshBackendClose>|null=null;
   #manualPaused=false;#switching=false;#manualVersion=0;
+  #pendingFeedback:{deliveryId:string;outcome:'engaged'|'declined'|'neutral'}|null=null;
   #usageKnown=true;
   constructor(backend:DshCoupledBackend,options:{sessionId:string;provider:string;model:string;clock?:()=>number;
     onEvent?:(event:DshCoupledEvent)=>void;publishPrepared?:(deliveryId:string,attach:(messageId:string)=>boolean)=>Promise<boolean>;
-    cancelNativePrepared?:()=>void;realProvider?:boolean}){
+    cancelNativePrepared?:()=>void;realProvider?:boolean;requireManualResume?:boolean;initialConsumedRequests?:number}){
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.sessionId))fail('DSH_DEDICATED_SESSION_REQUIRED');
     text(options.provider,128);text(options.model,128);this.#backend=backend;this.#sessionId=options.sessionId;
     this.#provider=options.provider;this.#model=options.model;this.#clock=options.clock??(()=>performance.now());
     this.#event=options.onEvent??(()=>{});this.#publish=options.publishPrepared;this.#cancelNativePrepared=options.cancelNativePrepared;
     this.#realProvider=options.realProvider??false;
+    this.#manualPaused=options.requireManualResume??false;
+    this.#realCalls=options.initialConsumedRequests??0;
     this.#lastTime=this.#now();this.#offPrepared=backend.onPrepared?.(id=>{void this.#offerPrepared(id).catch(()=>{this.#log('prepared-notification','rejected');void this.pause();});});
     this.#log('ready','paused-unavailable');
   }
@@ -178,7 +181,9 @@ export class DshCoupledBridge {
         this.#usageKnown=!this.#realProvider;
         this.#requests++;this.#log('provider-request','selected-native-user',turn.number,{messageId:selected!.id});
         stage='submit';
-        const receipt=await this.#backend.command('submit',{messageId:selected!.key,selectedText:selected!.text,recallQuery:selected!.text.slice(0,256)},turn.controller.signal);
+        const feedback=this.#pendingFeedback;this.#pendingFeedback=null;
+        const receipt=await this.#backend.command('submit',{messageId:selected!.key,selectedText:selected!.text,recallQuery:selected!.text.slice(0,256),
+          ...(feedback?{feedback}:{})},turn.controller.signal);
         this.#check(turn,options.signal);if(!receipt||typeof receipt.deliveryId!=='string')fail('DSH_BACKEND_PROTOCOL');turn.deliveryId=receipt.deliveryId;
         if(receipt.appraisalStatus==='applied'||receipt.appraisalStatus==='not-applied')
           this.#log('core-interaction','receipt',turn.number,{appraisalStatus:receipt.appraisalStatus});
@@ -219,6 +224,7 @@ export class DshCoupledBridge {
     if(turn.cancelled)return;turn.cancelled=true;turn.controller.abort();turn.offAbort();this.#log('cancelled',reason,turn.number);void this.pause();
   }
   pause():Promise<void>{
+    this.#pendingFeedback=null;
     this.#generation++;this.#leaseExpires=0;for(const item of this.#prepared.values())item.cancelled=true;
     for(const turn of this.#turns.values())if(!turn.ended){turn.cancelled=true;turn.controller.abort();turn.offAbort();}
     if(this.#pausing)return this.#pausing;
@@ -234,6 +240,25 @@ export class DshCoupledBridge {
     if(!this.#mounted||this.#switching||version!==this.#manualVersion)fail('DSH_MANAGEMENT_UNAVAILABLE');
     await this.#backend.command('resume');if(!this.#mounted||this.#switching||version!==this.#manualVersion){await this.pause();fail('DSH_MANAGEMENT_UNAVAILABLE');}this.#manualPaused=false;
   }
+  async selectFeedback(deliveryId:string,outcome:'engaged'|'declined'|'neutral'):Promise<void>{
+    text(deliveryId,128);if(!['engaged','declined','neutral'].includes(outcome)||!this.#mounted||this.#switching||this.#manualPaused)fail('DSH_MANAGEMENT_UNAVAILABLE');
+    const turn=this.#turns.get(this.#latestTurn);if(turn&&!turn.ended)fail('DSH_MANAGEMENT_UNAVAILABLE');
+    if(this.#pendingFeedback){
+      if(this.#pendingFeedback.deliveryId!==deliveryId||this.#pendingFeedback.outcome!==outcome)fail('DSH_FEEDBACK_CONFLICT');
+      return;
+    }
+    const version=this.#manualVersion,generation=this.#generation;
+    await this.#backend.command('feedback-check',{deliveryId});
+    if(!this.#mounted||this.#switching||this.#manualPaused||version!==this.#manualVersion||generation!==this.#generation)fail('DSH_MANAGEMENT_UNAVAILABLE');
+    const active=this.#turns.get(this.#latestTurn);if(active&&!active.ended)fail('DSH_MANAGEMENT_UNAVAILABLE');
+    const selected=this.status.pendingFeedback;
+    if(selected){if(selected.deliveryId===deliveryId&&selected.outcome===outcome)return;fail('DSH_FEEDBACK_CONFLICT');}
+    this.#pendingFeedback={deliveryId,outcome};
+  }
+  async revoke(ref:{id:string;revision:number}):Promise<void>{
+    text(ref.id,128);if(!Number.isSafeInteger(ref.revision)||ref.revision<1||!this.#mounted)fail('DSH_MANAGEMENT_UNAVAILABLE');
+    await this.manualPause();await this.#backend.command('revoke',{ref});
+  }
   async switchBackend(backend:'baseline'|'no-state'|'flywire'):Promise<void>{
     if(!this.#mounted||this.#switching)fail('DSH_MANAGEMENT_UNAVAILABLE');this.#manualVersion++;this.#switching=true;this.#manualPaused=true;
     try{await this.pause();await this.#backend.command('switch',{backend});}
@@ -241,7 +266,7 @@ export class DshCoupledBridge {
   }
   get status(){return {mounted:this.#mounted,sessionId:this.#sessionId,turn:this.#latestTurn,requestCount:this.#requests,
     ackCount:this.#acks,realModelCalls:this.#realCalls,usageSnapshotKnown:this.#usageKnown,manualPaused:this.#manualPaused,switching:this.#switching,sourceCount:this.#selected.size,preparedCount:this.#prepared.size,proactiveEnabled:!!this.#publish,
-    leaseRemainingMs:Math.max(0,this.#leaseExpires-this.#now())};}
+    leaseRemainingMs:Math.max(0,this.#leaseExpires-this.#now()),pendingFeedback:this.#pendingFeedback?{...this.#pendingFeedback}:null};}
   dispose():Promise<DshBackendClose>{
     if(this.#close)return this.#close;this.#mounted=false;this.#offPrepared?.();
     this.#close=(async()=>{await this.pause();await this.#refreshUsage();const result=await this.#backend.close();this.#log('backend-closed',result.graceful?'closed':'partial');return result;})();return this.#close;

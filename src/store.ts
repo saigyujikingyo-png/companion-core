@@ -17,12 +17,20 @@ export class MemoryStore {
   #clock: Clock;
   #owner = randomUUID();
   #key: string;
+  #persist: ((image: Uint8Array, revocationHighWater: number) => void) | undefined;
+  #assertHealthy: (() => void) | undefined;
+  #poisoned = false;
 
-  constructor(path: string, options: { clock?: Clock } = {}) {
+  constructor(path: string, options: { clock?: Clock; image?: Uint8Array;
+    persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void } = {}) {
+    if ((options.image || options.persist) && path !== ':memory:') v.fail('DURABLE_MEMORY_ONLY');
     this.#clock = options.clock ?? clock;
     this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false, allowExtension: false });
     try {
+      if ((options.image || options.persist) && (typeof this.#db.serialize !== 'function' || typeof this.#db.deserialize !== 'function'))
+        v.fail('DURABLE_UNSUPPORTED');
+      if (options.image) this.#db.deserialize(options.image);
       const version = this.#one('PRAGMA user_version')!.user_version as number;
       if (version !== 0 && version !== SCHEMA_VERSION) v.fail('UNSUPPORTED_SCHEMA');
       if (version === 0 && this.#one("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")) v.fail('UNKNOWN_DATABASE');
@@ -31,7 +39,7 @@ export class MemoryStore {
         if (this.#one("SELECT value FROM meta WHERE key='schema_hash'")?.value !== this.#schemaHash()) v.fail('SCHEMA_MISMATCH');
         if (this.#one("SELECT value FROM meta WHERE key='layout_hash'")?.value !== this.#layoutHash()) v.fail('SCHEMA_MISMATCH');
       }
-      this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;');
+      this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON; PRAGMA temp_store=MEMORY;');
       if (version === 0) this.#tx(() => {
         this.#db.exec(SCHEMA_SQL);
         this.#run('INSERT INTO meta VALUES (?,?)', 'schema_hash', this.#schemaHash());
@@ -42,6 +50,13 @@ export class MemoryStore {
       if (this.#one("SELECT value FROM meta WHERE key='schema_hash'")?.value !== this.#schemaHash()) v.fail('SCHEMA_MISMATCH');
       this.#key = this.#one("SELECT value FROM meta WHERE key='ledger_key'")!.value as string;
       this.#db.enableDefensive(true);
+      if (options.image) {
+        if (!this.diagnostics().integrity || !this.diagnostics().foreignKeys) v.fail('DURABLE_CORRUPT');
+        // A process restart never revives worker leases, active artifacts or run tickets.
+        this.#db.exec("UPDATE jobs SET lease_owner=NULL,lease_token=NULL,lease_deadline=NULL; UPDATE scopes SET runtime_epoch=runtime_epoch+1; UPDATE artifacts SET status='registered' WHERE status='active';");
+      }
+      this.#persist = options.persist;
+      this.#assertHealthy = options.assertHealthy;
     } catch (error) { this.#db.close(); throw error; }
   }
 
@@ -49,14 +64,32 @@ export class MemoryStore {
   #layoutHash(): string {
     return createHash('sha256').update(JSON.stringify(this.#all("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name"))).digest('hex');
   }
-  #one(sql: string, ...args: SQLInputValue[]): Row | undefined { return this.#db.prepare(sql).get(...args) as Row | undefined; }
+  #check(): void { if (this.#poisoned) v.fail('DURABLE_UNAVAILABLE'); this.#assertHealthy?.(); }
+  #one(sql: string, ...args: SQLInputValue[]): Row | undefined { this.#check(); return this.#db.prepare(sql).get(...args) as Row | undefined; }
   #all(sql: string, ...args: SQLInputValue[]): Row[] { return this.#db.prepare(sql).all(...args) as Row[]; }
   #run(sql: string, ...args: SQLInputValue[]): void { this.#db.prepare(sql).run(...args); }
   #tx<T>(body: () => T, readOnly = false): T {
+    this.#check();
     this.#db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
-    try { const result = body(); this.#db.exec('COMMIT'); return result; }
-    catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+    let persisting = false;
+    try {
+      const before = this.#one('SELECT total_changes() AS n')!.n;
+      const result = body();
+      if (this.#persist && !readOnly && before !== this.#one('SELECT total_changes() AS n')!.n) {
+        persisting = true;
+        this.#persist(this.#db.serialize(), this.revocationHighWater());
+      }
+      this.#db.exec('COMMIT'); return result;
+    } catch (error) {
+      // Persistence may already have committed. A caller must never continue on
+      // a rolled-back RAM view after an uncertain durable commit.
+      if (persisting) this.#poisoned = true;
+      try { this.#db.exec('ROLLBACK'); } catch { /* Fail closed even if COMMIT failed. */ }
+      throw error;
+    }
   }
+  snapshot(): Uint8Array { this.#check(); return this.#db.serialize(); }
+  revocationHighWater(): number { return this.#one('SELECT coalesce(max(id),0) AS n FROM revocations')!.n as number; }
   #digest(value: unknown): string { return createHmac('sha256', this.#key).update(JSON.stringify(value)).digest('hex'); }
   #scope(id: string): Scope {
     v.text(id, 128);

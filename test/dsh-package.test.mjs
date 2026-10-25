@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,6 +46,17 @@ test('exclusive audit opens only fixed runtime path and retains complete termina
   assert.ok(text.endsWith('\n'));
   const status=await stat(opened.path);assert.ok(status.size>0&&status.size<=AUDIT_MAX_BYTES);
   await assert.rejects(openAuditSink(config),/AUDIT_OPEN_FAILED/);assert.equal(await readFile(opened.path,'utf8'),text);
+});
+
+test('durable audit accepts only the exact identity-scoped provider and rejects the legacy or another provider',async()=>{
+  for(const correct of [true,false]){
+    const config=await configuration();config.launcher.persistence={directory:config.cwd,identity:'synthetic-vault'};
+    const provider='companion-core-'+createHash('sha256').update(config.launcher.persistence.identity).digest('hex').slice(0,12);
+    const sink=await openAuditSink(config);
+    if(correct){await write(sink.output,line(config,{provider,model:'coupled'}));assert.equal(await sink.close(),true);
+      assert.ok((await readFile(sink.path,'utf8')).includes(provider));}
+    else{await assert.rejects(write(sink.output,line(config,{provider:'companion-core',model:'coupled'})));assert.equal(await sink.close(),false);}
+  }
 });
 
 test('unload while asynchronous file open is pending creates no host and closes late sink',async()=>{

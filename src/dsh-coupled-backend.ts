@@ -6,7 +6,8 @@ import { isAbsolute, join } from 'node:path';
 import { CoreError, fail, text } from './validation.ts';
 
 export type DshBackendConfig={mode:'resident'|'synthetic';pythonPath?:string;scriptPath?:string;corePath:string;nodePath:string;
-  runtimeRoot:string;maxCalls:number;allowExistingDpapi?:boolean;neuralRuntime?:string;credentialRoot?:string};
+  runtimeRoot:string;maxCalls:number;allowExistingDpapi?:boolean;neuralRuntime?:string;credentialRoot?:string;
+  persistence?:{directory:string;identity:string}};
 export type DshBackendClose={closed:true;graceful:boolean;exitCode:number|null;signal:string|null;forced:boolean;residualBytes:number;coreStatus:string|null};
 export interface DshCoupledBackend {
   readonly sessionId:string;
@@ -23,14 +24,16 @@ const allowedEnv=new Set(['SYSTEMROOT','WINDIR','PATH','PATHEXT','COMSPEC','TEMP
 export class DshStdioBackend implements DshCoupledBackend {
   static #resident=false;
   readonly #child:ChildProcessWithoutNullStreams;readonly #expectedBudget:number;
+  readonly #persistent:boolean;
+  readonly #expectedIdentity:string|undefined;
   #sessionId='';#buffer=Buffer.alloc(0);#stderrBytes=0;#pending=new Map<string,Pending>();#writes=0;
   #closed=false;#closing=false;#fatal:CoreError|null=null;#forced=false;#exitCode:number|null=null;#exitSignal:string|null=null;
   #coreStatus:string|null=null;#coreStopped=false;#closePromise:Promise<DshBackendClose>|null=null;
   #prepared=new Set<(deliveryId:string)=>void>();
   #boot:Promise<void>;#bootResolve!:()=>void;#bootReject!:(error:unknown)=>void;#bootTimer:ReturnType<typeof setTimeout>;
   #closedPromise:Promise<void>;#closedResolve!:()=>void;
-  private constructor(child:ChildProcessWithoutNullStreams,budget:number){
-    this.#child=child;this.#expectedBudget=budget;
+  private constructor(child:ChildProcessWithoutNullStreams,budget:number,persistentIdentity?:string){
+    this.#child=child;this.#expectedBudget=budget;this.#persistent=persistentIdentity!==undefined;this.#expectedIdentity=persistentIdentity;
     this.#boot=new Promise((resolve,reject)=>{this.#bootResolve=resolve;this.#bootReject=reject;});
     this.#closedPromise=new Promise(resolve=>{this.#closedResolve=resolve;});
     this.#bootTimer=setTimeout(()=>this.#terminate('DSH_BACKEND_BOOT_TIMEOUT'),30000);
@@ -59,6 +62,10 @@ export class DshStdioBackend implements DshCoupledBackend {
     if(!config||!['resident','synthetic'].includes(config.mode)||!Number.isSafeInteger(config.maxCalls)||config.maxCalls<0||config.maxCalls>32)fail('DSH_BACKEND_CONFIG');
     for(const path of [config.corePath,config.nodePath,config.runtimeRoot]){text(path,4096);if(!isAbsolute(path))fail('DSH_BACKEND_CONFIG');}
     if(config.neuralRuntime!==undefined&&!isAbsolute(config.neuralRuntime))fail('DSH_BACKEND_CONFIG');
+    if(config.persistence){
+      if(config.mode!=='resident'||!isAbsolute(config.persistence.directory))fail('DSH_BACKEND_CONFIG');
+      text(config.persistence.directory,4096);text(config.persistence.identity,128);
+    }
     if(config.credentialRoot!==undefined){
       text(config.credentialRoot,4096);if(!isAbsolute(config.credentialRoot))fail('DSH_BACKEND_CONFIG');
       try{if(!(await stat(config.credentialRoot)).isDirectory())fail('DSH_BACKEND_CONFIG');}catch{fail('DSH_BACKEND_CONFIG');}
@@ -74,13 +81,14 @@ export class DshStdioBackend implements DshCoupledBackend {
         '--runtime-root',config.runtimeRoot,'--max-calls',String(config.maxCalls)];
       if(config.maxCalls>0)args.push('--allow-existing-dpapi');if(config.neuralRuntime)args.push('--neural-runtime',config.neuralRuntime);
       if(config.credentialRoot!==undefined)args.push('--credential-root',config.credentialRoot);
+      if(config.persistence)args.push('--memory-directory',config.persistence.directory,'--memory-identity',config.persistence.identity);
     }
     if(DshStdioBackend.#resident)fail('DSH_BACKEND_RESIDENT_LIMIT');DshStdioBackend.#resident=true;
     let child:ChildProcessWithoutNullStreams;
     try{child=(dependencies.spawn??spawn)(executable,args,{cwd:config.runtimeRoot,stdio:'pipe',windowsHide:true,
       env:Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.has(key.toUpperCase())))});}
     catch(error){DshStdioBackend.#resident=false;throw new CoreError('DSH_BACKEND_PROCESS_ERROR');}
-    const backend=new DshStdioBackend(child,config.maxCalls);
+    const backend=new DshStdioBackend(child,config.maxCalls,config.persistence?.identity);
     if(config.mode==='synthetic')backend.#write({id:'host-boot',command:'boot',maxCalls:config.maxCalls,apiKey:'synthetic-fixture-not-a-credential'});
     await backend.#boot;
     if(backend.#closed||backend.#fatal){await backend.#closedPromise;throw backend.#fatal??new CoreError('DSH_BACKEND_CLOSED');}
@@ -117,7 +125,10 @@ export class DshStdioBackend implements DshCoupledBackend {
         if(frame.id==='host-boot'&&!this.#sessionId){
           const status=frame.result;
           if(frame.ok!==true||!status||typeof status.sessionId!=='string'||status.paused!==true||status.available!==false
-            ||status.maxCalls!==this.#expectedBudget||status.requests?.total!==0)fail('DSH_BACKEND_BOOT_FAILED');
+            ||status.maxCalls!==this.#expectedBudget
+            ||(this.#persistent?(!Number.isSafeInteger(status.requests?.total)||status.requests.total<0||status.requests.total>this.#expectedBudget
+              ||status.personalPersistence!==true||status.persistence?.manualResumeRequired!==true||status.persistence?.identity!==this.#expectedIdentity)
+              :status.requests?.total!==0||status.personalPersistence===true))fail('DSH_BACKEND_BOOT_FAILED');
           this.#sessionId=status.sessionId;clearTimeout(this.#bootTimer);this.#bootResolve();continue;
         }
         if(frame.event==='stopped'){

@@ -11,6 +11,8 @@ export type InteractionRequest = {
   sessionId: string; requestId: string; kind: 'user' | 'proactive'; selectedText: string | null;
   recalled: RecallAudit[]; engineeredPrior: { background: BackgroundView | null; neural: Prior | null; backend: BackendMode };
   motive: Motive | null; signal: AbortSignal;
+  /** Trusted local fence, never serialized into the provider payload. */
+  validateBeforeSend?: () => void;
 };
 export type InteractionResponse = { version: 1; responseText: string; appraisal: AppraisalHypothesis; memoryProposal: Proposal | null };
 export interface InteractionProvider { interact(input: InteractionRequest): Promise<InteractionResponse> }
@@ -72,24 +74,36 @@ export class RawOperationPermit {
 export class RequestBudget {
   #clock: () => number; #last = 0; #total = 0; #sent: number[] = [];
   readonly #limits: { total: number; hourly: number; daily: number };
-  constructor(limits: { total: number; hourly: number; daily: number }, clock = () => performance.now()) {
+  readonly #durable: { initialTotal: number; reserve(requestId?: string): void } | undefined;
+  constructor(limits: { total: number; hourly: number; daily: number }, clock = () => performance.now(),
+    durable?: { initialTotal: number; reserve(requestId?: string): void }) {
     if (![limits.total,limits.hourly,limits.daily].every(n => Number.isSafeInteger(n) && n > 0 && n <= 1_000_000)) fail('INVALID_REQUEST_BUDGET');
     this.#limits = { ...limits }; this.#clock = clock;
     this.#last = this.#now();
+    this.#durable = durable;
+    if (durable) {
+      if (!Number.isSafeInteger(durable.initialTotal) || durable.initialTotal < 0 || durable.initialTotal > limits.total) fail('INVALID_REQUEST_BUDGET');
+      this.#total = durable.initialTotal;
+      // Old monotonic timestamps are meaningless after a process restart. All
+      // historic spend is conservatively charged again to the current windows.
+      this.#sent = Array(this.#total).fill(this.#last) as number[];
+    }
   }
   #now(): number { const now = this.#clock(); if (!Number.isFinite(now) || now < this.#last) fail('BUDGET_CLOCK_INVALID'); this.#last = now; return now; }
-  reserve(): void {
+  reserve(requestId?: string): void {
     const now = this.#now();
     this.#sent = this.#sent.filter(at => now-at < 86_400_000);
     if (this.#total >= this.#limits.total || this.#sent.filter(at => now-at < 3_600_000).length >= this.#limits.hourly
       || this.#sent.length >= this.#limits.daily) fail('REQUEST_BUDGET_EXHAUSTED');
-    this.#total++; this.#sent.push(now);
+    this.#durable?.reserve(requestId); this.#total++; this.#sent.push(now);
   }
   get usage() { return { total:this.#total, hour:this.#sent.filter(at => this.#last-at < 3_600_000).length,
     day:this.#sent.length, limits:{ ...this.#limits } }; }
 }
 /** Host creates one for its lifetime; sessions/rebinds/backend switches reuse it. */
 export class InteractionResources {
+  lastRequestAudit: { requestId:string;payloadSha256:string;recalled:Array<Pick<RecallAudit,'ref'|'beforeScore'|'afterScore'|'beforeRank'|'afterRank'>>;
+    attentionPrior:Prior|null;conditioningSourceRefs:SourceRef[] } | null = null;
   readonly calls = new RawOperationPermit();
   readonly transport = new RawOperationPermit();
   readonly neural = new RawOperationPermit();

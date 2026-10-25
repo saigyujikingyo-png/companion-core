@@ -1,8 +1,8 @@
 # Trusted-parent resident stdio entrypoint
 
-`node src/coupled-stdio.ts` runs the session-only core behind a private JSONL stdin/stdout connection owned by its parent process. It opens no socket or named pipe, reads no credentials/configuration/chat files, writes no database or logs, and changes no DSH configuration. This is a shared backend entrypoint, not a GUI or a completed DSH integration.
+`node src/coupled-stdio.ts` runs the core behind a private JSONL stdin/stdout connection owned by its parent process. It opens no socket or named pipe, discovers no credentials/configuration/chat files and changes no DSH configuration. The default RAM mode writes no database or logs. Optional [M2a persistence](M2-DURABLE.md) uses encrypted checkpoints and a separate safety ledger; its key is supplied by the parent only through boot stdin.
 
-The process creates a new `MemoryStore(':memory:')` and random session on boot. It starts paused and quiet/unavailable, with no scheduler, worker or model request. M2 encrypted persistence is still absent: process exit loses its memory/state, and there is no replay, automatic reboot, automatic rebind, cross-restart deduplication or budget restoration.
+Both modes use `MemoryStore(':memory:')` and a new random session token on boot, starting paused and quiet/unavailable with no scheduler, worker or model request. RAM mode loses memory and quota on exit. M2 restores memory, deduplication, consumed quota and revocation authority while resetting background state; it restores no presence, output delivery rights, automatic reboot or replay. Its exact initialization, failure and capacity boundaries are in the M2a contract.
 
 ## Zero-call boot
 
@@ -30,6 +30,7 @@ The boot response returns `sessionId`. Except `status`, `pause` and `stop`, ever
 | `submit` | `sessionId`, `messageId`, `selectedText`; optional `recallQuery`, `feedback` | One native user message; returns only delivery/request metadata and appraisal status |
 | `take` | `sessionId`, `deliveryId` | One-shot local payload consumption; this is the only command that returns response text and recall statements |
 | `ack` | `sessionId`, `deliveryId` | Parent confirms actual delivery after a successful `take`; ACK is not engagement |
+| `feedback-check` | `sessionId`, `deliveryId` | Validates a current-binding acknowledged receipt for a pending native feedback selection; no source, reward or model call |
 | `reset` | `sessionId` | Clears state influence while retaining consumed message identities |
 | `revoke` | `sessionId`, `ref:{id,revision}` | Revokes a source, invalidates the current binding and closes its worker |
 | `purge` | `sessionId` | Clears the scope, invalidates the binding and closes its worker |

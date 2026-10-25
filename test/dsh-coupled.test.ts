@@ -34,6 +34,7 @@ class FakeBackend implements DshCoupledBackend{
     if(command==='take'){const delivery=this.deliveries.get(fields.deliveryId as string);assert.ok(delivery&&!delivery.taken);delivery.taken=true;
       return {deliveryId:fields.deliveryId,text:delivery.text,recall:[],sourceRefs:[{id:'synthetic-anchor',revision:1}]};}
     if(command==='ack'){const delivery=this.deliveries.get(fields.deliveryId as string);assert.ok(delivery?.taken&&!delivery.acked);delivery.acked=true;return {};}
+    if(command==='feedback-check'){const delivery=this.deliveries.get(fields.deliveryId as string);if(!delivery?.acked)throw new Error('FEEDBACK_REQUIRES_DELIVERED_RECEIPT');return {valid:true};}
     return {};
   }
   prepared(){const id=randomUUID();this.deliveries.set(id,{text:'PREPARED_SYNTHETIC_REPLY',taken:false,acked:false});this.requests++;this.callback?.(id);return id;}
@@ -267,7 +268,7 @@ test('official slash controls require exact owned agent, fixed arguments and nev
   const config=await hostConfig(),host=mockHost(config.sessionId),backend=new FakeBackend(),input=new PassThrough(),output=new PassThrough();output.resume();
   const mounted=await mountDshCoupled(host.ctx,config,sdk,{startBackend:async()=>backend,input,output});
   const invoke=(name:string,rawInput='',agent:any=host.agent)=>host.commands.get(`companion-${name}`).handler({agent,rawInput,attachments:[],signal:new AbortController().signal});
-  assert.deepEqual([...host.commands.keys()],['companion-pause','companion-resume','companion-status','companion-switch']);
+  assert.deepEqual([...host.commands.keys()],['companion-pause','companion-resume','companion-status','companion-switch','companion-feedback','companion-revoke','companion-inspect']);
   assert.ok([...host.commands.values()].every(def=>def.recordInput===false));
   assert.equal((await invoke('pause','',{})).kind,'error');assert.equal((await invoke('switch','arbitrary')).kind,'error');
   assert.equal((await invoke('pause','extra')).kind,'error');assert.equal(backend.calls.length,0);
@@ -275,6 +276,7 @@ test('official slash controls require exact owned agent, fixed arguments and nev
   assert.equal((await invoke('resume')).kind,'success');assert.equal(mounted.bridge!.status.manualPaused,false);assert.equal(mounted.bridge!.status.leaseRemainingMs,0);
   for(const value of ['baseline','no-state','flywire']){assert.equal((await invoke('switch',` ${value} `)).kind,'success');assert.equal(mounted.bridge!.status.manualPaused,true);}
   const status=await invoke('status');assert.equal(status.kind,'success');assert.match(status.text,/calls=0\/2/);
+  assert.ok(status.text.length<=1024);const inspect=await invoke('inspect');assert.equal(inspect.kind,'success');assert.equal(JSON.parse(inspect.text).calls,0);
   assert.equal(backend.requests,0);assert.equal(host.queue.length,0);assert.equal(mounted.bridge!.status.sourceCount,0);
   const stale=host.commands.get('companion-resume');await mounted.cleanup();assert.equal(host.commands.size,0);
   assert.equal((await stale.handler({agent:host.agent,rawInput:'',signal:new AbortController().signal})).kind,'error');
@@ -285,6 +287,79 @@ test('actual synthetic stdio process drives native-shaped turn and closes gracef
   const frames=await collect(bridge.stream({sessionId:config.sessionId,provider:'companion-core',model:'coupled',messages:[message],signal:new AbortController().signal}));
   assert.equal(frames[1].text,'SYNTHETIC_COUPLED_REPLY');await finish(h,frames[1].text);assert.equal(bridge.status.ackCount,1);
   assert.equal((await backend.command('status')).requests.total,1);const closed=await bridge.dispose();assert.equal(closed.graceful,true);assert.equal(closed.exitCode,0);
+});
+
+test('durable bridge requires explicit resume; feedback selection waits for native ACK and next real input',async t=>{
+  const h=fixture(t,{requireManualResume:true}),message=human();await begin(h,message);
+  await assert.rejects(collect(h.bridge.stream(h.options([message]))),/DSH_MANUALLY_PAUSED/);assert.equal(h.backend.requests,0);
+  await h.bridge.manualResume();assert.equal(h.bridge.status.leaseRemainingMs,0);
+  await collect(h.bridge.stream(h.options([message])));
+  const id=[...h.backend.deliveries.keys()][0]!;
+  await assert.rejects(h.bridge.selectFeedback(id,'engaged'));await finish(h,'SYNTHETIC_REPLY');
+  await h.bridge.selectFeedback(id,'engaged');await h.bridge.selectFeedback(id,'engaged');
+  await assert.rejects(h.bridge.selectFeedback(id,'declined'),/DSH_FEEDBACK_CONFLICT/);
+  assert.equal(h.backend.requests,1);assert.deepEqual(h.bridge.status.pendingFeedback,{deliveryId:id,outcome:'engaged'});
+  const next=human('Synthetic explicit feedback source');await begin(h,next,2);await collect(h.bridge.stream(h.options([message,next])));
+  assert.deepEqual(h.backend.calls.filter(c=>c.command==='submit').at(-1)!.fields.feedback,{deliveryId:id,outcome:'engaged'});
+  assert.equal(h.bridge.status.pendingFeedback,null);await finish(h,'SYNTHETIC_REPLY',2);
+  await h.bridge.selectFeedback([...h.backend.deliveries.keys()][1]!,'neutral');await h.bridge.manualPause();assert.equal(h.bridge.status.pendingFeedback,null);
+  await h.bridge.revoke({id:randomUUID(),revision:1});assert.equal(h.backend.calls.at(-1)!.command,'revoke');assert.equal(h.bridge.status.manualPaused,true);
+});
+
+test('persistent native mount explicitly resumes fixed SID, restores usage and does not consume legacy boot claim',async()=>{
+  const config=await hostConfig();config.nativeSessionMode='resume';config.launcher={...config.launcher,mode:'resident',pythonPath:process.execPath,
+    scriptPath:process.execPath,allowExistingDpapi:true,persistence:{directory:config.cwd,identity:'SYNTHETIC_VAULT'}};
+  const host=mockHost(config.sessionId),backend=new FakeBackend(),output=new PassThrough();const frames=outputFrames(output);let resumed:any;
+  host.ctx.agents.create=async()=>assert.fail('resume must not fall back to create');
+  (host.ctx.agents as any).resume=async(options:any)=>{resumed=options;return {agent:host.agent,dispose:async()=>{}};};
+  const command=backend.command.bind(backend);backend.command=async(name,fields,signal)=>name==='status'
+    ?{paused:true,available:false,personalPersistence:true,requests:{total:1},persistence:{manualResumeRequired:true,identity:'SYNTHETIC_VAULT'}}
+    :command(name,fields,signal);
+  const mounted=await mountDshCoupled(host.ctx,config,sdk,{startBackend:async()=>backend,input:new PassThrough(),output});
+  assert.equal(resumed.resumeSessionId,config.sessionId);assert.match(resumed.agentOptions.provider,/^companion-core-[a-f0-9]{12}$/);
+  assert.equal(mounted.bridge!.status.manualPaused,true);assert.equal(mounted.bridge!.status.realModelCalls,1);
+  assert.equal(frames.find(f=>f.kind==='plugin-ready').requests,1);
+  await assert.rejects(readFile(join(config.cwd,`session-${config.sessionId}.boot-claimed`)),/ENOENT/);await mounted.cleanup();
+});
+
+test('read-only native status/inspect abort or failure never pauses or changes host context',async()=>{
+  for(const action of ['status','inspect'])for(const failure of ['abort','reject','oversize']){
+    if(action==='status'&&failure==='oversize')continue;
+    const config=await hostConfig(),host=mockHost(config.sessionId),backend=new FakeBackend(),output=new PassThrough();output.resume();
+    const mounted=await mountDshCoupled(host.ctx,config,sdk,{startBackend:async()=>backend,input:new PassThrough(),output});
+    const entered=deferred<void>(),release=deferred<void>();const original=backend.command.bind(backend);
+    backend.command=async(name,fields,signal)=>{
+      if(name==='status'){
+        backend.calls.push({command:name,fields:fields??{}});entered.resolve();
+        if(failure==='abort')await release.promise;
+        if(failure==='reject')throw new Error('synthetic status error');
+        return {paused:false,available:false,requests:{total:0},requestAudit:failure==='oversize'?{synthetic:'x'.repeat(33000)}:null};
+      }
+      return original(name,fields,signal);
+    };
+    const abort=new AbortController();const pending=host.commands.get(`companion-${action}`).handler({agent:host.agent,rawInput:'',attachments:[],signal:abort.signal});
+    await entered.promise;if(failure==='abort'){abort.abort();release.resolve();}
+    const result=await pending;assert.equal(result.kind,'error');assert.equal(mounted.bridge!.status.manualPaused,false);
+    assert.deepEqual(backend.calls.map(c=>c.command),['status']);assert.equal(mounted.bridge!.status.leaseRemainingMs,0);
+    await mounted.cleanup();
+  }
+});
+
+test('persistent launcher handshake and native mount both reject wrong or missing observed vault identity',async()=>{
+  for(const observed of ['wrong',undefined]){
+    const config=await hostConfig();config.launcher={...config.launcher,mode:'resident',pythonPath:process.execPath,scriptPath:process.execPath,
+      maxCalls:0,persistence:{directory:config.cwd,identity:'expected'}};
+    const boot={sessionId:randomUUID(),paused:true,available:false,maxCalls:0,personalPersistence:true,requests:{total:0},
+      persistence:{manualResumeRequired:true,...(observed?{identity:observed}:{})}};
+    const launch=()=>{const child:any=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();
+      child.stdin.write=()=>{};child.kill=()=>{queueMicrotask(()=>child.emit('close',1,null));return true;};
+      queueMicrotask(()=>child.stdout.emit('data',Buffer.from(JSON.stringify({version:1,id:'host-boot',ok:true,result:boot})+'\n')));return child;};
+    await assert.rejects(DshStdioBackend.start(config.launcher,{spawn:launch as typeof spawn}));
+    const host=mockHost(config.sessionId),backend=new FakeBackend(),output=new PassThrough();output.resume();
+    backend.command=async()=>boot;host.ctx.agents.create=async()=>assert.fail('wrong identity must not create native session');
+    await assert.rejects(mountDshCoupled(host.ctx,config,sdk,{startBackend:async()=>backend,input:new PassThrough(),output}),/COMPANION_PLUGIN_START_FAILED/);
+    assert.equal(backend.closed,1);assert.equal(host.adapter,undefined);
+  }
 });
 
 for(const mode of ['boot-close','boot-fatal','write-throws'])test(`client ${mode} startup rejects only after actual owned close`,async()=>{
