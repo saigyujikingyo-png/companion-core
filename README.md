@@ -4,6 +4,8 @@
 
 **当前是 0.1 开发原型：运行合成数据，不接生产数据库。** 真实 provider 与宿主回合按独立证据验收，普通测试不会调用真实模型。它是现有六插件维护工作的独立实验核心；尚未替换、合并或发布到任一上游插件。
 
+2026-10-25 新切片：[双向状态/回忆/交流](docs/COUPLED-RUNTIME.md)与[受信 stdio 宿主入口](docs/COUPLED-STDIO.md)。完整143项回归、真实DeepSeek有限闭环、真实FlyWire CPU在线接口，以及Windows stdio stop/EOF均通过独立验收；[证据与限制](../dsh-plugin-maintenance/research/2026-10-25-coupling/README.md)保留失败案例。当前会话仅RAM，尚未完成M2持久化；用户选定的DSH插件会话挂载正在实施，不能把stdio验收当作生产界面已接通。
+
 ## 运行
 
 使用 Node **24.16.0 / 24.x**。运行本身没有第三方依赖；类型检查的开发依赖已固定并带 lockfile。

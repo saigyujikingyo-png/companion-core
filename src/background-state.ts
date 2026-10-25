@@ -37,7 +37,7 @@ export type AppraisalHypothesis = {
   kind: 'appraisal-hypothesis'; confidence: number;
   valence: number; arousal: number; uncertainty: number; fatigue: number;
 };
-export type AppraisalRequest = { id: string; refs: SourceRef[] };
+export type AppraisalRequest = { id: string; refs: SourceRef[]; conditioningRefs?: SourceRef[] };
 export type AppraisalEvaluator = (input: Readonly<{
   kind: 'background-hypothesis-request'; snapshot: BackgroundView;
   refs: readonly Readonly<SourceRef>[]; deadlineAtMonotonicMs: number; signal: AbortSignal;
@@ -184,8 +184,8 @@ export class BackgroundState {
     this.#advance(now);
     return now;
   }
-  #refs(value: unknown): SourceRef[] {
-    if (!Array.isArray(value) || value.length < 1 || value.length > 8) fail('BACKGROUND_INVALID_INPUT');
+  #refs(value: unknown, maximum = 8): SourceRef[] {
+    if (!Array.isArray(value) || value.length < 1 || value.length > maximum) fail('BACKGROUND_INVALID_INPUT');
     const seen = new Set<string>();
     const refs = value.map((ref: unknown) => {
       if (!object(ref) || !key(ref.id) || !Number.isSafeInteger(ref.revision)
@@ -205,7 +205,11 @@ export class BackgroundState {
         // subject's self-report. Observation alone can include assistant output.
         if (outcome && record.basis !== 'self_report') fail('BACKGROUND_OUTCOME_REQUIRES_SELF_REPORT');
       }
-      return this.#store.publishedEventSources(this.#ticket, refs);
+      const roots = new Map<string,SourceRef>();
+      for (let i = 0; i < refs.length; i += 32) {
+        for (const root of this.#store.publishedEventSources(this.#ticket, refs.slice(i,i+32))) roots.set(refKey(root),root);
+      }
+      return [...roots.values()];
     } catch (error) { this.#invalidate(); throw error; }
   }
   #reserve(id: string, refs: SourceRef[], roots: SourceRef[], payload: unknown, status: LedgerEntry['status']): boolean {
@@ -339,10 +343,17 @@ export class BackgroundState {
     if (!object(input) || !key(input.id) || typeof evaluate !== 'function') fail('BACKGROUND_INVALID_INPUT');
     const refs = this.#refs(input.refs);
     const roots = this.#checkRefs(refs);
+    // Conditioning memories are dependencies, not new stimuli/rewards. They
+    // remain revocable without consuming their roots again on every new turn.
+    const conditioning = input.conditioningRefs === undefined || (Array.isArray(input.conditioningRefs) && input.conditioningRefs.length === 0)
+      ? [] : this.#refs(input.conditioningRefs,this.#maxSources);
+    const allRefs = this.#refs([...new Map([...refs, ...conditioning].map(ref => [ref.id, ref])).values()],this.#maxSources);
+    for (const ref of refs) if (conditioning.some(other => other.id === ref.id && other.revision !== ref.revision)) fail('BACKGROUND_INVALID_INPUT');
+    const allRoots = this.#checkRefs(allRefs);
     const id = input.id;
     if (this.#pending.size > 0 && !this.#ledger.has(id)) fail('BACKGROUND_APPRAISAL_BUSY');
     if (!this.#ledger.has(id) && roots.some(ref => this.#appraisedSources.has(refKey(ref)))) fail('BACKGROUND_APPRAISAL_SOURCE_REPLAY');
-    if (!this.#reserve(id, refs, roots, ['appraisal', refs], 'pending')) return this.#receipt('duplicate');
+    if (!this.#reserve(id, allRefs, allRoots, ['appraisal', refs, conditioning], 'pending')) return this.#receipt('duplicate');
     for (const ref of roots) this.#appraisedSources.add(refKey(ref));
     const deadline = startedAt + BACKGROUND_DEFAULTS.appraisalMaxAgeMs;
     const generation = this.#generation, revision = this.#revision, contextRevision = this.#contextRevision;
@@ -360,7 +371,7 @@ export class BackgroundState {
         if (atInvocation >= deadline) fail('BACKGROUND_APPRAISAL_EXPIRED');
         if (controller.signal.aborted || generation !== this.#generation || revision !== this.#revision) fail('BACKGROUND_APPRAISAL_STALE');
         return evaluate(Object.freeze({ kind: 'background-hypothesis-request' as const,
-          snapshot: structuredClone(before), refs: Object.freeze(refs.map(ref => Object.freeze({ ...ref }))),
+          snapshot: structuredClone(before), refs: Object.freeze(allRefs.map(ref => Object.freeze({ ...ref }))),
           deadlineAtMonotonicMs: deadline, signal: controller.signal }));
       });
       const release = () => {
@@ -373,7 +384,7 @@ export class BackgroundState {
       if (completedAt >= deadline) fail('BACKGROUND_APPRAISAL_EXPIRED');
       if (controller.signal.aborted || generation !== this.#generation || revision !== this.#revision || contextRevision !== this.#contextRevision)
         fail('BACKGROUND_APPRAISAL_STALE');
-      this.#checkRefs(refs);
+      this.#checkRefs(allRefs);
       if (!object(hypothesis) || hypothesis.kind !== 'appraisal-hypothesis' || !finite(hypothesis.confidence, 0, 1)
         || ![hypothesis.valence, hypothesis.arousal, hypothesis.uncertainty, hypothesis.fatigue].every(v => finite(v, -1, 1)))
         fail('BACKGROUND_INVALID_HYPOTHESIS');
