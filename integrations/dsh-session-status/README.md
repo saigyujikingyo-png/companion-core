@@ -1,5 +1,8 @@
 # Exact-session native status action
 
+Current acceptance: **CONTROL_PASS**. The user-visible result was baseline/paused=true/available=false/calls=0/32 for the exact owned SID, with commandId `cmd-8e0637d9-2`. Independent own safe audit recorded two command-status events with matching SID/state and all model/provider counts0. The audit carries no commandId, so no one-to-one pairing is inferred. Older pending statements below are historical. Chat composer binding, a first production model reply and permanent core memory are not accepted by this read-only control result.
+
+
 This separate client-only package appends **Companion Core 状态** to the existing session-row menu. It addresses only the build-time owned SID and calls official `remote.commands.list` followed by `remote.commands.execute` for `/companion-status`. It never routes through the current composer and never falls back to an ordinary message.
 
 The frontend is authored by actual Claude Opus; receipt and immutable original version are recorded. Sol only supplies mechanical SDK packaging and tests. Server entry is an empty apply. The existing opener/backend packages and core snapshot must not be changed by this deployment.

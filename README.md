@@ -7,6 +7,8 @@
 2026-10-25 新切片：[双向状态/回忆/交流](docs/COUPLED-RUNTIME.md)与[受信 stdio 宿主入口](docs/COUPLED-STDIO.md)。完整143项回归、真实DeepSeek有限闭环、真实FlyWire CPU在线接口，以及Windows stdio stop/EOF均通过独立验收；[证据与限制](../dsh-plugin-maintenance/research/2026-10-25-coupling/README.md)保留失败案例。当前会话仅RAM，尚未完成M2持久化；用户选定的 DSH rc.3 专用插件会话已实际 READY，用户确认成功打开；最终 whole187/187 与后续 client5/5 分开记录。新会话预算32、不自动重启/补额度，核心记忆仍RAM。
 
 [DSH 挂载原型](docs/DSH-COUPLED.md)当前每个原生回合只支持一条纯文本输入；多模态和合并连续输入尚未支持，请避免连续拆条。宿主同轮合并多条人类消息时会明确拒绝整批，不静默只处理最后一条。
+DSH 原生只读状态已 **CONTROL_PASS**：用户看见固定SID的真实状态回执，独立safe audit有2条command-status，模型计数仍0/32；[分层证据](../dsh-plugin-maintenance/research/2026-10-25-coupling/DSH-CONTROL-PASS.json)。这不代表聊天输入绑定、首个正式模型回合或永久记忆已通过。
+
 
 ## 运行
 

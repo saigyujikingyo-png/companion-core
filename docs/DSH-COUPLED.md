@@ -1,5 +1,12 @@
 # Dedicated DSH coupled session
 
+## Current native status acceptance
+
+**CONTROL_PASS**: the user clicked **Companion Core 状态** and saw `Companion: baseline; paused=true; available=false; calls=0/32.`, target SID `cc3b37e9-4c26-400e-ace0-7995a9785b76` and commandId `cmd-8e0637d9-2`. That commandId is user-provided UI evidence. Independent own safe audit contains four events: two initial ready events and **two** command-status events for the exact SID, baseline/paused/unavailable, all request/provider/synthetic/real counters0 and knownusage=true. The audit has no commandId; no one-to-one correlation is claimed. See [layered receipt](../../dsh-plugin-maintenance/research/2026-10-25-coupling/DSH-CONTROL-PASS.json).
+
+This accepts fixed-session native status execution and its user-visible response. Chat composer binding, the first production model turn and permanent core memory remain unverified/unimplemented. This final record step made no model request, credential read, deployment/HMR/restart or live runtime change. Historical pending/failure checkpoints below are preserved.
+
+
 This backend plugin targets the currently installed DSH 0.2.1-rc.3 SDK and its existing UI. `integrations/dsh` is an installable local package with no client bundle or install scripts. Node 24.16 strips the TypeScript modules from the explicitly configured absolute `launcher.corePath`. The plugin does not read other sessions, the old DSH profile, credentials or environment API keys. Install it into a fresh `DSH_HOME` using the official `web` profile and a fresh session UUID. Never reuse a stored personal session as an implicit restore.
 
 The public config is supplied by an explicit plugin server config `{configPath: "absolute/path/to/public.json"}`. This takes precedence over the `COMPANION_CORE_CONFIG_PATH` environment fallback used by a fresh isolated CLI host. The JSON file is bounded to 32 KiB. A complete explicit server config is also supported. No test config path is embedded in the package. Required fields are `auditId`, `sessionId`, absolute `cwd`, and `launcher`. Optional fields: `model: "coupled"`, `parentControl: true`, `enableProactive: true`, `initialBackend: "baseline" | "no-state" | "flywire"` (default baseline), and the explicit synthetic acceptance trigger `acceptanceInput: {text, rpcId}`. No secret fields are accepted. A desktop installation must explicitly supply its own production public path without acceptanceInput; it cannot inherit a CLI-only environment by assumption.
