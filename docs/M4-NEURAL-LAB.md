@@ -2,7 +2,7 @@
 
 The independent Python CLI in `neural/run_experiment.py` executes a small, real FlyWire-derived circuit on CUDA. It is an original **research rate-dynamics implementation**, not a reproduction of Shiu's LIF simulation, a complete fly, a language model, or evidence of subjective affect. It does not implement the online `NeuralAdapter` or activate artifacts in `MemoryStore`. Scope, permission, reset and output-delivery fences remain mandatory for any later integration.
 
-**Current acceptance checkpoint:** CPU tests 8/8 and independent read-only review pass. The first real run (`20261025T161608Z-347a9e2a`) passed graph forward/parity, local-rule controls and one 48-step readout condition, then retained `FAILED_OR_PARTIAL` because its reload check wrongly required identical CUDA output hashes. The corrected source preserves exact checkpoint-byte/state checks and uses declared FP32 logit tolerances, with separate output hashes/error reporting. Its full four-mode, 24-condition rerun was `PRELAUNCH_REFUSED_NOT_STARTED` due to the existing 1.5-GiB host-memory gate. BPTT and complete controls remain NOT_RUN at this checkpoint. Old evidence is retained under its original source identity and is not promoted to a qualification of changed code.
+**Current acceptance checkpoint:** final run `20261025T164817Z-d3d04a6f` exited 0 with `PASS_FOUR_MODES_AND_BOUNDED_CONTROLS`. CPU tests 8/8 and independent read-only review pass. The first run (`20261025T161608Z-347a9e2a`) remains `FAILED_OR_PARTIAL` because its reload check wrongly required identical CUDA output hashes. The corrected source preserves exact checkpoint-byte/state checks and uses declared FP32 logit tolerances, with separate output hashes/error reporting. One later attempt was `PRELAUNCH_REFUSED_NOT_STARTED` at the existing 1.5-GiB RAM gate. After a fresh normal-user reading showed 7.746 GiB available, the unchanged gated CLI completed all four modes and 24 conditions. Old evidence remains under its original source identity.
 
 ## Fixed sources and data handling
 
@@ -54,3 +54,22 @@ Three fixed seeds (101, 202, 303), batch 4 and 48 update opportunities are used 
 All conditions receive the same examples and update cap. No-learning intentionally disables updates. Parameter counts and wall time are measured and reported; FLOPs are not measured. Parameter counts, FLOPs and wall time are not matched. A GRU comparator and richer behavioral protocols remain separate work. Three seeds and a small synthetic task cannot establish biological superiority. Accuracy without an advantage over controls remains a valid result.
 
 The final machine-readable summary is the authority for what actually ran. Unit tests alone are synthetic CPU checks, and a generic GPU matrix smoke is not evidence for any of these four workloads. Research execution does not complete the entire M4 milestone or production readiness.
+
+## Measured final result
+
+The final summary SHA256 is `24f88a93412ecca195b4ec39786ca3d839f96e4ed121d6736dc522fa14249ef8`; model implementation identity is `152a501c135c31c0e9dd9760172b20440fc28f880ce1f1361b2e7f8447e2b4e0`. Full artifacts remain in the isolated local runtime's `runs/20261025T164817Z-d3d04a6f`. A small immutable summary copy and Python/TypeScript contract verification are in the sibling coordinator's `evidence/core-neural-native-20261025T164817Z-{summary,policy}.json`.
+
+On RTX5070 Laptop/sm120, batch 4 and 32 engineering steps, the 11-sample resident-operation p95 values were inference 70.50 ms, local-plasticity 163.06 ms, readout-training 88.86 ms and BPTT 176.66 ms. The two representative trained-checkpoint inference probes measured 138.33/119.43 ms independently. These are distinct input/checkpoint workloads, not evidence that learning caused the timing differences. Maximum probe host lifetime peak was 2,059,112,448 B; observed device occupancy of 1,415,118,848 B can include other clients. The training allocator peak of 117,310,464 B is not total device memory demand.
+
+| Condition | Readout accuracy, seeds 101/202/303 | BPTT accuracy, seeds 101/202/303 |
+|---|---|---|
+| Real graph | 1.00 / 0.75 / 0.50 | 1.00 / 0.75 / 0.50 |
+| Rewired graph | 0.50 / 0.50 / 0.50 | 0.50 / 0.50 / 0.50 |
+| No learning | 0.50 / 0.50 / 0.50 | 0.50 / 0.50 / 0.50 |
+| No circuit | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 |
+
+Real mean accuracy was 0.75 with sample standard deviation 0.25. No-circuit mean loss of 0.002053 was below real readout 0.563784 and real BPTT 0.536308. The no-circuit algorithm is the same linear baseline in both mode groups, not two independent circuit-training methods. These results do not establish biological superiority or an accuracy improvement from BPTT.
+
+There are 24,654 trainable real KC→MBON gains plus 98 head parameters; all three real BPTT runs changed circuit parameters (maximum theta deltas 1.18669/1.29210/1.40026). This is not a count of individually changed edges. Readout-only theta and all no-learning states stayed unchanged. All 24 reloaded states were exact; maximum logit difference was 2.38419e-7 within the declared rtol 2e-4 / atol 2e-5. The independent reviewer checked 102 artifact hashes, 48 checkpoint files and all eight aggregate rows without executing training again.
+
+Six exact probes passed the TypeScript workload hash and policy contract at their evidence timestamps. Synthetic authority checks rejected changed checkpoints, expired probes, invalid lineage and withdrawn learning permission. This does not renew expiry or implement online authorization. Physical NPU was absent on the tested 9955HX host; no NPU execution/training is claimed. The next experiment needs stronger sequence tasks, a GRU comparator and biologically constrained recovery/extinction rules before any claim of more natural affect.
