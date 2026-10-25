@@ -38,8 +38,8 @@ flowchart LR
 - 投影消费者获取 upsert/remove 并确认；周期调用可产生未来生效/到期变化。它是至少一次协议，不声称远端恰好一次。
 - 可选训练注册表绑定许可与删除代际；子检查点继承父产物来源；激活和每次输出交付前检查运行代际。此处**没有训练或加载模型**。
 - M1 版本化 JSON 边界、DSH/Codex 精选文字映射、持久提取幂等、有界队列与立即本地取消；云 HTTPS/本地回环共用可注入 HTTP 推理适配器。
-- 本地神经能力策略默认小回路，分别检查推理、局部学习、读出训练和全回路反向传播的实测证据；按工作负载、检查点、设备和运行时版本失效，支持已验证的 CPU 回退。尚无实际神经后端。
-- Host、Inference、Media、Neural、Action 的扩展接口；Media/Neural/Action 仍是接口，没有声称真实模型或神经回路运行。
+- 本地神经能力策略默认小回路，分别检查推理、局部学习、读出训练和回路反向传播的实测证据；按工作负载、检查点、设备和运行时版本失效，支持已验证的 CPU 回退。另有独立 Python/CUDA 研究 CLI，在线 NeuralAdapter 尚未实现。
+- Host、Inference、Media、Neural、Action 的扩展接口；Media/Neural/Action 的在线服务仍待实施。真实 DeepSeek 与 Codex 回合已按独立证据验收，神经实验的具体完成范围见实验记录。
 
 ## 阅读入口
 
@@ -53,6 +53,7 @@ flowchart LR
 | [M1 适配合同](docs/M1-ADAPTERS.md) | 宿主绑定、协议映射、取消、背压与 HTTP |
 | [Codex 原生验收](docs/CODEX-NATIVE-ACCEPTANCE.md) | 真实完成回合、合成记忆落库、独立中断及保留的重放失败 |
 | [本地回路策略](docs/NEURAL-LOCAL-POLICY.md) | 本地优先、能力证据、训练资格与硬件回退 |
+| [连接组实验](docs/M4-NEURAL-LAB.md) | 冻结真实子图、CUDA研究CLI、局部学习与训练对照；以实际run状态为准 |
 | [安全边界](SECURITY.md) | 原型限制与真实数据接入门槛 |
 
 ## 当前边界
