@@ -1,0 +1,20 @@
+{
+  "name": "@companion/core",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "Local authoritative memory contracts and synthetic replay for a cross-host companion",
+  "engines": {
+    "node": ">=24.16.0 <25"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "demo": "node src/replay.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run demo"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
