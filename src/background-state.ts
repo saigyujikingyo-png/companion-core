@@ -9,7 +9,7 @@ export type BackgroundLatent = {
   affiliativeTone: number; activation: number; uncertainty: number; fatigue: number;
   affiliation: number; withdrawal: number;
 };
-export type BackgroundContext = { quiet: boolean; available: boolean };
+export type BackgroundContext = { quiet: boolean; available: boolean; proactiveAllowed?:boolean };
 export type Motive = 'affiliation' | 'withdrawal';
 export type BackgroundView = {
   kind: 'engineered-background-prior'; bindingId: string; generation: number;
@@ -61,7 +61,7 @@ const key = (value: unknown): value is string => typeof value === 'string' && va
 const refKey = (ref: SourceRef) => JSON.stringify([ref.id, ref.revision]);
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 type LedgerEntry = { hash: string; status: 'pending' | 'applied' | 'failed' };
-type IntentSeal = { generation: number; revision: number; contextRevision: number };
+type IntentSeal = { generation: number; revision: number; contextRevision: number; permissionRevision:number };
 
 /** Trusted in-process experiment. It owns no timer, GPU, provider or persistent state. */
 export class BackgroundState {
@@ -80,6 +80,7 @@ export class BackgroundState {
   #generation = 1;
   #revision = 0;
   #contextRevision = 0;
+  #permissionRevision = 0;
   #paused = false;
   #invalidated = false;
   #cooldownUntil = 0;
@@ -241,7 +242,7 @@ export class BackgroundState {
     this.#targetValidUntil = this.#lastTime + BACKGROUND_DEFAULTS.targetValidityMs;
   }
   #nextWake(now: number): number | null {
-    if (this.#paused || this.#context.quiet || !this.#context.available || this.#ablation === 'no-state') return null;
+    if (this.#paused || this.#context.quiet || !(this.#context.proactiveAllowed??this.#context.available) || this.#ablation === 'no-state') return null;
     const deadlines: number[] = [];
     for (const motive of ['affiliation', 'withdrawal'] as const) {
       if (!this.#armed[motive]) continue;
@@ -280,11 +281,15 @@ export class BackgroundState {
   read(): BackgroundView { return this.#view(this.#guard()); }
   setContext(context: BackgroundContext): BackgroundView {
     this.#guard();
-    if (!object(context) || typeof context.quiet !== 'boolean' || typeof context.available !== 'boolean') fail('BACKGROUND_INVALID_INPUT');
-    if (context.quiet !== this.#context.quiet || context.available !== this.#context.available) {
-      this.#context = { quiet: context.quiet, available: context.available };
-      this.#contextRevision++;
-      this.#cancelPending();
+    if (!object(context) || typeof context.quiet !== 'boolean' || typeof context.available !== 'boolean'
+      ||(context.proactiveAllowed!==undefined&&typeof context.proactiveAllowed!=='boolean')) fail('BACKGROUND_INVALID_INPUT');
+    if (context.quiet !== this.#context.quiet || context.available !== this.#context.available || context.proactiveAllowed!==this.#context.proactiveAllowed) {
+      if(context.quiet!==this.#context.quiet||context.available!==this.#context.available){
+        this.#contextRevision++;this.#cancelPending();
+      }
+      if(context.proactiveAllowed!==this.#context.proactiveAllowed)this.#permissionRevision++;
+      this.#context = { quiet: context.quiet, available: context.available,
+        ...(context.proactiveAllowed===undefined?{}:{proactiveAllowed:context.proactiveAllowed}) };
     }
     return this.read();
   }
@@ -410,7 +415,7 @@ export class BackgroundState {
     const now = this.#guard();
     if (this.#paused) return { intent: null, nextWakeAt: null, reason: 'paused' };
     if (this.#context.quiet) return { intent: null, nextWakeAt: null, reason: 'quiet' };
-    if (!this.#context.available) return { intent: null, nextWakeAt: null, reason: 'unavailable' };
+    if (!(this.#context.proactiveAllowed??this.#context.available)) return { intent: null, nextWakeAt: null, reason: 'unavailable' };
     if (this.#ablation === 'no-state') return { intent: null, nextWakeAt: null, reason: 'below-threshold-or-latched' };
     if (now < this.#cooldownUntil) return { intent: null, nextWakeAt: this.#nextWake(now), reason: 'cooldown' };
     const candidates = (['withdrawal', 'affiliation'] as const).filter(m => this.#armed[m] && this.#latent[m] >= BACKGROUND_DEFAULTS.high - 1e-12);
@@ -422,15 +427,15 @@ export class BackgroundState {
     const intent: ShadowIntent = Object.freeze({ kind: 'shadow-intent', id: randomUUID(), bindingId: this.#bindingId,
       motive, suggestedWork: motive === 'affiliation' ? 'consider-appraisal' : 'reduce-engagement',
       createdAtMonotonicMs: now, expiresAtMonotonicMs: now + BACKGROUND_DEFAULTS.intentTtlMs, delivery: 'shadow-only' });
-    this.#intents.set(intent, { generation: this.#generation, revision: this.#revision, contextRevision: this.#contextRevision });
+    this.#intents.set(intent, { generation: this.#generation, revision: this.#revision, contextRevision: this.#contextRevision,permissionRevision:this.#permissionRevision });
     this.validateIntent(intent);
     return { intent, nextWakeAt: this.#nextWake(this.#lastTime), reason: 'shadow-intent' };
   }
   validateIntent(intent: ShadowIntent): void {
     const now = this.#guard(), seal = this.#intents.get(intent);
     if (!seal || intent.bindingId !== this.#bindingId || seal.generation !== this.#generation
-      || seal.revision !== this.#revision || seal.contextRevision !== this.#contextRevision
-      || now >= intent.expiresAtMonotonicMs || this.#paused || this.#context.quiet || !this.#context.available)
+      || seal.revision !== this.#revision || seal.contextRevision !== this.#contextRevision||seal.permissionRevision!==this.#permissionRevision
+      || now >= intent.expiresAtMonotonicMs || this.#paused || this.#context.quiet || !(this.#context.proactiveAllowed??this.#context.available))
       fail('BACKGROUND_INTENT_STALE');
   }
   pause(): BackgroundView {

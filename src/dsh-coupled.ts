@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import { CoreError, fail, text } from './validation.ts';
 import { mapEvent } from './wire.ts';
 import { bounded } from './runtime.ts';
-import type { DshCoupledBackend, DshBackendClose } from './dsh-coupled-backend.ts';
+import type { DshCoupledBackend, DshBackendClose, PreparedAuthorization } from './dsh-coupled-backend.ts';
+
+import { CompanionWindowPolicy } from './presence-policy.ts';
 
 export type DshNativeChunk={type:'block-start';index:0;blockType:'text'}|{type:'text-delta';index:0;text:string}
   |{type:'block-end';index:0;block:{type:'text';text:string}}|{type:'finish';reason:{kind:'stop'}};
@@ -11,11 +13,11 @@ export type DshCoupledEvent={kind:string;status:string;sessionId:string;turn?:nu
   replySha256?:string;replyCharacters?:number;realModelCalls?:number;appraisalStatus?:'applied'|'not-applied';recallCount?:number;sourceRefCount?:number;
   code?:string;elapsedMs?:number;usageSnapshotKnown?:boolean};
 type Selected={id:string;key:string;text:string;hash:string;arrivedAt:number};
-type Prepared={messageId:string;deliveryId:string;generation:number;expiresAt:number;consumed:boolean;cancelled:boolean};
-type PreparedOffer={deliveryId:string;generation:number;expiresAt:number};
+type Prepared={messageId:string;deliveryId:string;generation:number;permissionVersion:number;expiresAt:number;consumed:boolean;cancelled:boolean};
+type PreparedOffer={deliveryId:string;generation:number;permissionVersion:number;expiresAt:number};
 type Turn={number:number;claims:Set<string>;started:boolean;stopping:boolean;ended:boolean;cancelled:boolean;streamStarted:boolean;
   streamComplete:boolean;deliveryId:string|null;reply:string|null;assistantId:string|null;prepared:boolean;acknowledged:boolean;
-  generation:number;scheduleQuery:string|null;humanId:string|null;controller:AbortController;offAbort:()=>void};
+  generation:number;permissionVersion:number;expiresAt:number;scheduleQuery:string|null;humanId:string|null;controller:AbortController;offAbort:()=>void};
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
 const object=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 const safeFailureCodes=new Set(['INFERENCE_TIMEOUT','PROVIDER_NETWORK','PROVIDER_HTTP_STATUS','PROVIDER_CONTENT_TYPE','PROVIDER_RESPONSE_TOO_LARGE',
@@ -44,7 +46,8 @@ export class DshCoupledBridge {
   #pausing:Promise<void>|null=null;#close:Promise<DshBackendClose>|null=null;
   #manualPaused=false;#switching=false;#manualVersion=0;
   #pendingFeedback:{deliveryId:string;outcome:'engaged'|'declined'|'neutral'}|null=null;
-  #usageKnown=true;
+  #usageKnown=true;readonly #window=new CompanionWindowPolicy();#windowVersion=0;#windowChanging=false;
+  #lastAcceptedHumanQuery:string|null=null;#proactiveSuppressed=false;
   constructor(backend:DshCoupledBackend,options:{sessionId:string;provider:string;model:string;clock?:()=>number;
     onEvent?:(event:DshCoupledEvent)=>void;publishPrepared?:(deliveryId:string,attach:(messageId:string)=>boolean,signal:AbortSignal)=>Promise<boolean>;
     cancelNativePrepared?:()=>void;realProvider?:boolean;requireManualResume?:boolean;initialConsumedRequests?:number}){
@@ -55,7 +58,7 @@ export class DshCoupledBridge {
     this.#realProvider=options.realProvider??false;
     this.#manualPaused=options.requireManualResume??false;
     this.#realCalls=options.initialConsumedRequests??0;
-    this.#lastTime=this.#now();this.#offPrepared=backend.onPrepared?.(id=>{void this.#offerPrepared(id).catch(()=>{this.#log('prepared-notification','rejected');void this.pause();});});
+    this.#lastTime=this.#now();this.#offPrepared=backend.onPrepared?.((id,authorization)=>{void this.#offerPrepared(id,authorization).catch(()=>{this.#log('prepared-notification','rejected');void this.pause();});});
     this.#log('ready','paused-unavailable');
   }
   #now():number{const now=this.#clock();if(!Number.isFinite(now)||now<this.#lastTime)fail('DSH_CLOCK_INVALID');this.#lastTime=now;return now;}
@@ -72,21 +75,24 @@ export class DshCoupledBridge {
     if(!Number.isSafeInteger(number)||(number as number)<1)fail('DSH_TURN_INVALID');
     const n=number as number;let turn=this.#turns.get(n);
     if(!turn){if(this.#turns.size>=128)fail('DSH_SESSION_CAPACITY');turn={number:n,claims:new Set(),started:false,stopping:false,ended:false,
-      cancelled:false,streamStarted:false,streamComplete:false,deliveryId:null,reply:null,assistantId:null,prepared:false,acknowledged:false,generation:0,scheduleQuery:null,humanId:null,
+      cancelled:false,streamStarted:false,streamComplete:false,deliveryId:null,reply:null,assistantId:null,prepared:false,acknowledged:false,generation:0,permissionVersion:0,expiresAt:0,scheduleQuery:null,humanId:null,
       controller:new AbortController(),offAbort:()=>{}};this.#turns.set(n,turn);}return turn;
   }
   #invalidatePrepared():void{
-    this.#generation++;this.#waitingPrepared.clear();this.#activePrepared=null;this.#publicationAbort?.abort();
+    this.#generation++;this.#discardPrepared();
+  }
+  #discardPrepared():void {
+    this.#waitingPrepared.clear();this.#activePrepared=null;this.#publicationAbort?.abort();
     for(const prepared of this.#prepared.values())prepared.cancelled=true;
     const active=this.#turns.get(this.#latestTurn);
-    if(active?.prepared&&!active.ended){this.#cancel(active,'human-input-preempted');try{this.#cancelNativePrepared?.();}catch{}}
+    if(active?.prepared&&!active.ended){active.cancelled=true;active.controller.abort();active.offAbort();try{this.#cancelNativePrepared?.();}catch{}}
   }
   inboxInserted(message:unknown):void{
     if(!this.#mounted||!object(message)||!object(message.source))return;
     if(message.source.kind==='user'){
       text(message.id,256);const hash=digest(contentText(message.content)),old=this.#arrivals.get(message.id);
       if(old&&old.hash!==hash)fail('DSH_IDEMPOTENCY_CONFLICT');
-      if(!old){if(this.#arrivals.size>=128)fail('DSH_SESSION_CAPACITY');this.#arrivals.set(message.id,{time:this.#now(),hash});this.#latestHumanId=message.id;
+      if(!old){if(this.#arrivals.size>=128)fail('DSH_SESSION_CAPACITY');this.#arrivals.set(message.id,{time:this.#now(),hash});this.#latestHumanId=message.id;this.#lastAcceptedHumanQuery=null;
         if(this.#publish&&!this.#schedulerStopping){
           const stopping=this.#backend.command('schedule',{recallQuery:null}).then(()=>{},()=>{void this.pause();});this.#schedulerStopping=stopping;
           void stopping.then(()=>{if(this.#schedulerStopping===stopping)this.#schedulerStopping=null;});
@@ -144,10 +150,12 @@ export class DshCoupledBridge {
       const completed=object(data.reason)&&data.reason.kind==='completed';
       if(!completed||turn.cancelled||!turn.streamComplete||!turn.assistantId||!turn.deliveryId){this.#cancel(turn,'native-not-completed');this.#log('turn-end','not-acknowledged',turn.number);return;}
       const generation=turn.generation;
-      try{await this.#backend.command('ack',{deliveryId:turn.deliveryId});if(!this.#mounted||turn.cancelled||generation!==this.#generation)return;
+      try{this.#check(turn);await this.#backend.command('ack',{deliveryId:turn.deliveryId});if(!this.#mounted||turn.cancelled||generation!==this.#generation)return;this.#check(turn);
         turn.acknowledged=true;this.#acks++;this.#log('delivery-ack','native-commit-and-completed',turn.number,{deliveryId:turn.deliveryId});this.#log('turn-end','completed',turn.number);
         if(turn.prepared&&this.#activePrepared&&this.#prepared.get(this.#activePrepared)?.deliveryId===turn.deliveryId)this.#activePrepared=null;
-        if(this.#publish&&!turn.prepared&&turn.scheduleQuery&&turn.humanId===this.#latestHumanId&&!this.#foregroundWaiting()&&this.#now()<this.#leaseExpires){
+        if(!turn.prepared&&turn.humanId===this.#latestHumanId){this.#lastAcceptedHumanQuery=turn.scheduleQuery;
+          if(turn.permissionVersion===this.#windowVersion)this.#proactiveSuppressed=false;}
+        if(!this.#proactiveSuppressed&&turn.permissionVersion===this.#windowVersion&&this.#publish&&!turn.prepared&&turn.scheduleQuery&&turn.humanId===this.#latestHumanId&&!this.#foregroundWaiting()&&this.#now()<this.#proactiveExpiry()){
           await this.#backend.command('schedule',{recallQuery:turn.scheduleQuery});
           if(!this.#mounted||turn.cancelled||generation!==this.#generation)return;
         }
@@ -161,7 +169,7 @@ export class DshCoupledBridge {
     if(signal?.aborted)this.#cancel(turn,'native-aborted');else this.#log('turn-stopping','awaiting-native-end',turn.number);
   }
   #check(turn:Turn,signal?:AbortSignal):void{
-    if(!this.#mounted||turn.cancelled||turn.controller.signal.aborted||signal?.aborted||this.#now()>=this.#leaseExpires)fail('DSH_CANCELLED');
+    if(!this.#mounted||turn.cancelled||turn.controller.signal.aborted||signal?.aborted||this.#now()>=turn.expiresAt||(turn.prepared&&turn.permissionVersion!==this.#windowVersion))fail('DSH_CANCELLED');
   }
   async *stream(options:DshGenerateOptions):AsyncGenerator<DshNativeChunk>{
     if(!this.#mounted||options.sessionId!==this.#sessionId||options.provider!==this.#provider||options.model!==this.#model)fail('DSH_AUTHORITY_MISMATCH');
@@ -184,11 +192,12 @@ export class DshCoupledBridge {
       if(!selected||lastUser.source.kind!=='user'||contentText(lastUser.content)!==selected.text)fail('DSH_SOURCE_MISMATCH');
       if(this.#handled.has(selected.id))fail('DSH_MESSAGE_ALREADY_HANDLED');this.#handled.add(selected.id);
     }else{
-      if(!prepared||prepared.cancelled||prepared.consumed||prepared.generation!==this.#generation||this.#now()>=prepared.expiresAt
+      if(!prepared||prepared.cancelled||prepared.consumed||prepared.generation!==this.#generation||prepared.permissionVersion!==this.#windowVersion||this.#now()>=prepared.expiresAt
         ||lastUser.source.kind!=='companion-prepared-delivery'||contentText(lastUser.content)!==this.preparedNotice(prepared.deliveryId))fail('DSH_UNOWNED_NOTIFICATION');
       prepared.consumed=true;turn.prepared=true;
     }
-    turn.streamStarted=true;turn.generation=this.#generation;
+    turn.streamStarted=true;turn.generation=this.#generation;turn.permissionVersion=this.#windowVersion;
+    if(prepared)turn.expiresAt=prepared.expiresAt;
     const abort=()=>this.#cancel(turn,'native-signal');options.signal.addEventListener('abort',abort,{once:true});
     turn.offAbort=()=>options.signal!.removeEventListener('abort',abort);
     let stage='context';const startedAt=this.#now();
@@ -197,7 +206,7 @@ export class DshCoupledBridge {
       if(human){
         await this.#schedulerStopping;
         if(options.signal.aborted||!this.#mounted||this.#manualPaused||this.#switching||turn.cancelled||turn.controller.signal.aborted)fail('DSH_CANCELLED');
-        this.#leaseExpires=selected!.arrivedAt+30000;turn.humanId=selected!.id;
+        this.#leaseExpires=selected!.arrivedAt+30000;turn.expiresAt=this.#leaseExpires;turn.humanId=selected!.id;
         const ttlMs=Math.floor(this.#leaseExpires-this.#now());if(ttlMs<1)fail('DSH_INPUT_EXPIRED');
         turn.scheduleQuery=this.#publish?selected!.text.slice(0,256):null;
         await this.#backend.command('context',{quiet:false,available:true,ttlMs,recallQuery:null},turn.controller.signal);
@@ -228,18 +237,29 @@ export class DshCoupledBridge {
     finally{if(!turn.streamComplete)this.#cancel(turn,'consumer-interrupted');}
   }
   preparedNotice(deliveryId:string):string{return `Machine notification: companion prepared delivery ${deliveryId}. This is not a human message or feedback.`;}
-  async #offerPrepared(deliveryId:string):Promise<void>{
+  #proactiveExpiry():number {return this.#proactiveSuppressed?0:Math.max(this.#leaseExpires,this.#window.current(this.#now())?.expiresAt??0);}
+  async #offerPrepared(deliveryId:string,authorization?:PreparedAuthorization):Promise<void>{
     text(deliveryId,128);
-    if(!this.#mounted||this.#manualPaused||this.#switching||!this.#publish||this.#foregroundWaiting()||this.#now()>=this.#leaseExpires||this.#preparedDeliveries.has(deliveryId))return;
+    if(!this.#mounted||this.#manualPaused||this.#switching||!this.#publish||this.#foregroundWaiting()||this.#now()>=this.#proactiveExpiry()||this.#preparedDeliveries.has(deliveryId))return;
     if(this.#preparedDeliveries.size>=128)return;this.#preparedDeliveries.add(deliveryId);
-    // Keep the original one-shot result, generation and lease while a native
-    // turn/ACK or publisher is busy. No provider work or lease refresh occurs.
-    this.#waitingPrepared.set(deliveryId,{deliveryId,generation:this.#generation,expiresAt:this.#leaseExpires});
-    await this.#drainPrepared();
+    const generation=this.#generation,permissionVersion=this.#windowVersion;
+    let expiresAt=this.#leaseExpires;
+    if(authorization){
+      const window=this.#window.current(this.#now());
+      if(authorization.permissionId!==null&&authorization.permissionId!==window?.id)return;
+      // Anchor remaining validity to BEFORE this read-only request. Adding a
+      // delayed event's TTL at receipt would extend the core's fixed deadline.
+      const startedAt=this.#now();let checked:PreparedAuthorization;
+      try{checked=await this.#backend.command('prepared-check',{deliveryId});}catch{return;}
+      if(!checked||checked.permissionId!==authorization.permissionId||!Number.isFinite(checked.remainingMs)||checked.remainingMs<=0||checked.remainingMs>30000)return;
+      expiresAt=Math.min(authorization.permissionId===null?this.#leaseExpires:window!.expiresAt,startedAt+Math.floor(checked.remainingMs));
+    }else if(this.#now()>=this.#leaseExpires)return; // Legacy notifications can only use the original short input lease.
+    const offer={deliveryId,generation,permissionVersion,expiresAt};if(!this.#offerValid(offer))return;
+    this.#waitingPrepared.set(deliveryId,offer);await this.#drainPrepared();
   }
   #offerValid(offer:PreparedOffer):boolean{
-    return this.#mounted&&!this.#manualPaused&&!this.#switching&&!this.#foregroundWaiting()&&offer.generation===this.#generation
-      &&this.#now()<offer.expiresAt&&this.#now()<this.#leaseExpires;
+    return this.#mounted&&!this.#manualPaused&&!this.#switching&&!this.#foregroundWaiting()&&offer.generation===this.#generation&&offer.permissionVersion===this.#windowVersion
+      &&this.#now()<offer.expiresAt&&this.#now()<this.#proactiveExpiry();
   }
   #foregroundWaiting():boolean{const now=this.#now();return [...this.#arrivals].some(([id,arrival])=>!this.#handled.has(id)&&now<arrival.time+30000);}
   #nativeSettled():boolean{
@@ -260,7 +280,7 @@ export class DshCoupledBridge {
         try{
           const accepted=await bounded(publication.signal,Math.max(1,Math.ceil(offer.expiresAt-this.#now())),signal=>this.#publish!(offer.deliveryId,messageId=>{
             if(signal.aborted||!this.#offerValid(offer)||!this.#nativeSettled()||this.#prepared.has(messageId))return false;text(messageId,256);
-            this.#prepared.set(messageId,{messageId,deliveryId:offer.deliveryId,generation:offer.generation,expiresAt:offer.expiresAt,consumed:false,cancelled:false});this.#activePrepared=messageId;return true;
+            this.#prepared.set(messageId,{messageId,deliveryId:offer.deliveryId,generation:offer.generation,permissionVersion:offer.permissionVersion,expiresAt:offer.expiresAt,consumed:false,cancelled:false});this.#activePrepared=messageId;return true;
           },signal));
           if(!accepted)for(const item of this.#prepared.values())if(item.deliveryId===offer.deliveryId){item.cancelled=true;if(this.#activePrepared===item.messageId)this.#activePrepared=null;}
           this.#log('prepared-notification',accepted?'machine-followup-queued':'not-queued');
@@ -274,7 +294,7 @@ export class DshCoupledBridge {
     if(turn.cancelled)return;turn.cancelled=true;turn.controller.abort();turn.offAbort();this.#log('cancelled',reason,turn.number);void this.pause();
   }
   pause():Promise<void>{
-    this.#pendingFeedback=null;
+    this.#pendingFeedback=null;this.#window.clear();this.#windowVersion++;this.#lastAcceptedHumanQuery=null;
     this.#generation++;this.#leaseExpires=0;this.#waitingPrepared.clear();this.#activePrepared=null;this.#publicationAbort?.abort();for(const item of this.#prepared.values())item.cancelled=true;
     for(const turn of this.#turns.values())if(!turn.ended){turn.cancelled=true;turn.controller.abort();turn.offAbort();}
     if(this.#pausing)return this.#pausing;
@@ -283,6 +303,36 @@ export class DshCoupledBridge {
       await this.#backend.command('context',{quiet:true,available:false,ttlMs:1,recallQuery:null});
     }).then(()=>{},()=>{});this.#pausing=task;
     void task.then(()=>{if(this.#pausing===task)this.#pausing=null;});return task;
+  }
+  async companionWindow(grantId:string,durationMs:number):Promise<void>{
+    if(durationMs===0){
+      this.#windowVersion++;this.#window.clear();this.#proactiveSuppressed=true;this.#discardPrepared();
+      await this.#backend.command('companion-window',{durationMs:0});return;
+    }
+    if(!this.#publish)fail('PROACTIVE_DISABLED');
+    if(!this.#mounted||this.#manualPaused||this.#switching)fail('DSH_MANAGEMENT_UNAVAILABLE');
+    if(this.#windowChanging||this.#foregroundWaiting()||!this.#nativeSettled())fail('COMPANION_WINDOW_BUSY');
+    if(!this.#lastAcceptedHumanQuery)fail('COMPANION_WINDOW_REQUIRES_HUMAN_ACK');
+    const query=this.#lastAcceptedHumanQuery,generation=this.#generation;
+    const grant=this.#window.grant(grantId,durationMs,'dsh-command',this.#now()),version=++this.#windowVersion;
+    this.#windowChanging=true;this.#discardPrepared();
+    const authorized=()=>{const current=this.#window.current(this.#now());
+      return this.#mounted&&generation===this.#generation&&version===this.#windowVersion&&!this.#manualPaused&&!this.#switching
+        &&current?.id===grant.id&&current.generation===grant.generation&&current.expiresAt===grant.expiresAt;};
+    try{
+      if(!authorized())fail('DSH_MANAGEMENT_UNAVAILABLE');
+      await this.#backend.command('companion-window',{grantId,durationMs,source:'dsh-command'});
+      if(!authorized())fail('DSH_MANAGEMENT_UNAVAILABLE');
+      this.#proactiveSuppressed=false;
+      await this.#backend.command('schedule',{recallQuery:query});
+      if(!authorized())fail('DSH_MANAGEMENT_UNAVAILABLE');
+    }catch(error){
+      // Expiry or a fresh human can race an already-written grant/schedule.
+      // Revoke in pipe order; an aborted host promise is not a backend ACK.
+      if(version===this.#windowVersion){this.#window.clear();this.#proactiveSuppressed=true;this.#discardPrepared();
+        await this.#backend.command('companion-window',{durationMs:0}).catch(()=>{});}
+      throw error;
+    }finally{this.#windowChanging=false;}
   }
   async manualPause():Promise<void>{this.#manualVersion++;this.#manualPaused=true;await this.pause();}
   async manualResume():Promise<void>{
@@ -316,7 +366,7 @@ export class DshCoupledBridge {
   }
   get status(){return {mounted:this.#mounted,sessionId:this.#sessionId,turn:this.#latestTurn,requestCount:this.#requests,
     ackCount:this.#acks,realModelCalls:this.#realCalls,usageSnapshotKnown:this.#usageKnown,manualPaused:this.#manualPaused,switching:this.#switching,sourceCount:this.#selected.size,preparedCount:this.#prepared.size,proactiveEnabled:!!this.#publish,
-    leaseRemainingMs:Math.max(0,this.#leaseExpires-this.#now()),pendingFeedback:this.#pendingFeedback?{...this.#pendingFeedback}:null};}
+    leaseRemainingMs:Math.max(0,this.#leaseExpires-this.#now()),companionWindow:this.#window.status(this.#now()),pendingFeedback:this.#pendingFeedback?{...this.#pendingFeedback}:null};}
   dispose():Promise<DshBackendClose>{
     if(this.#close)return this.#close;this.#mounted=false;this.#offPrepared?.();
     this.#close=(async()=>{await this.pause();await this.#refreshUsage();const result=await this.#backend.close();this.#log('backend-closed',result.graceful?'closed':'partial');return result;})();return this.#close;

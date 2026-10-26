@@ -11,17 +11,17 @@ import { spawn } from 'node:child_process';
 import { DshCoupledBridge } from '../src/dsh-coupled.ts';
 import { CoreError } from '../src/validation.ts';
 import { DshStdioBackend } from '../src/dsh-coupled-backend.ts';
-import type { DshCoupledBackend, DshBackendClose } from '../src/dsh-coupled-backend.ts';
+import type { DshCoupledBackend, DshBackendClose, PreparedAuthorization } from '../src/dsh-coupled-backend.ts';
 import { mountDshCoupled, validateDshConfig } from '../src/dsh-coupled-host.ts';
 import type { DshPluginConfig } from '../src/dsh-coupled-host.ts';
 const tick=()=>new Promise<void>(resolve=>setImmediate(resolve));
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 const closeResult:DshBackendClose={closed:true,graceful:true,exitCode:0,signal:null,forced:false,residualBytes:0,coreStatus:'closed'};
 class FakeBackend implements DshCoupledBackend{
-  sessionId=randomUUID();calls:Array<{command:string;fields:Record<string,unknown>}>=[];callback:((id:string)=>void)|undefined;
+  sessionId=randomUUID();calls:Array<{command:string;fields:Record<string,unknown>}>=[];callback:((id:string,authorization?:PreparedAuthorization)=>void)|undefined;authorizations=new Map<string,PreparedAuthorization>();
   deliveries=new Map<string,{text:string;taken:boolean;acked:boolean}>();closed=0;requests=0;paused=true;
   pending:Promise<void>|undefined;started=deferred<void>();
-  onPrepared(callback:(id:string)=>void){this.callback=callback;return()=>{this.callback=undefined;};}
+  onPrepared(callback:(id:string,authorization?:PreparedAuthorization)=>void){this.callback=callback;return()=>{this.callback=undefined;};}
   async command(command:string,fields:Record<string,unknown>={},signal?:AbortSignal):Promise<any>{
     this.calls.push({command,fields});if(signal?.aborted)throw new Error('aborted');
     if(command==='status')return {paused:this.paused,available:!this.paused,workerResident:false,requests:{total:this.requests}};
@@ -31,13 +31,14 @@ class FakeBackend implements DshCoupledBackend{
       this.requests++;this.started.resolve();if(this.pending)await Promise.race([this.pending,new Promise((_,reject)=>signal?.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}))]);
       const deliveryId=randomUUID();this.deliveries.set(deliveryId,{text:'SYNTHETIC_REPLY',taken:false,acked:false});return {deliveryId,appraisalStatus:'applied'};
     }
+    if(command==='prepared-check')return this.authorizations.get(fields.deliveryId as string);
     if(command==='take'){const delivery=this.deliveries.get(fields.deliveryId as string);assert.ok(delivery&&!delivery.taken);delivery.taken=true;
       return {deliveryId:fields.deliveryId,text:delivery.text,recall:[],sourceRefs:[{id:'synthetic-anchor',revision:1}]};}
     if(command==='ack'){const delivery=this.deliveries.get(fields.deliveryId as string);assert.ok(delivery?.taken&&!delivery.acked);delivery.acked=true;return {};}
     if(command==='feedback-check'){const delivery=this.deliveries.get(fields.deliveryId as string);if(!delivery?.acked)throw new Error('FEEDBACK_REQUIRES_DELIVERED_RECEIPT');return {valid:true};}
     return {};
   }
-  prepared(){const id=randomUUID();this.deliveries.set(id,{text:'PREPARED_SYNTHETIC_REPLY',taken:false,acked:false});this.requests++;this.callback?.(id);return id;}
+  prepared(authorization?:PreparedAuthorization){const id=randomUUID();this.deliveries.set(id,{text:'PREPARED_SYNTHETIC_REPLY',taken:false,acked:false});this.requests++;if(authorization)this.authorizations.set(id,authorization);this.callback?.(id,authorization);return id;}
   async close(){this.closed++;return closeResult;}
 }
 const human=(text='Synthetic violet preference')=>({id:randomUUID(),role:'user',content:[{type:'text',text}],source:{kind:'user',rpcId:randomUUID()}});
@@ -373,7 +374,7 @@ test('official slash controls require exact owned agent, fixed arguments and nev
   const config=await hostConfig(),host=mockHost(config.sessionId),backend=new FakeBackend(),input=new PassThrough(),output=new PassThrough();output.resume();
   const mounted=await mountDshCoupled(host.ctx,config,sdk,{startBackend:async()=>backend,input,output});
   const invoke=(name:string,rawInput='',agent:any=host.agent)=>host.commands.get(`companion-${name}`).handler({agent,rawInput,attachments:[],signal:new AbortController().signal});
-  assert.deepEqual([...host.commands.keys()],['companion-pause','companion-resume','companion-status','companion-switch','companion-feedback','companion-revoke','companion-inspect']);
+  assert.deepEqual([...host.commands.keys()],['companion-pause','companion-resume','companion-status','companion-switch','companion-feedback','companion-revoke','companion-inspect','companion-window']);
   assert.ok([...host.commands.values()].every(def=>def.recordInput===false));
   assert.equal((await invoke('pause','',{})).kind,'error');assert.equal((await invoke('switch','arbitrary')).kind,'error');
   assert.equal((await invoke('pause','extra')).kind,'error');assert.equal(backend.calls.length,0);
@@ -518,3 +519,149 @@ for(const [pipe,event] of [['stdout','close'],['stdout','error'],['stderr','erro
     await assert.rejects(DshStdioBackend.start(config.launcher,{spawn:launch as typeof spawn}),/RESIDENT_LIMIT/);
     const result=await adapter.close();assert.equal(closed,true);assert.equal(kills,1);assert.equal(result.graceful,false);
   });
+
+
+test('window grants only after settled human ACK and uses that human query, never commands',async t=>{
+  const h=fixture(t,{publishPrepared:async()=>false});
+  await assert.rejects(h.bridge.companionWindow('cmd-before',180000));assert.equal(h.backend.calls.length,0);
+  const message=human('SYNTHETIC human recall');await begin(h,message);await collect(h.bridge.stream(h.options([message])));
+  const ack=deferred<void>(),entered=deferred<void>(),original=h.backend.command.bind(h.backend);
+  h.backend.command=async(command,fields,signal)=>{if(command==='ack'){entered.resolve();await ack.promise;}return original(command,fields,signal);};
+  const finishing=finish(h,'SYNTHETIC_REPLY');await entered.promise;
+  await assert.rejects(h.bridge.companionWindow('cmd-during-ack',180000));assert.equal(h.bridge.status.ackCount,0);
+  ack.resolve();await finishing;const submissions=h.backend.calls.filter(c=>c.command==='submit').length;
+  await h.bridge.companionWindow('cmd-ok',180000);const expiry=h.bridge.status.companionWindow.expiresAtMonotonicMs;
+  assert.equal(h.backend.calls.filter(c=>c.command==='submit').length,submissions);
+  assert.equal(h.backend.calls.at(-1)!.command,'schedule');assert.equal(h.backend.calls.at(-1)!.fields.recallQuery,'SYNTHETIC human recall');
+  h.advance(31000);assert.equal(h.bridge.status.leaseRemainingMs,0);assert.equal(h.bridge.status.companionWindow.active,true);
+  await assert.rejects(h.bridge.companionWindow('cmd-new-execute',180000),{code:'COMPANION_WINDOW_ACTIVE'});
+  assert.equal(h.bridge.status.companionWindow.expiresAtMonotonicMs,expiry);
+  await h.bridge.companionWindow('',0);await assert.rejects(h.bridge.companionWindow('cmd-ok',180000),{code:'COMPANION_WINDOW_ID_REUSED'});
+  await h.bridge.companionWindow('cmd-new',180000);await h.bridge.manualPause();await h.bridge.manualResume();
+  assert.equal(h.bridge.status.companionWindow.active,false);
+});
+
+for(const action of ['off','pause','human'] as const)test(`late grant response after ${action} cannot autoarm or revive permission`,async t=>{
+  const h=fixture(t,{publishPrepared:async()=>false}),message=human();await begin(h,message);await collect(h.bridge.stream(h.options([message])));await finish(h,'SYNTHETIC_REPLY');
+  const original=h.backend.command.bind(h.backend),reply=deferred<void>(),entered=deferred<void>();let remoteWindow=false;
+  h.backend.command=async(command,fields,signal)=>{
+    if(command==='companion-window'){remoteWindow=fields?.durationMs!==0;const result=await original(command,fields,signal);
+      if(fields?.durationMs!==0){entered.resolve();await reply.promise;}return result;}return original(command,fields,signal);};
+  const schedules=h.backend.calls.filter(c=>c.command==='schedule').length;
+  const granting=h.bridge.companionWindow('cmd-delayed',180000);const rejected=assert.rejects(granting);await entered.promise;
+  if(action==='off')await h.bridge.companionWindow('',0);
+  if(action==='pause')await h.bridge.manualPause();
+  if(action==='human')h.bridge.inboxInserted(human('new human'));
+  reply.resolve();await rejected;
+  assert.equal(h.bridge.status.companionWindow.active,false);
+  if(action!=='pause')assert.equal(remoteWindow,false);
+  assert.equal(h.backend.calls.filter(c=>c.command==='schedule'&&c.fields.recallQuery!==null).length,schedules-1);
+});
+
+test('window prepared delivery uses core original deadline, despite a longer window and delayed SDK idle',async t=>{
+  let notification:any;const idle=deferred<void>();const h=fixture(t,{publishPrepared:async(id,attach)=>{await idle.promise;
+    notification={id:randomUUID(),role:'user',source:{kind:'companion-prepared-delivery'},content:[{type:'text',text:h.bridge.preparedNotice(id)}]};return attach(notification.id);}});
+  const message=human();await begin(h,message);await collect(h.bridge.stream(h.options([message])));await finish(h,'SYNTHETIC_REPLY');
+  await h.bridge.companionWindow('window-A',180000);h.advance(31000);
+  const prepared=h.backend.prepared({permissionId:'window-A',remainingMs:1000});await tick();
+  h.advance(1001);idle.resolve();await tick();
+  assert.equal(h.bridge.status.companionWindow.active,true);
+  await assert.rejects(begin(h,notification,2),{code:'DSH_UNOWNED_NOTIFICATION'});
+  assert.equal(h.backend.calls.filter(c=>c.command==='take'&&c.fields.deliveryId===prepared).length,0);
+});
+
+test('off plus new grant invalidates old pending publication and delayed ready; fresh human keeps its own 30s deadline',async t=>{
+  const idle=deferred<void>();let attached=0;const h=fixture(t,{publishPrepared:async(_id,attach)=>{await idle.promise;const ok=attach(randomUUID());if(ok)attached++;return ok;}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  await h.bridge.companionWindow('window-A',180000);h.advance(31000);
+  h.backend.prepared({permissionId:'window-A',remainingMs:30000});await tick();
+  await h.bridge.companionWindow('',0);await h.bridge.companionWindow('window-B',180000);
+  h.backend.prepared({permissionId:'window-A',remainingMs:30000});idle.resolve();await tick();assert.equal(attached,0);
+  const fresh=human('SYNTHETIC fresh');await begin(h,fresh,2);await collect(h.bridge.stream(h.options([first,fresh])));
+  assert.equal(h.bridge.status.leaseRemainingMs,30000);h.advance(30001);await finish(h,'SYNTHETIC_REPLY',2);
+  assert.equal(h.backend.calls.filter(c=>c.command==='ack').length,1);
+});
+
+test('official window command is trusted, scoped, disabled by default, and active execute does not renew',async()=>{
+  const config=await hostConfig(),host=mockHost(config.sessionId),backend=new FakeBackend(),output=new PassThrough();output.resume();
+  let bootEnabled:boolean|undefined;const mounted=await mountDshCoupled(host.ctx,config,sdk,{startBackend:async config=>{bootEnabled=config.enableProactive;return backend;},output,input:new PassThrough()});
+  const invoke=(rawInput:string,commandId='cmd-synthetic')=>host.commands.get('companion-window').handler({commandId,agent:host.agent,rawInput,attachments:[],signal:new AbortController().signal});
+  assert.equal(bootEnabled,false);assert.equal((await invoke('60')).kind,'error');assert.equal(backend.calls.length,0);assert.equal(mounted.bridge!.status.manualPaused,false);
+  await mounted.cleanup();
+  const enabled={...await hostConfig(),enableProactive:true},activeHost=mockHost(enabled.sessionId),activeBackend=new FakeBackend(),out=new PassThrough();out.resume();
+  const active=await mountDshCoupled(activeHost.ctx,enabled,sdk,{startBackend:async config=>{assert.equal(config.enableProactive,true);return activeBackend;},output:out,input:new PassThrough()});
+  const command=(rawInput:string,commandId='cmd-native')=>activeHost.commands.get('companion-window').handler({commandId,agent:activeHost.agent,rawInput,attachments:[],signal:new AbortController().signal});
+  assert.equal((await command('60')).kind,'error');assert.equal(active.bridge!.status.manualPaused,false);
+  const h={bridge:active.bridge!,sessionId:enabled.sessionId},message=human();await begin(h,message);
+  await collect(h.bridge.stream({provider:'companion-core',model:'coupled',sessionId:enabled.sessionId,messages:[message],signal:new AbortController().signal}));await finish(h,'SYNTHETIC_REPLY');
+  assert.equal((await command('60')).kind,'success');const expiry=h.bridge.status.companionWindow.expiresAtMonotonicMs;
+  assert.equal((await command('60','cmd-another-execute')).kind,'error');assert.equal(h.bridge.status.companionWindow.expiresAtMonotonicMs,expiry);
+  for(const input of ['0','301','1.5','-1','60 extra'])assert.equal((await command(input)).kind,'error');
+  assert.equal((await command('off')).kind,'success');assert.equal(h.bridge.status.companionWindow.active,false);assert.equal(activeBackend.requests,1);
+  await active.cleanup();
+});
+
+
+test('prepared window output can commit and ACK after observed presence expires without renewing either deadline',async t=>{
+  let notice:any;const h=fixture(t,{publishPrepared:async(id,attach)=>{notice={id:randomUUID(),role:'user',source:{kind:'companion-prepared-delivery'},content:[{type:'text',text:h.bridge.preparedNotice(id)}]};return attach(notice.id);}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  await h.bridge.companionWindow('window',180000);h.advance(31000);const expiry=h.bridge.status.companionWindow.expiresAtMonotonicMs;
+  h.backend.prepared({permissionId:'window',remainingMs:30000});await tick();await begin(h,notice,2);
+  await collect(h.bridge.stream(h.options([first,notice])));await finish(h,'PREPARED_SYNTHETIC_REPLY',2);
+  assert.equal(h.bridge.status.ackCount,2);assert.equal(h.bridge.status.leaseRemainingMs,0);
+  assert.equal(h.bridge.status.companionWindow.expiresAtMonotonicMs,expiry);assert.equal(h.backend.calls.filter(c=>c.command==='submit').length,1);
+});
+
+test('prepared-check response latency cannot add time to the frozen output deadline',async t=>{
+  let published=0;const h=fixture(t,{publishPrepared:async(_id,attach)=>{if(attach(randomUUID()))published++;return true;}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  await h.bridge.companionWindow('window',180000);h.advance(31000);
+  const original=h.backend.command.bind(h.backend),checked=deferred<void>(),release=deferred<void>();
+  h.backend.command=async(command,fields,signal)=>{const result=await original(command,fields,signal);if(command==='prepared-check'){checked.resolve();await release.promise;}return result;};
+  h.backend.prepared({permissionId:'window',remainingMs:1000});await checked.promise;h.advance(1001);release.resolve();await tick();
+  assert.equal(published,0);assert.equal(h.bridge.status.companionWindow.active,true);
+});
+
+test('fresh human cancels active prepared output while retaining only the original explicit window expiry',async t=>{
+  let notice:any;const h=fixture(t,{publishPrepared:async(id,attach)=>{notice={id:randomUUID(),role:'user',source:{kind:'companion-prepared-delivery'},content:[{type:'text',text:h.bridge.preparedNotice(id)}]};return attach(notice.id);}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  await h.bridge.companionWindow('window',180000);h.advance(31000);const expiry=h.bridge.status.companionWindow.expiresAtMonotonicMs;
+  h.backend.prepared({permissionId:'window',remainingMs:30000});await tick();await begin(h,notice,2);await collect(h.bridge.stream(h.options([first,notice])));
+  const fresh=human('SYNTHETIC next human');h.bridge.inboxInserted(fresh);assert.equal(h.bridge.status.companionWindow.expiresAtMonotonicMs,expiry);
+  await finish(h,'PREPARED_SYNTHETIC_REPLY',2,'cancelled');await begin(h,fresh,3);await collect(h.bridge.stream(h.options([first,notice,fresh])));await finish(h,'SYNTHETIC_REPLY',3);
+  assert.equal(h.bridge.status.ackCount,2);assert.equal(h.bridge.status.companionWindow.expiresAtMonotonicMs,expiry);
+});
+
+
+test('new grant invalidates an older observed-permission prepared-check response that was already in flight',async t=>{
+  let published=0;const h=fixture(t,{publishPrepared:async(_id,attach)=>{if(attach(randomUUID()))published++;return true;}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  const original=h.backend.command.bind(h.backend),checked=deferred<void>(),release=deferred<void>();
+  h.backend.command=async(command,fields,signal)=>{const result=await original(command,fields,signal);if(command==='prepared-check'){checked.resolve();await release.promise;}return result;};
+  h.backend.prepared({permissionId:null,remainingMs:30000});await checked.promise;
+  await h.bridge.companionWindow('new-window',180000);release.resolve();await tick();assert.equal(published,0);
+  assert.equal(h.bridge.status.companionWindow.active,true);
+});
+
+
+for(const stage of ['grant','schedule'] as const)test(`original grant expires while ${stage} is awaiting: ordered revoke rejects and cannot authorize late scheduling`,async t=>{
+  const h=fixture(t,{publishPrepared:async()=>false}),first=human();
+  await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  h.advance(31000);assert.equal(h.bridge.status.leaseRemainingMs,0);
+  const original=h.backend.command.bind(h.backend),entered=deferred<void>(),release=deferred<void>();let remoteWindow=false;
+  h.backend.command=async(command,fields,signal)=>{
+    if(stage==='grant'&&command==='companion-window'&&fields?.durationMs!==0){entered.resolve();await release.promise;}
+    if(command==='companion-window')remoteWindow=fields?.durationMs!==0;
+    const result=await original(command,fields,signal);
+    if(stage==='schedule'&&command==='schedule'&&fields?.recallQuery!==null){entered.resolve();await release.promise;}
+    return result;
+  };
+  const before=h.backend.calls.length,granting=h.bridge.companionWindow(`expired-${stage}`,1000);
+  const rejected=assert.rejects(granting,{code:'DSH_MANAGEMENT_UNAVAILABLE'});await entered.promise;
+  h.advance(2000);release.resolve();await rejected;
+  const calls=h.backend.calls.slice(before);
+  assert.equal(calls.filter(call=>call.command==='schedule'&&call.fields.recallQuery!==null).length,stage==='grant'?0:1);
+  assert.equal(calls.at(-1)!.command,'companion-window');assert.equal(calls.at(-1)!.fields.durationMs,0);
+  assert.equal(remoteWindow,false);assert.equal(h.bridge.status.companionWindow.active,false);
+  assert.equal(calls.filter(call=>call.command==='submit').length,0);
+});

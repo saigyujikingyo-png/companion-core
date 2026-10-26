@@ -26,7 +26,8 @@ const safeCodes=new Set(['INVALID_INPUT','INVALID_WIRE_SHAPE','INVALID_JSON','BO
   'DURABLE_CONFIG','DURABLE_UNSUPPORTED','DURABLE_KEY_INVALID','DURABLE_INCOMPLETE','DURABLE_CORRUPT','DURABLE_LOCKED',
   'DURABLE_IDENTITY_MISMATCH','DURABLE_BUDGET_MISMATCH','DURABLE_LIMIT','DURABLE_WRITE_FAILED','DURABLE_UNAVAILABLE',
   'DURABLE_CLOCK_ROLLBACK','DURABLE_REQUEST_REQUIRED','DURABLE_DELIVERY_CONFLICT','DURABLE_MEMORY_ONLY',
-  'UNSUPPORTED_SCHEMA','UNKNOWN_DATABASE','SCHEMA_MISMATCH','FOREGROUND_DRAIN_REFUSED']);
+  'UNSUPPORTED_SCHEMA','UNKNOWN_DATABASE','SCHEMA_MISMATCH','FOREGROUND_DRAIN_REFUSED','PROACTIVE_DISABLED','INVALID_COMPANION_WINDOW','COMPANION_WINDOW_ID_REUSED',
+  'COMPANION_WINDOW_CAPACITY','COMPANION_WINDOW_BUSY','COMPANION_WINDOW_ACTIVE','COMPANION_WINDOW_REQUIRES_HUMAN_ACK']);
 function safeError(error:unknown):string {
   if(error instanceof CoreError&&safeCodes.has(error.code))return error.code;
   if(error instanceof Error&&error.name==='AbortError')return 'ABORTED';
@@ -110,7 +111,7 @@ class StdioHost {
       }
       if(request.command==='boot')fail('ALREADY_BOOTED');
       // Stop/pause/status remain available when a bounded command ledger is full.
-      if(!['stop','pause','status','revoke','purge'].includes(request.command)){
+      if(!['stop','pause','status','revoke','purge'].includes(request.command)&&!(request.command==='companion-window'&&request.durationMs===0)){
         if(this.#seen.has(id))fail('COMMAND_ID_REUSED');if(this.#seen.size>=MAX_COMMANDS)fail('COMMAND_CAPACITY');this.#seen.add(id);
       }
       const result=this.#dispatch(request);
@@ -123,8 +124,9 @@ class StdioHost {
     return fields(request,['id','command',...required],['version',...optional]);
   }
   #boot(request:Record<string,unknown>):void{
-    this.#shape(request,[],['apiKey','model','maxCalls','neuralConfig','persistence']);
+    this.#shape(request,[],['apiKey','model','maxCalls','neuralConfig','persistence','enableProactive']);
     const maxCalls=request.maxCalls??0,model=request.model??'deepseek-flash';
+    if(request.enableProactive!==undefined&&typeof request.enableProactive!=='boolean')fail('INVALID_INPUT');
     if(!Number.isSafeInteger(maxCalls)||(maxCalls as number)<0||(maxCalls as number)>32)fail('INVALID_INPUT');
     text(model,128);if(!/^[a-zA-Z0-9._-]+$/.test(model))fail('INVALID_INPUT');
     if(request.apiKey!==undefined){text(request.apiKey,4096);if(/[\r\n]/.test(request.apiKey))fail('INVALID_INPUT');}
@@ -156,13 +158,13 @@ class StdioHost {
         ({apiKey:request.apiKey as string,model},resources);
     this.#store??=new MemoryStore(':memory:',{clock:{wall:this.#options.wallClock??(()=>Date.now()),monotonic:this.#clock}});
     const scope=this.#store.ensureScope({tenantId:'trusted-stdio-local',subjectId:'local-user',personaId:'companion',relationshipId:'local-session'});
-    this.#session=new CoupledSession(this.#store,scope,{provider,resources,clock:this.#clock,...(this.#durable?{durable:this.#durable}:{})});this.#booted=true;
+    this.#session=new CoupledSession(this.#store,scope,{provider,resources,clock:this.#clock,enableProactive:request.enableProactive===true,...(this.#durable?{durable:this.#durable}:{})});this.#booted=true;
   }
   #status(){
     const status=this.#session?.status,usage=this.#resources?.budget.usage;
     return {booted:this.#booted,sessionId:status?.sessionId??null,backend:status?.backend??'baseline',paused:status?.paused??true,
       invalidated:status?.invalidated??false,available:this.#hostContext.available&&this.#clock()<this.#hostContext.expiresAt,
-      quiet:this.#hostContext.quiet,maxCalls:this.#maxCalls,requestsEnabled:this.#maxCalls>0,
+      quiet:this.#hostContext.quiet,companionWindow:status?.companionWindow??{active:false,source:null,remainingMs:0},companionWindowEnabled:status?.companionWindowEnabled??false,maxCalls:this.#maxCalls,requestsEnabled:this.#maxCalls>0,
       requests:{total:usage?.total??0,hour:usage?.hour??0,day:usage?.day??0},submitting:this.#submitting!==null,
       managementBusy:this.#management!==null,workerResident:this.#worker!==null,workerStarts:this.#workerStarts,
       rawCallsActive:status?.rawActive??false,rawTransportActive:status?.transportActive??false,
@@ -179,7 +181,7 @@ class StdioHost {
     const session=this.#session!;
     switch(request.command){
       case 'status':this.#shape(request,[]);return this.#status();
-      case 'pause':this.#shape(request,[]);this.#controlVersion++;this.#foregroundWait?.abort();session.pause();return this.#status();
+      case 'pause':this.#shape(request,[]);this.#controlVersion++;this.#foregroundWait?.abort();session.pause();this.#scheduleQuery=null;return this.#status();
       case 'resume':this.#shape(request,['sessionId']);this.#requireSession(request);if(this.#management)fail('MANAGEMENT_IN_PROGRESS');session.resume();return this.#status();
       case 'context':{
         this.#shape(request,['sessionId','quiet','available','ttlMs'],['recallQuery']);this.#requireSession(request);
@@ -191,11 +193,7 @@ class StdioHost {
         this.#hostContext={quiet:context.quiet,available:context.available,expiresAt:this.#clock()+context.ttlMs};session.setHostContext(context);
         if(request.recallQuery!==undefined&&request.recallQuery!==this.#scheduleQuery){
           this.#scheduleQuery=request.recallQuery as string|null;session.stopScheduler();
-          if(this.#scheduleQuery!==null)session.startScheduler({recallQuery:this.#scheduleQuery,
-            refreshContext:()=>({quiet:this.#hostContext.quiet,available:this.#hostContext.available&&this.#clock()<this.#hostContext.expiresAt,
-              ttlMs:Math.max(1,Math.min(30000,Math.floor(this.#hostContext.expiresAt-this.#clock())))}),
-            onReady:result=>{if(!this.#stopping)this.#emit({version:1,event:'delivery-ready',sessionId:result.sessionId,deliveryId:result.deliveryId});},
-            onError:code=>{if(!this.#stopping)this.#emit({version:1,event:'scheduler-error',code:safeCodes.has(code)?code:'INTERNAL_ERROR'});}});
+          if(this.#scheduleQuery!==null)this.#startSchedule(this.#scheduleQuery);
         }
         return this.#status();
       }
@@ -205,16 +203,21 @@ class StdioHost {
         text(request.recallQuery,256);
         if(this.#management||this.#submitting)fail('MANAGEMENT_IN_PROGRESS');
         session.stopScheduler();this.#scheduleQuery=null;
-        if(session.status.paused||session.status.invalidated||this.#hostContext.quiet||!this.#hostContext.available
-          ||this.#clock()>=this.#hostContext.expiresAt)return {scheduled:false};
-        // Scheduling owns no presence grant: retain the existing absolute expiry.
-        this.#scheduleQuery=request.recallQuery;
-        session.startScheduler({recallQuery:this.#scheduleQuery,
-          refreshContext:()=>({quiet:this.#hostContext.quiet,available:this.#hostContext.available&&this.#clock()<this.#hostContext.expiresAt,
-            ttlMs:Math.max(1,Math.min(30000,Math.floor(this.#hostContext.expiresAt-this.#clock())))}),
-          onReady:result=>{if(!this.#stopping)this.#emit({version:1,event:'delivery-ready',sessionId:result.sessionId,deliveryId:result.deliveryId});},
-          onError:code=>{if(!this.#stopping)this.#emit({version:1,event:'scheduler-error',code:safeCodes.has(code)?code:'INTERNAL_ERROR'});}});
+        if(!session.status.proactiveAllowed||session.status.paused||session.status.invalidated||this.#hostContext.quiet
+          ||(!session.status.companionWindow.active&&(!this.#hostContext.available||this.#clock()>=this.#hostContext.expiresAt)))return {scheduled:false};
+        // A window may schedule only the last successfully acknowledged human.
+        const query=session.status.companionWindow.active?session.acceptedHumanQuery:request.recallQuery;
+        if(!query)return {scheduled:false};this.#startSchedule(query);
         return {scheduled:true};
+      }
+      case 'companion-window':{
+        this.#shape(request,['sessionId','durationMs'],['grantId','source']);this.#requireSession(request);
+        if(request.durationMs===0){session.clearCompanionWindow();this.#scheduleQuery=null;return this.#status();}
+        if(this.#management||this.#submitting)fail('COMPANION_WINDOW_BUSY');
+        session.grantCompanionWindow(request.grantId as string,request.durationMs as number,request.source as 'trusted-stdio'|'dsh-command');
+        // Grant itself never calls a model. Explicit schedule remains separate,
+        // enabling the native host to install its own fixed authorization first.
+        this.#scheduleQuery=null;return this.#status();
       }
       case 'submit':{
         this.#shape(request,['sessionId','messageId','selectedText'],['recallQuery','feedback']);this.#requireSession(request);
@@ -231,6 +234,7 @@ class StdioHost {
         return operation.then(result=>({sessionId:result.sessionId,requestId:result.requestId,deliveryId:result.deliveryId,
           status:result.status,appraisalStatus:result.appraisalStatus}));
       }
+      case 'prepared-check':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.preparedAuthorization(request.deliveryId);
       case 'take':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.takeDelivery(request.deliveryId);
       case 'ack':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.acknowledgeDelivery(request.deliveryId);
       case 'feedback-check':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);session.validateFeedback(request.deliveryId);return {valid:true};
@@ -256,6 +260,15 @@ class StdioHost {
       case 'stop':this.#shape(request,[]);return this.#stop('parent-stop',request.id as string);
       default:fail('UNKNOWN_COMMAND');
     }
+  }
+  #startSchedule(query:string):void {
+    const session=this.#session!;this.#scheduleQuery=query;
+    session.startScheduler({recallQuery:query,
+      refreshContext:()=>({quiet:this.#hostContext.quiet,available:this.#hostContext.available&&this.#clock()<this.#hostContext.expiresAt,
+        ttlMs:Math.max(1,Math.min(30000,Math.floor(this.#hostContext.expiresAt-this.#clock())))}),
+      onReady:result=>{if(!this.#stopping)this.#emit({version:1,event:'delivery-ready',sessionId:result.sessionId,deliveryId:result.deliveryId,
+        authorization:session.preparedAuthorization(result.deliveryId)});},
+      onError:code=>{if(!this.#stopping)this.#emit({version:1,event:'scheduler-error',code:safeCodes.has(code)?code:'INTERNAL_ERROR'});}});
   }
   async #submitWhenIdle(input:UserInteraction){
     const session=this.#session!,version=this.#controlVersion,deadline=Math.min(this.#hostContext.expiresAt,this.#clock()+30000);

@@ -7,12 +7,13 @@ import { CoreError, fail, text } from './validation.ts';
 
 export type DshBackendConfig={mode:'resident'|'synthetic';pythonPath?:string;scriptPath?:string;corePath:string;nodePath:string;
   runtimeRoot:string;maxCalls:number;allowExistingDpapi?:boolean;neuralRuntime?:string;credentialRoot?:string;
-  persistence?:{directory:string;identity:string}};
+  persistence?:{directory:string;identity:string};enableProactive?:boolean};
 export type DshBackendClose={closed:true;graceful:boolean;exitCode:number|null;signal:string|null;forced:boolean;residualBytes:number;coreStatus:string|null};
+export type PreparedAuthorization={permissionId:string|null;remainingMs:number};
 export interface DshCoupledBackend {
   readonly sessionId:string;
   command(command:string,fields?:Record<string,unknown>,signal?:AbortSignal):Promise<any>;
-  onPrepared?(callback:(deliveryId:string)=>void):()=>void;
+  onPrepared?(callback:(deliveryId:string,authorization?:PreparedAuthorization)=>void):()=>void;
   close():Promise<DshBackendClose>;
 }
 type Pending={resolve:(value:unknown)=>void;reject:(error:unknown)=>void;timer:ReturnType<typeof setTimeout>;
@@ -37,7 +38,7 @@ export class DshStdioBackend implements DshCoupledBackend {
   #sessionId='';#buffer=Buffer.alloc(0);#stderrBytes=0;#pending=new Map<string,Pending>();#writes=0;
   #closed=false;#closing=false;#fatal:CoreError|null=null;#forced=false;#exitCode:number|null=null;#exitSignal:string|null=null;
   #coreStatus:string|null=null;#coreStopped=false;#closePromise:Promise<DshBackendClose>|null=null;
-  #prepared=new Set<(deliveryId:string)=>void>();
+  #prepared=new Set<(deliveryId:string,authorization?:PreparedAuthorization)=>void>();
   #boot:Promise<void>;#bootResolve!:()=>void;#bootReject!:(error:unknown)=>void;#bootTimer:ReturnType<typeof setTimeout>;
   #closedPromise:Promise<void>;#closedResolve!:()=>void;
   private constructor(child:ChildProcessWithoutNullStreams,budget:number,persistentIdentity?:string){
@@ -65,10 +66,11 @@ export class DshStdioBackend implements DshCoupledBackend {
     });
   }
   get sessionId():string{return this.#sessionId;}
-  onPrepared(callback:(deliveryId:string)=>void):()=>void{this.#prepared.add(callback);return()=>{this.#prepared.delete(callback);};}
+  onPrepared(callback:(deliveryId:string,authorization?:PreparedAuthorization)=>void):()=>void{this.#prepared.add(callback);return()=>{this.#prepared.delete(callback);};}
   static async start(config:DshBackendConfig,dependencies:{spawn?:typeof spawn}={}):Promise<DshStdioBackend>{
     if(!config||!['resident','synthetic'].includes(config.mode)||!Number.isSafeInteger(config.maxCalls)||config.maxCalls<0||config.maxCalls>32)fail('DSH_BACKEND_CONFIG');
     for(const path of [config.corePath,config.nodePath,config.runtimeRoot]){text(path,4096);if(!isAbsolute(path))fail('DSH_BACKEND_CONFIG');}
+    if(config.enableProactive!==undefined&&typeof config.enableProactive!=='boolean')fail('DSH_BACKEND_CONFIG');
     if(config.neuralRuntime!==undefined&&!isAbsolute(config.neuralRuntime))fail('DSH_BACKEND_CONFIG');
     if(config.persistence){
       if(config.mode!=='resident'||!isAbsolute(config.persistence.directory))fail('DSH_BACKEND_CONFIG');
@@ -87,6 +89,7 @@ export class DshStdioBackend implements DshCoupledBackend {
       if(config.maxCalls>0&&config.allowExistingDpapi!==true)fail('DSH_BACKEND_CREDENTIAL_FLAG_REQUIRED');
       executable=config.pythonPath;args=[config.scriptPath,'--core',config.corePath,'--node',config.nodePath,
         '--runtime-root',config.runtimeRoot,'--max-calls',String(config.maxCalls)];
+      if(config.enableProactive===true)args.push('--enable-proactive');
       if(config.maxCalls>0)args.push('--allow-existing-dpapi');if(config.neuralRuntime)args.push('--neural-runtime',config.neuralRuntime);
       if(config.credentialRoot!==undefined)args.push('--credential-root',config.credentialRoot);
       if(config.persistence)args.push('--memory-directory',config.persistence.directory,'--memory-identity',config.persistence.identity);
@@ -97,7 +100,7 @@ export class DshStdioBackend implements DshCoupledBackend {
       env:Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.has(key.toUpperCase())))});}
     catch(error){DshStdioBackend.#resident=false;throw new CoreError('DSH_BACKEND_PROCESS_ERROR');}
     const backend=new DshStdioBackend(child,config.maxCalls,config.persistence?.identity);
-    if(config.mode==='synthetic')backend.#write({id:'host-boot',command:'boot',maxCalls:config.maxCalls,apiKey:'synthetic-fixture-not-a-credential'});
+    if(config.mode==='synthetic')backend.#write({id:'host-boot',command:'boot',maxCalls:config.maxCalls,enableProactive:config.enableProactive===true,apiKey:'synthetic-fixture-not-a-credential'});
     await backend.#boot;
     if(backend.#closed||backend.#fatal){await backend.#closedPromise;throw backend.#fatal??new CoreError('DSH_BACKEND_CLOSED');}
     return backend;
@@ -147,7 +150,9 @@ export class DshStdioBackend implements DshCoupledBackend {
         }
         if(frame.event==='delivery-ready'){
           if(frame.sessionId!==this.#sessionId||typeof frame.deliveryId!=='string')fail('DSH_BACKEND_PROTOCOL');
-          for(const callback of this.#prepared)try{callback(frame.deliveryId);}catch{/* isolated native consumer */}continue;
+          if(frame.authorization!==undefined&&(!frame.authorization||!(frame.authorization.permissionId===null||typeof frame.authorization.permissionId==='string')
+              ||!Number.isFinite(frame.authorization.remainingMs)||frame.authorization.remainingMs<0||frame.authorization.remainingMs>30000))fail('DSH_BACKEND_PROTOCOL');
+          for(const callback of this.#prepared)try{callback(frame.deliveryId,frame.authorization);}catch{/* isolated native consumer */}continue;
         }
         if(frame.event==='scheduler-error')continue;
         if(typeof frame.id!=='string'||!this.#pending.has(frame.id)||typeof frame.ok!=='boolean')fail('DSH_BACKEND_PROTOCOL');

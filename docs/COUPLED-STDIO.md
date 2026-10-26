@@ -17,6 +17,8 @@ The first complete line must be a boot command. Each input line has an `id` of a
 
 Positive-budget boot requires an in-memory `apiKey` supplied only in that first stdin line by an explicitly authorized trusted launcher; optional `model` defaults to `deepseek-flash`. The endpoint is fixed to the official DeepSeek chat/completions endpoint. The key is never echoed or read from environment/files by this entrypoint. The process total is `maxCalls`, rolling hourly cap is `min(8,maxCalls)`, and rolling daily cap is `maxCalls`. HTTP attempts are charged by the existing provider immediately before fetch, without retries/refunds. A new authorized process is required for any later budget; this entrypoint never replenishes its own allowance.
 
+Optional boot `enableProactive:true` enables the new [finite companion-window command](PRESENCE-WINDOW.md). It defaults false and cannot be enabled by later commands. `companionWindowEnabled` reports this feature flag; the older trusted `context`/`schedule` interfaces remain compatible. The flag creates no timer, resume, presence or provider request by itself.
+
 ## Commands
 
 The boot response returns `sessionId`. Except `status`, `pause` and `stop`, every subsequent command below includes that exact `sessionId`. Old boot/session IDs cannot address a new process.
@@ -27,7 +29,9 @@ The boot response returns `sessionId`. Except `status`, `pause` and `stop`, ever
 | `pause` | none | Immediately cancels local output, including while submit/switch is awaiting a provider |
 | `resume` | `sessionId` | Explicitly resumes; does not grant availability or auto-ACK anything |
 | `context` | `sessionId`, `quiet`, `available`, `ttlMs` | Trusted parent availability lease, `1..30000` ms |
-| `schedule` | `sessionId`, `recallQuery:string|null` | Installs scheduling using existing absolute lease only, or cancels old scheduling; no presence grant |
+| `schedule` | `sessionId`, `recallQuery:string|null` | Installs scheduling using existing observed lease or explicit window, or cancels old scheduling; no presence grant; active-window query comes only from last human ACK |
+| `companion-window` | `sessionId`, `durationMs`; grants also require `grantId`, `source` | Explicit 1..300-second grant in whole seconds, or `durationMs:0` to revoke; requires enabled feature and settled human ACK, never resumes |
+| `prepared-check` | `sessionId`, `deliveryId` | Read-only original output permission ID and remaining duration; no text, taking, ACK or model request |
 | `submit` | `sessionId`, `messageId`, `selectedText`; optional `recallQuery`, `feedback` | One native user message; returns only delivery/request metadata and appraisal status |
 | `take` | `sessionId`, `deliveryId` | One-shot local payload consumption; this is the only command that returns response text and recall statements |
 | `ack` | `sessionId`, `deliveryId` | Parent confirms actual delivery after a successful `take`; ACK is not engagement |
@@ -46,11 +50,13 @@ Before its first core submission, a foreground request stops background scheduli
 
 ## Optional proactive scheduling
 
+Window authorization has an independent monotonic expiry and never relabels `available`. Its contract, active-window refusal, command identity limits, `off` behavior and safe metadata are in [PRESENCE-WINDOW](PRESENCE-WINDOW.md). `delivery-ready` now includes `authorization:{permissionId,remainingMs}` for conservative native deadline checks. Resume, model output and ACK cannot renew a grant.
+
 `context` may additionally contain `recallQuery:"..."` to enable the existing one-shot scheduler, or `recallQuery:null` to stop it. Omitting the field preserves the current scheduler setting. The parent must derive `available` from actual current host/user context; a resident process alone is not proof of availability.
 
-The native DSH path always disables scheduling for foreground context. After the latest human turn's native ACK, it sends `schedule` separately; that command neither calls `setHostContext` nor replaces the recorded expiry. Paused/invalid/expired contexts return `scheduled:false`. A fresh human arrival sends `schedule` with null before admission, cancelling old background ownership without releasing its raw permits.
+The native DSH path always disables scheduling for foreground context. After the latest human turn's native ACK, it sends `schedule` separately; that command neither calls `setHostContext` nor replaces the recorded expiry. Paused/invalid contexts, explicit suppression, or expiry of both observed and explicit authority return `scheduled:false`. An explicit window cannot lengthen foreground admission or its output deadline. A fresh human arrival sends `schedule` with null before admission, cancelling old background ownership without releasing its raw permits.
 
-The scheduler's refresh callback only reads the parent's still-valid lease and remaining duration. It does not renew that lease internally. Expired availability prevents proactive work until a new explicit context command arrives. A proactive completion emits only `{version:1,event:'delivery-ready',sessionId,deliveryId}`. The parent must explicitly take the payload and separately ACK actual delivery. There is no automatic local display, social delivery, reward or positive feedback.
+The scheduler's refresh callback reads the remaining observed-presence and explicit-window authority without renewing either. Proactive work is blocked when neither authority remains valid, or while paused, quiet or explicitly suppressed; observed availability expiry alone does not revoke a still-valid explicit window. A proactive completion emits `{version:1,event:'delivery-ready',sessionId,deliveryId,authorization:{permissionId,remainingMs}}`. The parent must explicitly take the payload and separately ACK actual delivery. There is no automatic local display, social delivery, reward or positive feedback.
 
 ## Optional CPU worker ownership
 

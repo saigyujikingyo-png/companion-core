@@ -15,7 +15,7 @@ const code = (c:string) => (error:unknown) => error instanceof CoreError && erro
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 function deferred<T>() { let resolve!:(value:T)=>void; const promise = new Promise<T>(r=>resolve=r); return {promise,resolve}; }
 function fixture(t:TestContext, run:(request:InteractionRequest)=>Promise<InteractionResponse> = async()=>neutral,
-  options:{backend?:'baseline'|'no-state';maxEntries?:number} = {}) {
+  options:{backend?:'baseline'|'no-state';maxEntries?:number;enableProactive?:boolean} = {}) {
   const clock = {now:0}; const store = new MemoryStore(':memory:',{clock:{wall:()=>1_000_000+Math.floor(clock.now),monotonic:()=>clock.now}});
   t.after(()=>store.close());
   const scope = store.ensureScope({tenantId:'synthetic',subjectId:'test-user',personaId:'test',relationshipId:'test'});
@@ -245,4 +245,88 @@ test('HTTP candidate schema matches validation and exposes only safe rejection s
   await assert.rejects(provider.interact({...request,signal:new AbortController().signal}),code('PROVIDER_RESPONSE_INVALID'));
   assert.deepEqual(diagnostics,[{stage:'content',code:'TTL_REQUIRED'}]);await tick();
   assert.equal(JSON.stringify(diagnostics).includes('private-looking'),false);
+});
+
+
+test('deterministic real BackgroundState crossing and explicit window are independent from 30s observed presence',async t=>{
+  const f=fixture(t,async()=>({...positive,appraisal:{...positive.appraisal,confidence:0.4}}),{enableProactive:true});f.ready();
+  for(let i=0;i<5;i++){
+    f.clock.now=i*20000;f.session.setHostContext({quiet:false,available:true,ttlMs:30000});
+    const result=await f.send(`natural-${i}`,'synthetic topic friend');f.ack(result.deliveryId);
+  }
+  const before=f.session.background(),crossing=before.nextWakeAt!;
+  assert.ok(crossing>110000,'unchanged dynamics cross after the observed 80s + 30s lease');
+  const entries=f.session.status.entries;
+  f.session.grantCompanionWindow('trusted-window',180000,'trusted-stdio');
+  assert.deepEqual(f.session.background().latent,before.latent);assert.deepEqual(f.session.background().targets,before.targets);assert.equal(f.session.background().ledgerSize,before.ledgerSize);
+  assert.equal(f.session.status.entries,entries);assert.equal(f.requests.length,5);
+  f.clock.now=110001;const withoutPresence=f.session.background();
+  assert.equal(withoutPresence.context.available,false);assert.equal(withoutPresence.context.proactiveAllowed,true);
+  assert.equal(withoutPresence.context.quiet,false);assert.equal(f.session.considerShadow(),null);
+  f.clock.now=crossing+1;const ready=deferred<any>();
+  f.session.startScheduler({recallQuery:'/companion-window must never be recall',refreshContext:()=>({quiet:false,available:false,ttlMs:1}),onReady:ready.resolve,onError:code=>ready.resolve({error:code})});
+  const hold=setTimeout(()=>ready.resolve(null),1000);const result=await ready.promise;clearTimeout(hold);assert.ok(result);assert.equal(result.error,undefined);
+  const delivery=f.session.takeDelivery(result.deliveryId);assert.equal(delivery.kind,'proactive');
+  assert.equal(delivery.expiresAtMonotonicMs,f.clock.now+30000);assert.equal(f.requests.length,6);
+  assert.equal(f.requests[5]!.selectedText,null);assert.ok(f.requests[5]!.recalled.some(x=>x.statement==='synthetic topic friend'));
+  assert.equal(f.session.status.companionWindow.expiresAtMonotonicMs,260000);
+  f.clock.now=260000;assert.equal(f.session.status.companionWindow.active,false);
+  await assert.rejects(f.session.considerProactive('synthetic'),code('HOST_CONTEXT_BLOCKED'));
+});
+
+test('window needs explicit enable and latest actual human ACK; replay and active renew cannot extend',async t=>{
+  const disabled=fixture(t);disabled.ready();assert.throws(()=>disabled.session.grantCompanionWindow('no',180000,'trusted-stdio'),code('PROACTIVE_DISABLED'));
+  const f=fixture(t,async()=>positive,{enableProactive:true});f.ready();
+  assert.throws(()=>f.session.grantCompanionWindow('early',180000,'trusted-stdio'),code('COMPANION_WINDOW_REQUIRES_HUMAN_ACK'));
+  const result=await f.send('anchor');assert.throws(()=>f.session.grantCompanionWindow('before-ack',180000,'trusted-stdio'),code('COMPANION_WINDOW_REQUIRES_HUMAN_ACK'));
+  f.ack(result.deliveryId);f.session.grantCompanionWindow('one',1000,'trusted-stdio');const original=f.session.status.companionWindow;
+  f.clock.now=500;assert.throws(()=>f.session.grantCompanionWindow('two',300000,'trusted-stdio'),code('COMPANION_WINDOW_ACTIVE'));
+  assert.throws(()=>f.session.grantCompanionWindow('one',300000,'trusted-stdio'),code('COMPANION_WINDOW_ID_REUSED'));
+  assert.equal(f.session.status.companionWindow.expiresAtMonotonicMs,original.expiresAtMonotonicMs);
+  f.clock.now=1000;assert.throws(()=>f.session.grantCompanionWindow('one',300000,'trusted-stdio'),code('COMPANION_WINDOW_ID_REUSED'));
+  f.session.grantCompanionWindow('two',300000,'trusted-stdio');f.session.pause();f.session.resume();assert.equal(f.session.status.companionWindow.active,false);
+});
+
+for(const action of ['off','pause','switch','quiet','reset','revoke'] as const)test(`window ${action} destroys permission and prepared output`,async t=>{
+  const f=fixture(t,async()=>positive,{enableProactive:true});f.ready();let last!:Awaited<ReturnType<typeof f.send>>;
+  for(let i=0;i<3;i++){last=await f.send(`w-${i}`,'synthetic topic friend');f.ack(last.deliveryId);}
+  f.session.grantCompanionWindow('one',300000,'trusted-stdio');f.clock.now=f.session.background().nextWakeAt!+1;
+  const prepared=await f.session.considerProactive('topic');assert.ok(prepared);
+  if(action==='off')f.session.clearCompanionWindow();
+  if(action==='pause')f.session.pause();
+  if(action==='switch')await f.session.switchBackend('baseline');
+  if(action==='quiet')f.session.setHostContext({quiet:true,available:true,ttlMs:30000});
+  if(action==='reset')f.session.reset();
+  if(action==='revoke')f.session.revoke(f.session.status.lastSourceRef!);
+  assert.equal(f.session.status.companionWindow.active,false);assert.throws(()=>f.session.takeDelivery(prepared.deliveryId));
+});
+
+test('off preserves foreground appraisal and receipt, and old ACK cannot rearm; next fresh ACK may',async t=>{
+  const pending=deferred<InteractionResponse>();let hold=false;
+  const f=fixture(t,async()=>hold?pending.promise:positive,{enableProactive:true});f.ready();const anchor=await f.send('anchor');f.ack(anchor.deliveryId);
+  f.session.grantCompanionWindow('one',180000,'trusted-stdio');hold=true;const human=f.send('fresh');await tick();
+  assert.throws(()=>f.session.grantCompanionWindow('busy',180000,'trusted-stdio'),code('COMPANION_WINDOW_BUSY'));
+  f.session.clearCompanionWindow();pending.resolve(positive);const result=await human;assert.equal(result.appraisalStatus,'applied');f.ack(result.deliveryId);
+  assert.equal(f.session.status.proactiveAllowed,false);assert.equal(f.session.status.paused,false);
+  hold=false;const next=await f.send('next');f.ack(next.deliveryId);assert.equal(f.session.status.proactiveAllowed,true);
+});
+
+test('window cannot extend a foreground original deadline',async t=>{
+  const delayed=deferred<InteractionResponse>();let hold=false;
+  const f=fixture(t,async()=>hold?delayed.promise:positive,{enableProactive:true});f.ready();
+  for(let i=0;i<3;i++){const result=await f.send(`a-${i}`);f.ack(result.deliveryId);}
+  f.session.setHostContext({quiet:false,available:true,ttlMs:30000});f.session.grantCompanionWindow('one',300000,'trusted-stdio');
+  f.clock.now=29000;hold=true;const human=f.send('late-human');await tick();f.clock.now=30001;delayed.resolve(positive);await assert.rejects(human);
+  assert.equal(f.session.status.companionWindow.active,true);assert.equal(f.session.background().context.available,false);
+});
+
+
+for(const bound of ['operation-30s','window-1s'] as const)test(`proactive response is refused at the fixed ${bound} boundary despite a longer observed or explicit permission`,async t=>{
+  const late=deferred<InteractionResponse>();const f=fixture(t,async request=>request.kind==='proactive'?late.promise:positive,{enableProactive:true});f.ready();
+  for(let i=0;i<3;i++){const r=await f.send(`a-${i}`);f.ack(r.deliveryId);}
+  f.clock.now=f.session.background().nextWakeAt!+1;f.session.setHostContext({quiet:false,available:true,ttlMs:1});
+  f.session.grantCompanionWindow('one',bound==='window-1s'?1000:300000,'trusted-stdio');
+  const pending=f.session.considerProactive('synthetic'),rejected=assert.rejects(pending);await tick();
+  f.clock.now+=bound==='window-1s'?1000:30000;late.resolve(positive);await rejected;
+  assert.equal(f.session.status.deliveries,3);
 });

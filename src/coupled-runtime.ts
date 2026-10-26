@@ -8,6 +8,8 @@ import { CoreError, fail, text } from './validation.ts';
 import { InteractionResources, interactionResponse, validatePrior } from './interaction.ts';
 import type { BackendMode, InteractionProvider, Prior, PriorAdapter, RecallAudit } from './interaction.ts';
 import type { DurableMemory } from './durable-memory.ts';
+import { CompanionWindowPolicy } from './presence-policy.ts';
+import type { CompanionPermissionSource } from './presence-policy.ts';
 
 export type UserInteraction = { sessionId: string; id: string; selectedText: string; recallQuery?: string;
   feedback?: { deliveryId: string; outcome: 'engaged' | 'declined' | 'neutral' } };
@@ -16,9 +18,9 @@ export type LocalDelivery = { sessionId: string; deliveryId: string; requestId: 
   memoryRef: null; memoryCandidate: Proposal | null; backend: BackendMode; expiresAtMonotonicMs: number };
 export type InteractionResult = { sessionId: string; requestId: string; deliveryId: string;
   status: 'ready' | 'taken' | 'acknowledged'; recall: RecallAudit[]; appraisalStatus: LocalDelivery['appraisalStatus'] };
-type PendingInput = { hash: string; result?: InteractionResult; failed: boolean };
+type PendingInput = { hash: string; result?: InteractionResult; failed: boolean; query:string };
 type DeliveryEntry = { value: LocalDelivery; generation: number; contextRevision: number;
-  status: 'ready' | 'taken' | 'acknowledged' | 'cancelled'; feedbackId: string | null; schedulerVersion:number|null };
+  status: 'ready' | 'taken' | 'acknowledged' | 'cancelled'; feedbackId: string | null; schedulerVersion:number|null; permissionId:string|null; permissionEpoch:number };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const refKey = (ref: SourceRef) => `${ref.id}:${ref.revision}`;
 // Process-lifetime ownership is outside sessions/resources. A retired worker is
@@ -61,6 +63,9 @@ export class CoupledSession {
   #adapterNeedsReset = true; #neuralRefs = new Map<string,SourceRef>();
   #last = 0; #lastNeural = 0; #generation = 1; #contextRevision = 0; #paused = true; #invalid = false;
   #host = { quiet:true, available:false, expiresAt:0 };
+  readonly #window=new CompanionWindowPolicy();readonly #enableProactive:boolean;
+  #lastAcceptedHumanQuery:string|null=null;#pendingKind:'user'|'proactive'|null=null;
+  #permissionEpoch=0;#proactiveSuppressed=false;
   #inputs = new Map<string,PendingInput>(); #deliveries = new Map<string,DeliveryEntry>(); #intents = new Set<string>();
   #pending: AbortController | null = null; #timer: ReturnType<typeof setTimeout> | undefined;
   #schedulerVersion = 0; #pendingSchedulerVersion: number | null = null;
@@ -68,11 +73,12 @@ export class CoupledSession {
   #scheduler: { recallQuery:string; onReady:(result:InteractionResult) => void; onError:(code:string) => void;
     refreshContext:() => {quiet:boolean;available:boolean;ttlMs:number} } | undefined;
   constructor(store: MemoryStore, epoch: Epoch, options: { provider: InteractionProvider; resources: InteractionResources;
-    backend?: BackendMode; priorAdapter?: PriorAdapter; clock?: () => number; timeoutMs?: number; maxEntries?: number; durable?: DurableMemory }) {
+    backend?: BackendMode; priorAdapter?: PriorAdapter; clock?: () => number; timeoutMs?: number; maxEntries?: number; durable?: DurableMemory; enableProactive?:boolean }) {
+    this.#enableProactive=options.enableProactive===true;
     this.#durable = options.durable;
     this.#store = store; this.#ticket = Object.freeze({...store.beginRun(epoch)}); store.validateRun(this.#ticket);
     this.#clock = options.clock ?? (() => performance.now()); this.#provider = options.provider; this.#resources = options.resources;
-    this.#duration = timeoutMs(options.timeoutMs ?? 30_000); this.#maxEntries = options.maxEntries ?? 128;
+    this.#duration = Math.min(30_000,timeoutMs(options.timeoutMs ?? 30_000)); this.#maxEntries = options.maxEntries ?? 128;
     if (!Number.isSafeInteger(this.#maxEntries) || this.#maxEntries < 1 || this.#maxEntries > 256) fail('INVALID_SESSION_CAPACITY');
     this.#backend = options.backend ?? 'baseline'; this.#adapter = options.priorAdapter;
     this.#validateBackend(this.#backend,this.#adapter); this.#claimAdapter(this.#adapter); this.#last = this.#now(); this.#lastNeural = this.#last;
@@ -100,19 +106,24 @@ export class CoupledSession {
     if (this.#timer !== undefined) clearTimeout(this.#timer); this.#timer = undefined;
     for (const delivery of this.#deliveries.values()) delivery.status = 'cancelled';
   }
-  #invalidate(): void { this.#invalid = true; this.#paused = true; this.#cancel(); this.#poisonAdapter(); }
-  #guard(requireContext = false, allowPaused = false): number {
+  #invalidate(): void { this.#invalid = true; this.#paused = true; this.#window.clear();this.#lastAcceptedHumanQuery=null;this.#cancel(); this.#poisonAdapter(); }
+  #proactiveExpiry(now:number):number {return this.#proactiveSuppressed?0:Math.max(this.#host.available?this.#host.expiresAt:0,this.#window.current(now)?.expiresAt??0);}
+  #syncContext(now:number):void {this.#state.setContext({quiet:this.#host.quiet,available:this.#host.available&&now<this.#host.expiresAt,
+    proactiveAllowed:!this.#paused&&now<this.#proactiveExpiry(now)});}
+  #guard(requireContext = false, allowPaused = false, proactive=false): number {
     if (this.#durable) void this.#durable.status;
     if (this.#invalid) fail('SESSION_REBIND_REQUIRED');
     const now = this.#now();
     try { this.#store.validateRun(this.#ticket); this.#state.read(); }
     catch(error) { this.#invalidate(); throw error; }
     if (this.#host.available && now >= this.#host.expiresAt) {
-      this.#host = {...this.#host,available:false}; this.#contextRevision++; this.#cancel();
-      this.#state.setContext({quiet:this.#host.quiet,available:false});
+      // Natural observed-presence expiry is not a quiet command and cannot
+      // revoke a separately granted window. Every operation has a fixed deadline.
+      this.#host = {...this.#host,available:false};
     }
+    this.#syncContext(now);
     if (this.#paused && !allowPaused) fail('SESSION_PAUSED');
-    if (requireContext && (this.#host.quiet || !this.#host.available)) fail('HOST_CONTEXT_BLOCKED');
+    if (requireContext && (this.#host.quiet || (proactive?now>=this.#proactiveExpiry(now):!this.#host.available))) fail('HOST_CONTEXT_BLOCKED');
     return now;
   }
   #validateRefs(refs: SourceRef[]): void {
@@ -133,17 +144,18 @@ export class CoupledSession {
     const expired = this.#host.available && now >= this.#host.expiresAt;
     if (expired || context.quiet !== this.#host.quiet || context.available !== this.#host.available) { this.#contextRevision++; this.#cancel(); }
     this.#host = {quiet:context.quiet,available:context.available,expiresAt:now+context.ttlMs};
-    this.#state.setContext(context); this.#arm();
+    if(context.quiet)this.#window.clear();
+    this.#syncContext(now); this.#arm();
   }
   resume(): void {
     if (this.#invalid) fail('SESSION_REBIND_REQUIRED');
     if (!this.#paused) { this.#guard(); return; }
     this.#store.validateRun(this.#ticket); this.#claimAdapter(this.#adapter); this.#state.resume(); this.#paused = false; this.#generation++; this.#arm();
   }
-  pause(): void { this.#paused = true; this.#cancel(); if (!this.#invalid) this.#state.pause(); }
-  reset(): void { this.#guard(false,true); this.#cancel(); this.#state.reset(); this.#arm(); }
+  pause(): void { this.#paused = true;this.#window.clear();this.#lastAcceptedHumanQuery=null;this.stopScheduler(); this.#cancel(); if (!this.#invalid) this.#state.pause(); }
+  reset(): void { this.#guard(false,true);this.#window.clear();this.#lastAcceptedHumanQuery=null; this.#cancel(); this.#state.reset(); this.#arm(); }
   async switchBackend(mode: BackendMode, adapter?: PriorAdapter): Promise<void> {
-    this.#guard(false,true); this.#validateBackend(mode,adapter); this.#claimAdapter(adapter); this.#cancel(); this.#state.pause();
+    this.#guard(false,true); this.#validateBackend(mode,adapter); this.#claimAdapter(adapter);this.#window.clear();this.#lastAcceptedHumanQuery=null; this.#cancel(); this.#state.pause();
     if (adapter !== this.#adapter) this.#poisonAdapter();
     // Reset both outgoing and incoming workers. Raw neural permit is shared across bindings.
     const generation = this.#generation; this.#paused = true;
@@ -163,6 +175,7 @@ export class CoupledSession {
   purge(): void { this.#guard(false,true); this.#store.purge(this.#ticket); this.#invalidate(); }
   setLearningConsent(allowed: boolean): void { this.#guard(false,true); this.#store.setLearningConsent(this.#ticket,allowed); this.#invalidate(); }
   get status() { return {sessionId:this.sessionId,backend:this.#backend,paused:this.#paused,invalidated:this.#invalid,
+    companionWindow:this.#window.status(this.#now()),companionWindowEnabled:this.#enableProactive,proactiveAllowed:!this.#paused&&!this.#host.quiet&&this.#now()<this.#proactiveExpiry(this.#now()),
     entries:this.#inputs.size,deliveries:this.#deliveries.size,rawActive:this.#resources.calls.active,
     transportActive:this.#resources.transport.active,budget:this.#resources.budget.usage,
     lastSourceRef:this.#lastSourceRef??this.#durable?.status.lastSourceRef??null,lastMemoryRef:this.#lastMemoryRef,
@@ -171,6 +184,24 @@ export class CoupledSession {
     const entry = this.#delivery(deliveryId);
     if (entry.status !== 'acknowledged') fail('FEEDBACK_REQUIRES_DELIVERED_RECEIPT');
     if (entry.feedbackId !== null) fail('DELIVERY_FEEDBACK_ALREADY_CONSUMED');
+  }
+  get acceptedHumanQuery():string|null {return this.#lastAcceptedHumanQuery;}
+  grantCompanionWindow(id:string,durationMs:number,source:CompanionPermissionSource):void {
+    if(!this.#enableProactive)fail('PROACTIVE_DISABLED');
+    const now=this.#guard();
+    if(this.#host.quiet)fail('HOST_CONTEXT_BLOCKED');
+    if(this.#pending||this.#resources.calls.active||this.#resources.transport.active||this.#resources.neural.active)fail('COMPANION_WINDOW_BUSY');
+    if(!this.#lastAcceptedHumanQuery)fail('COMPANION_WINDOW_REQUIRES_HUMAN_ACK');
+    this.#window.grant(id,durationMs,source,now);this.#proactiveSuppressed=false;this.#cancelProactive();this.#syncContext(now);
+  }
+  clearCompanionWindow():void {this.#window.clear();this.#permissionEpoch++;this.#proactiveSuppressed=true;
+    this.#cancelProactive();if(!this.#invalid)this.#syncContext(this.#now());}
+  #cancelProactive():void {
+    this.stopScheduler();if(this.#pendingKind==='proactive')this.#pending?.abort();
+    for(const entry of this.#deliveries.values())if(entry.value.kind==='proactive')entry.status='cancelled';
+  }
+  preparedAuthorization(id:string):{permissionId:string|null;remainingMs:number} {
+    const entry=this.#delivery(id);return {permissionId:entry.permissionId,remainingMs:Math.max(0,entry.value.expiresAtMonotonicMs-this.#now())};
   }
   background(): BackgroundView { this.#guard(); return this.#state.read(); }
   recall(query: string): RecallAudit[] {
@@ -194,7 +225,8 @@ export class CoupledSession {
     }
     if (this.#inputs.size >= this.#maxEntries || this.#deliveries.size >= this.#maxEntries) fail('SESSION_CAPACITY_REACHED');
     this.#durable?.claim(input.id,fingerprint);
-    const ledger: PendingInput = {hash:fingerprint,failed:false}; this.#inputs.set(input.id,ledger);
+    const ledger: PendingInput = {hash:fingerprint,failed:false,query:input.recallQuery??input.selectedText.slice(0,256)}; this.#inputs.set(input.id,ledger);
+    this.#lastAcceptedHumanQuery=null;
     try {
       if (this.#pending || this.#resources.calls.active || this.#resources.neural.active) fail('INTERACTION_BACKPRESSURE');
       let feedback: DeliveryEntry | undefined;
@@ -221,7 +253,7 @@ export class CoupledSession {
     } catch(error) { ledger.failed = true; this.#durable?.terminal(input.id,'failed'); throw error; }
     finally { this.#arm(); }
   }
-  considerShadow(): ShadowIntent | null { this.#guard(true); return this.#state.consider().intent; }
+  considerShadow(): ShadowIntent | null { this.#guard(true,false,true); return this.#state.consider().intent; }
   /** Foreground admission waits for cancelled background work to actually drain.
    * The trusted host owns its original deadline and cancellation signal. */
   async waitForIdle(signal:AbortSignal):Promise<void>{
@@ -242,7 +274,8 @@ export class CoupledSession {
     return this.#proactive(query,suppliedIntent,null);
   }
   async #proactive(query: string, suppliedIntent: ShadowIntent | undefined, schedulerVersion:number|null): Promise<InteractionResult | null> {
-    this.#guard(true); text(query,256);
+    this.#guard(true,false,true); text(query,256);
+    if(this.#window.current(this.#now())){if(!this.#lastAcceptedHumanQuery)fail('COMPANION_WINDOW_REQUIRES_HUMAN_ACK');query=this.#lastAcceptedHumanQuery;}
     if (this.#pending || this.#resources.calls.active || this.#resources.neural.active) fail('INTERACTION_BACKPRESSURE');
     const intent = suppliedIntent ?? this.#state.consider().intent; if (!intent) { this.#arm(); return null; }
     this.#state.validateIntent(intent);
@@ -258,10 +291,14 @@ export class CoupledSession {
   }
   async #perform(input: {requestId:string;selectedText:string|null;query:string|undefined;anchor?:SourceRef;event?:SourceRef;
     kind:'user'|'proactive';motive:'affiliation'|'withdrawal'|null;schedulerVersion?:number|null}): Promise<InteractionResult> {
-    const startedAt = this.#guard(true), generation = this.#generation, contextRevision = this.#contextRevision;
-    const deadline = Math.min(startedAt + this.#duration,this.#host.expiresAt); // Fixed even after drain or heartbeat refresh.
-    const controller = new AbortController(); this.#pending = controller; this.#pendingSchedulerVersion = input.schedulerVersion ?? null;
-    const valid = () => { const now = this.#guard(true); if (controller.signal.aborted || generation !== this.#generation
+    const proactive=input.kind==='proactive';
+    const startedAt = this.#guard(true,false,proactive), generation = this.#generation, contextRevision = this.#contextRevision;
+    const offeredWindow=proactive?this.#window.current(startedAt):null;
+    const window=offeredWindow&&offeredWindow.expiresAt>=(this.#host.available?this.#host.expiresAt:0)?offeredWindow:null;
+    const permissionEpoch=this.#permissionEpoch;
+    const deadline = Math.min(startedAt + this.#duration,proactive?this.#proactiveExpiry(startedAt):this.#host.expiresAt);
+    const controller = new AbortController(); this.#pending = controller;this.#pendingKind=input.kind; this.#pendingSchedulerVersion = input.schedulerVersion ?? null;
+    const valid = () => { const now = this.#guard(true,false,proactive); if (controller.signal.aborted || generation !== this.#generation
       || contextRevision !== this.#contextRevision || now >= deadline) fail('INTERACTION_STALE'); };
     try {
       const background = this.#state.read();
@@ -308,13 +345,13 @@ export class CoupledSession {
         backend:this.#backend,expiresAtMonotonicMs:deadline};
       this.#durable?.terminal(input.requestId,'ready',deliveryId);
       valid(); this.#validateRefs(refs);
-      this.#deliveries.set(deliveryId,{value:delivery,generation,contextRevision,status:'ready',feedbackId:null,schedulerVersion:input.schedulerVersion??null});
+      this.#deliveries.set(deliveryId,{value:delivery,generation,contextRevision,status:'ready',feedbackId:null,schedulerVersion:input.schedulerVersion??null,permissionId:window?.id??null,permissionEpoch});
       return {sessionId:this.sessionId,requestId:input.requestId,deliveryId,status:'ready',recall,appraisalStatus};
     } catch(error) { if (this.#backend === 'flywire') this.#adapterNeedsReset = true; throw error; }
-    finally { if (this.#pending === controller) { this.#pending = null; this.#pendingSchedulerVersion = null;this.#idleWaiter?.(); } }
+    finally { if (this.#pending === controller) { this.#pending = null;this.#pendingKind=null; this.#pendingSchedulerVersion = null;this.#idleWaiter?.(); } }
   }
   #delivery(id: string): DeliveryEntry {
-    const now = this.#guard(true), entry = this.#deliveries.get(id);
+    const entry = this.#deliveries.get(id),now = this.#guard(true,false,entry?.value.kind==='proactive');
     if (!entry || entry.status === 'cancelled' || entry.generation !== this.#generation || entry.contextRevision !== this.#contextRevision)
       fail('DELIVERY_STALE');
     // Delivered receipts remain usable for feedback; undelivered payloads expire.
@@ -333,7 +370,10 @@ export class CoupledSession {
     if (entry.status !== 'taken') fail('DELIVERY_NOT_TAKEN');
     this.#durable?.terminal(entry.value.requestId,'acknowledged',id);
     this.#delivery(id);
-    entry.status = 'acknowledged'; this.#lastAcknowledgedDeliveryId=id; return {deliveryId:id,status:'acknowledged'};
+    entry.status = 'acknowledged'; this.#lastAcknowledgedDeliveryId=id;
+    if(entry.value.kind==='user'&&entry.permissionEpoch===this.#permissionEpoch){
+      this.#lastAcceptedHumanQuery=this.#inputs.get(entry.value.requestId)?.query??null;this.#proactiveSuppressed=false;}
+    return {deliveryId:id,status:'acknowledged'};
   }
   startScheduler(options: NonNullable<CoupledSession['schedulerOptions']>): void {
     text(options.recallQuery,256);
@@ -355,8 +395,9 @@ export class CoupledSession {
     let wake: number | null;
     try { this.#guard(); wake = this.#pending || this.#resources.calls.active || this.#resources.neural.active
       ? null : this.#state.read().nextWakeAt; } catch { return; }
-    if (!this.#host.available || this.#host.quiet) return;
-    const at = Math.min(wake ?? Infinity,this.#host.expiresAt);
+    const now=this.#now(),expiresAt=this.#proactiveExpiry(now);
+    if (now>=expiresAt || this.#host.quiet) return;
+    const at = Math.min(wake ?? Infinity,expiresAt);
     this.#timer = setTimeout(() => {
       this.#timer = undefined; const scheduler = this.#scheduler,version = this.#schedulerVersion; if (!scheduler) return;
       try { this.#guard(); this.setHostContext(scheduler.refreshContext()); }

@@ -231,3 +231,63 @@ test('real stdio CLI supports zero-key zero-request boot/status/stop and exits z
   assert.equal(frames.find(x=>x.id==='b').result.paused,true);assert.equal(frames.find(x=>x.id==='s').result.requests.total,0);
   assert.equal(frames.find(x=>x.id==='x').result.status,'closed');assert.ok(frames.some(x=>x.event==='stopped'));
 });
+
+
+test('trusted window boot opt-in, actual human ACK, finite metadata, quiet, pause and fresh process reset',async t=>{
+  let now=0,calls=0;const options={clock:()=>now,providerFactory:()=>({interact:async()=>{calls++;return response;}})};
+  const disabled=fixture(t,options),disabledId=await activate(disabled);
+  assert.equal((await disabled.send('companion-window',{sessionId:disabledId,grantId:'disabled',durationMs:60000,source:'trusted-stdio'})).error.code,'PROACTIVE_DISABLED');
+  const h=fixture(t,options),sessionId=await activate(h,4,{enableProactive:true});
+  const grant=(grantId:string,durationMs=60000)=>h.send('companion-window',{sessionId,grantId,durationMs,source:'trusted-stdio'});
+  assert.equal((await grant('early')).error.code,'COMPANION_WINDOW_REQUIRES_HUMAN_ACK');
+  const result=(await h.send('submit',{sessionId,messageId:'anchor',selectedText:'synthetic human'})).result;
+  await h.send('take',{sessionId,deliveryId:result.deliveryId});assert.equal((await grant('before-ack')).error.code,'COMPANION_WINDOW_REQUIRES_HUMAN_ACK');
+  await h.send('ack',{sessionId,deliveryId:result.deliveryId});
+  for(const duration of [0.5,999,1001,300001])assert.equal((await grant(`bad-${duration}`,duration)).error.code,'INVALID_COMPANION_WINDOW');
+  assert.equal((await grant('one')).ok,true);assert.equal(calls,1);now=31000;
+  const status=(await h.send('status')).result;assert.equal(status.available,false);assert.equal(status.companionWindow.active,true);
+  assert.equal(status.background.context.available,false);assert.equal(status.background.context.proactiveAllowed,true);assert.equal(status.background.context.quiet,false);
+  assert.equal(status.companionWindow.source,'trusted-stdio');assert.equal(status.companionWindow.expiresAtMonotonicMs,60000);
+  assert.equal((await grant('new-execute')).error.code,'COMPANION_WINDOW_ACTIVE');
+  await h.send('context',{sessionId,quiet:true,available:false,ttlMs:1});assert.equal((await h.send('status')).result.companionWindow.active,false);
+  assert.equal((await grant('quiet')).error.code,'HOST_CONTEXT_BLOCKED');
+  await h.send('pause');await h.send('resume',{sessionId});assert.equal((await h.send('status')).result.companionWindow.active,false);
+  const next=fixture(t,options),boot=await next.send('boot',{enableProactive:true,maxCalls:0});assert.equal(boot.result.companionWindow.active,false);assert.equal(boot.result.available,false);
+  assert.equal(calls,1);
+});
+
+test('long window cannot rescue foreground raw drain past original 30s; grant during drain refuses before any new ingress or quota',async t=>{
+  let now=0,calls=0,resources!:InteractionResources;
+  const h=fixture(t,{clock:()=>now,providerFactory:(_config,shared)=>{resources=shared;return {interact:async input=>{shared.budget.reserve(input.requestId);calls++;return response;}};}});
+  const sessionId=await activate(h,4,{enableProactive:true});const first=(await h.send('submit',{sessionId,messageId:'anchor',selectedText:'synthetic anchor'})).result;
+  await h.send('take',{sessionId,deliveryId:first.deliveryId});await h.send('ack',{sessionId,deliveryId:first.deliveryId});
+  assert.equal((await h.send('companion-window',{sessionId,grantId:'long',durationMs:300000,source:'trusted-stdio'})).ok,true);
+  now=29000;const done=deferred<void>(),raw=resources.transport.run(new AbortController().signal,()=>done.promise);
+  const foreground=h.send('submit',{sessionId,messageId:'after-drain',selectedText:'synthetic unclaimed'});await tick();
+  assert.equal((await h.send('companion-window',{sessionId,grantId:'drain-race',durationMs:300000,source:'trusted-stdio'})).error.code,'COMPANION_WINDOW_BUSY');
+  now=31000;done.resolve();await raw;assert.equal((await foreground).error.code,'FOREGROUND_DRAIN_REFUSED');
+  const status=(await h.send('status')).result;assert.equal(status.requests.total,1);assert.equal(calls,1);assert.equal(status.companionWindow.active,true);
+});
+
+test('stdio long-window scheduler crosses observed expiry using last ACK human query and emits fixed output authority',async t=>{
+  let now=0;const requests:InteractionRequest[]=[];
+  const h=fixture(t,{clock:()=>now,providerFactory:()=>({interact:async input=>{requests.push(input);return {...response,
+    appraisal:{...response.appraisal,confidence:0.4,valence:1}};}})});
+  const sessionId=await activate(h,8,{enableProactive:true});
+  for(let i=0;i<5;i++){
+    now=i*20000;await h.send('context',{sessionId,quiet:false,available:true,ttlMs:30000});
+    const submitted=(await h.send('submit',{sessionId,messageId:`natural-${i}`,selectedText:'synthetic topic friend'})).result;
+    await h.send('take',{sessionId,deliveryId:submitted.deliveryId});await h.send('ack',{sessionId,deliveryId:submitted.deliveryId});
+  }
+  const before=(await h.send('status')).result.background;assert.ok(before.nextWakeAt>110000);
+  await h.send('companion-window',{sessionId,grantId:'permission',durationMs:180000,source:'trusted-stdio'});
+  assert.equal(requests.length,5);now=before.nextWakeAt+1;
+  assert.equal((await h.send('schedule',{sessionId,recallQuery:'/companion-window COMMAND TEXT'})).result.scheduled,true);
+  const ready=await h.wait(frame=>frame.event==='delivery-ready');assert.equal(ready.authorization.permissionId,'permission');
+  assert.ok(ready.authorization.remainingMs>0&&ready.authorization.remainingMs<=30000);assert.equal(requests.length,6);
+  assert.equal(requests[5]!.selectedText,null);assert.ok(requests[5]!.recalled.some(item=>item.statement==='synthetic topic friend'));
+  const checked=(await h.send('prepared-check',{sessionId,deliveryId:ready.deliveryId})).result;assert.equal(checked.permissionId,'permission');
+  await h.send('companion-window',{sessionId,durationMs:0});
+  assert.equal((await h.send('schedule',{sessionId,recallQuery:'synthetic topic friend'})).result.scheduled,false);
+  assert.equal((await h.send('take',{sessionId,deliveryId:ready.deliveryId})).ok,false);assert.equal(requests.length,6);
+});

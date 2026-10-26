@@ -143,7 +143,7 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
     startup=(async()=>{
       if(config.launcher.mode==='resident'&&!config.launcher.persistence)await claimResidentBoot(config);
       if(disposed)fail('DSH_START_CANCELLED');
-      return (dependencies.startBackend??DshStdioBackend.start)(config.launcher);
+      return (dependencies.startBackend??DshStdioBackend.start)({...config.launcher,enableProactive:config.enableProactive===true});
     })();
     if(config.parentControl){
       if((input as any).isTTY)fail('DSH_PARENT_PIPE_REQUIRED');
@@ -197,9 +197,9 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
     // is never parsed as management authority. This adds no frontend bundle.
     agent.ctx.inject(['commands'],(commandCtx:any)=>{
       if(disposed)return;
-      for(const action of ['pause','resume','status','switch','feedback','revoke','inspect']){
+      for(const action of ['pause','resume','status','switch','feedback','revoke','inspect','window']){
         const off=commandCtx.commands.register({name:`companion-${action}`,description:`Companion Core ${action}`,recordInput:false,
-          ...(['switch','feedback','revoke'].includes(action)?{input:{hint:action==='switch'?'baseline|no-state|flywire':action==='feedback'?'<deliveryId> engaged|declined|neutral':'<sourceId> <revision>'}}:{}),
+          ...(['switch','feedback','revoke','window'].includes(action)?{input:{hint:action==='window'?'[1..300 seconds]|off':action==='switch'?'baseline|no-state|flywire':action==='feedback'?'<deliveryId> engaged|declined|neutral':'<sourceId> <revision>'}}:{}),
           handler:async(invocation:any)=>{
             if(disposed||invocation?.agent!==agent||typeof invocation.rawInput!=='string'||invocation.rawInput.length>128
               ||!invocation.signal||invocation.signal.aborted||(invocation.attachments?.length??0)>0)
@@ -208,9 +208,12 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
             const parts=argument.split(/\s+/);
             const valid=action==='switch'?['baseline','no-state','flywire'].includes(argument):action==='feedback'
               ?parts.length===2&&uuid(parts[0])&&['engaged','declined','neutral'].includes(parts[1]!)
-              :action==='revoke'?parts.length===2&&uuid(parts[0])&&/^[1-9][0-9]{0,8}$/.test(parts[1]!):argument==='';
+              :action==='revoke'?parts.length===2&&uuid(parts[0])&&/^[1-9][0-9]{0,8}$/.test(parts[1]!)
+              :action==='window'?argument===''||argument==='off'||(/^[1-9][0-9]{0,2}$/.test(argument)&&Number(argument)<=300):argument==='';
             if(!valid)
               return {kind:'error',text:'Companion control argument rejected.'};
+            if(action==='window'&&(config.enableProactive!==true||(argument!=='off'&&(typeof invocation.commandId!=='string'||!invocation.commandId.trim()||invocation.commandId.length>128))))
+              return {kind:'error',text:'Companion window requires proactive configuration and a trusted command ID.'};
             if(controlPending>=(action==='pause'?8:4))return {kind:'error',text:'Companion control is busy.'};
             const readOnly=action==='status'||action==='inspect';
             controlPending++;const onAbort=()=>{if(!readOnly)void bridge!.manualPause();};invocation.signal.addEventListener('abort',onAbort,{once:true});
@@ -218,6 +221,7 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
               if(action==='pause'){manualRequested=true;const pausing=bridge!.manualPause();await cancel();await pausing;}
               if(action==='resume'){await bridge!.manualResume();manualRequested=false;}
               if(action==='switch'){manualRequested=true;const switching=bridge!.switchBackend(argument as 'baseline'|'no-state'|'flywire');await cancel();await switching;}
+              if(action==='window')await bridge!.companionWindow(invocation.commandId??'',argument==='off'?0:(argument===''?180:Number(argument))*1000);
               if(action==='feedback')await bridge!.selectFeedback(parts[0]!,parts[1] as 'engaged'|'declined'|'neutral');
               if(action==='revoke'){manualRequested=true;const revoking=bridge!.revoke({id:parts[0]!,revision:Number(parts[1])});await cancel();await revoking;}
               if(disposed||invocation.signal.aborted)throw new Error('DSH_CONTROL_CANCELLED');
@@ -230,13 +234,14 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
                   runtimeBindingHash:typeof state.sessionId==='string'?createHash('sha256').update(state.sessionId).digest('hex'):null,
                   calls,maxCalls:config.launcher.maxCalls,personalPersistence:state.personalPersistence,stateResetOnRestore:state.stateResetOnRestore,
                   persistence:state.persistence,lastSourceRef:state.lastSourceRef,lastMemoryRef:state.lastMemoryRef,lastAcknowledgedDeliveryId:state.lastAcknowledgedDeliveryId,
-                  pendingFeedback:bridge!.status.pendingFeedback,background:state.background,requestAudit:state.requestAudit});
+                  companionWindow:bridge!.status.companionWindow,pendingFeedback:bridge!.status.pendingFeedback,background:state.background,requestAudit:state.requestAudit});
                 if(Buffer.byteLength(metadata)>32768)throw new Error('DSH_INSPECT_LIMIT');
                 return {kind:'success',text:metadata};
               }
-              return {kind:'success',text:`Companion: ${backendName}; paused=${state.paused===true}; available=${state.available===true}; calls=${calls}/${config.launcher.maxCalls}.`};
-            }catch{emit({kind:`command-${action}`,status:'rejected',code:'DSH_CONTROL_REJECTED'});if(!readOnly)await bridge!.pause();
-              return {kind:'error',text:readOnly?'Companion inspection unavailable.':'Companion control failed; output is paused.'};}
+              const permission=bridge!.status.companionWindow;
+              return {kind:'success',text:`Companion: ${backendName}; paused=${state.paused===true}; available=${state.available===true}; calls=${calls}/${config.launcher.maxCalls}; permission=${permission.source??'none'}; permissionRemainingMs=${Math.floor(permission.remainingMs)}.`};
+            }catch{emit({kind:`command-${action}`,status:'rejected',code:'DSH_CONTROL_REJECTED'});if(!readOnly&&action!=='window')await bridge!.pause();
+              return {kind:'error',text:action==='window'?'Companion window rejected (active, busy, paused, or no acknowledged human input).':readOnly?'Companion inspection unavailable.':'Companion control failed; output is paused.'};}
             finally{controlPending--;invocation.signal.removeEventListener('abort',onAbort);}
           }});
         if(typeof off==='function')offs.push(off);
