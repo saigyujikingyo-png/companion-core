@@ -1,50 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { OfflineStdioClient, OfflineClientError, OFFLINE_WATCHDOGS, OFFLINE_CASE_WATCHDOG_MS } from './fixtures/offline-stdio-client.ts';
+import type { OfflineDiagnostic } from './fixtures/offline-stdio-client.ts';
 
-type Frame={id?:string;ok?:boolean;result?:any;error?:{code:string};event?:string};
-const DEADLINE_MS=2000;
-function childHost(){
-  const child:ChildProcessWithoutNullStreams=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/durable-stdio-synthetic.ts',import.meta.url))],
-    {stdio:'pipe',windowsHide:true});
-  let buffer='',serial=0,stderrBytes=0;
-  const frames:Frame[]=[],pending=new Map<string,{resolve:(value:Frame)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
-  const closed=new Promise<{code:number|null;signal:string|null}>(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
-  child.stderr.on('data',(chunk:Buffer)=>{stderrBytes+=chunk.length;});
-  child.stdout.on('data',(chunk:Buffer)=>{
-    buffer+=chunk.toString('utf8');for(;;){const at=buffer.indexOf('\n');if(at<0)break;
-      const frame=JSON.parse(buffer.slice(0,at)) as Frame;buffer=buffer.slice(at+1);frames.push(frame);
-      if(frame.id){const entry=pending.get(frame.id);if(entry){pending.delete(frame.id);clearTimeout(entry.timer);entry.resolve(frame);}}
-    }
-  });
-  const send=(command:string,extra:Record<string,unknown>={})=>{
-    const id=`offline-${++serial}`;
-    return new Promise<Frame>((resolve,reject)=>{
-      const timer=setTimeout(()=>{pending.delete(id);reject(new Error(`OFFLINE_COMMAND_TIMEOUT:${command}`));},DEADLINE_MS);
-      pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({id,command,...extra})+'\n');
-    });
-  };
-  return {child,closed,frames,send,get stderrBytes(){return stderrBytes;},async stop(){
-    const frame=await send('stop');assert.equal(frame.ok,true);assert.equal(frame.result.status,'closed');
-    const exit=await Promise.race([closed,new Promise<never>((_,reject)=>{const timer=setTimeout(()=>reject(new Error('OFFLINE_EXIT_TIMEOUT')),DEADLINE_MS);timer.unref();})]);
-    assert.equal(exit.code,0);assert.equal(exit.signal,null);assert.equal(buffer.length,0);
-  },async force(){child.kill();
-    await Promise.race([closed,new Promise<never>((_,reject)=>{const timer=setTimeout(()=>reject(new Error('OFFLINE_CLEANUP_TIMEOUT')),DEADLINE_MS);timer.unref();})]);
-    for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('OFFLINE_CLEANUP'));}pending.clear();}};
+function childHost(delayB=false){
+  return new OfflineStdioClient(spawn(process.execPath,[fileURLToPath(new URL('./fixtures/durable-stdio-synthetic.ts',import.meta.url)),
+    ...(delayB?['--delay-b-2300']:[])],{stdio:'pipe',windowsHide:true}));
 }
+const failureCode=(error:unknown)=>error instanceof OfflineClientError?error.code:'OFFLINE_CASE_ASSERTION_OR_UNKNOWN';
 
-test('offline real stdin child: A/B, pause/C, restore/D, revoke A, second restore preserves quota and revocation',{timeout:15000},async t=>{
+test('offline real stdin child: A/B, pause/C, restore/D, revoke A, second restore preserves quota and revocation',{timeout:OFFLINE_CASE_WATCHDOG_MS},async t=>{
   const directory=mkdtempSync(join(tmpdir(),'companion-revoke-restart-'));
   const persistence={directory,identity:'SYNTHETIC_REVOKE_RESTART',keyBase64:randomBytes(32).toString('base64')};
-  const evidence:Array<Record<string,unknown>>=[];let host:ReturnType<typeof childHost>|undefined;
+  const evidence:Array<Record<string,unknown>>=[],transport:Array<{process:number;events:OfflineDiagnostic[]}>=[];
+  let host:ReturnType<typeof childHost>|undefined,processes=0,primaryFailure:unknown=null;
+  const stop=async()=>{await host!.stop();transport.push({process:processes,events:host!.diagnostics});host=undefined;};
   const boot=async(expected:number)=>{
-    host=childHost();const started=performance.now();
+    host=childHost(expected===0);processes++;const started=performance.now();
     const frame=await host.send('boot',{maxCalls:8,apiKey:'SYNTHETIC_OFFLINE_NOT_A_CREDENTIAL',persistence});
     evidence.push({phase:'boot',ok:frame.ok,code:frame.error?.code,elapsedMs:performance.now()-started,expected,stderrBytes:host.stderrBytes});
     assert.equal(frame.ok,true);assert.equal(frame.result.requests.total,expected);assert.equal(frame.result.paused,true);assert.equal(frame.result.available,false);
@@ -66,24 +44,34 @@ test('offline real stdin child: A/B, pause/C, restore/D, revoke A, second restor
   try {
     let token=await boot(0);await activate(token);const a=await turn(token,'A','SYNTHETIC violet preference A');
     const b=await turn(token,'B','SYNTHETIC violet feedback B',{deliveryId:a.deliveryId,outcome:'engaged'});
+    const delayedReply=host!.diagnostics.filter(row=>row.event==='reply'&&row.command==='submit').at(-1)!;
+    assert.ok(delayedReply.elapsedMs!>2000); // This valid response exceeded the former test-only watchdog.
     assert.equal((await host!.send('pause')).ok,true);
     const blocked=await host!.send('submit',{sessionId:token,messageId:'paused-attempt',selectedText:'SYNTHETIC should not call'});
     assert.equal(blocked.error?.code,'SESSION_PAUSED');await activate(token);const c=await turn(token,'C','SYNTHETIC violet source C');
-    await host!.stop();host=undefined;
+    await stop();
     const old=token;token=await boot(3);assert.notEqual(token,old);await activate(token);
     const d=await turn(token,'D','SYNTHETIC violet restored D');assert.ok(d.taken.recall.some((r:any)=>r.ref.id===a.memory.id));
     assert.equal((await host!.send('pause')).ok,true);
     const revoked=await host!.send('revoke',{sessionId:token,ref:a.source});assert.equal(revoked.ok,true);assert.equal(revoked.result.status.invalidated,true);
-    await host!.stop();host=undefined;
+    await stop();
     const previous=token;token=await boot(4);assert.notEqual(token,previous);await activate(token);
     const e=await turn(token,'E-offline-only','SYNTHETIC violet post-revoke E');
     assert.equal(e.taken.recall.some((r:any)=>[a.memory.id,a.source.id].includes(r.ref.id)),false);
     assert.equal(e.taken.sourceRefs.some((r:any)=>[a.memory.id,a.source.id].includes(r.id)),false);
     for(const sibling of [b,c,d])assert.ok(e.taken.recall.some((r:any)=>r.ref.id===sibling.memory.id));
-    await host!.stop();host=undefined;
-  } finally {
-    if(host)await host.force();writeFileSync(join(directory,'offline-reproduction.json'),JSON.stringify({version:1,deadlineMs:DEADLINE_MS,realModelCalls:0,evidence},null,2));
-    t.diagnostic(JSON.stringify({syntheticEvidence:join(directory,'offline-reproduction.json'),deadlineMs:DEADLINE_MS,realModelCalls:0,
+    await stop();
+  } catch(error){primaryFailure=error;throw error;}
+  finally {
+    let cleanupFailure:unknown=null;
+    if(host){try{await host.force();}catch(error){cleanupFailure=error;}finally{transport.push({process:processes,events:host.diagnostics});}}
+    const failures={primary:primaryFailure?failureCode(primaryFailure):null,cleanup:cleanupFailure?failureCode(cleanupFailure):null};
+    writeFileSync(join(directory,'offline-reproduction.json'),JSON.stringify({version:2,watchdogs:OFFLINE_WATCHDOGS,
+      caseWatchdogMs:OFFLINE_CASE_WATCHDOG_MS,realModelCalls:0,failures,evidence,transport},null,2));
+    t.diagnostic(JSON.stringify({syntheticEvidence:join(directory,'offline-reproduction.json'),watchdogs:OFFLINE_WATCHDOGS,
+      caseWatchdogMs:OFFLINE_CASE_WATCHDOG_MS,realModelCalls:0,failures,transport,
       phases:evidence.map(({phase,ok,code,elapsedMs,calls})=>({phase,ok,code,elapsedMs,calls}))}));
+    // Preserve the original assertion/RPC failure; cleanup uncertainty is separate evidence.
+    if(cleanupFailure&&!primaryFailure)throw cleanupFailure;
   }
 });
