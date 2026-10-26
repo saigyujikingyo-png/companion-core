@@ -1,0 +1,48 @@
+# J0: sealed RAM growth journal
+
+Status: **AUTHOR_FOCUSED_PASS**, 2026-10-26. The contract was frozen before implementation; independent review, whole check and release/CI are separate acceptance gates.
+
+- One actual observer path invokes `CurationService.lint` and `revalidate` itself. Only observations made by that wrapper may carry `CORE_OPERATION_OBSERVED`. No JSON or model narrative can append an actual receipt. Zero admitted rows or successful structural checks are not semantic evaluation or training.
+- Plan, attempt, observed effects and terminal outcome remain distinct. Fixed synthetic scenarios exercise training, artifact production, evaluation and activation independently, permanently marked `SYNTHETIC_REPLAY`. Actual model calls and parametric training remain zero. Failure, abort, unknown and rollback never erase earlier observed simulated effects.
+- A journal binds one scope and explicit published-memory pool. Writes retain the original runtime/epoch fence; current authorized views can be rebound after a legitimate runtime change. J0 requires the original scope, generation and consent revision: `bindView` is not a cross-consent reauthorization protocol. Every view checks the whole original pool, current authority, metadata identity and a journal-wide monotone clock. Rebinding cannot restore revoked sources, observed expiration/rollback, consent ABA or purged generations.
+- Limits: 16 entries, 16 receipts per entry, 128 receipts total; source limits remain 32 selected / 128 nodes / 512 edges / 262144 charged bytes. Complete JSON and Markdown exports each cap at 65536 UTF-8 bytes. Reserve the complete worst-case operation record before invoking curation.
+- Export only selected metadata, fixed status/codes and source references. Never copy selectedText, statement, speakerId, arbitrary exception text or curation annotations. Plan fields use closed enums and restricted identifiers. Markdown uses fixed safe templates, no HTML, remote images or external links.
+- JSON/Markdown are declaration archives. Pure archive parsing/rendering returns `NOT_AUTHENTICATED`, never a live journal/receipt capability. Hashes do not prove execution. No database/schema/M2 change, trusted archive restoration, trainer, model loader, network endpoint or background scheduler is implemented.
+- The synthetic demo runs the actual curation observer, writes JSON/Markdown only into a new operating-system temporary directory, and reports zero training/model calls. Source/OneDrive directories contain no runtime journal data.
+
+Author validation: **72/72 focused tests** (33 J0 + 39 existing curation), strict TypeScript and `GROWTH_JOURNAL_PASS` demo on Windows. The independent reviewer found an expired-source return path; the author's separate RED reproduced it, then a final delivery gate fixed it. Original RED/GREEN and complete final logs remain excluded author evidence. No whole run, cross-platform acceptance, model call, training, production deployment or publish was performed by this author.
+
+## API and trust root
+
+`GrowthJournalService(store, curationPolicyJson)` is an in-process trusted-local control surface, with no host, stdio or network endpoint. Its trust root is the existing trusted `MemoryStore`/`CurationService` code executing synchronously. It does not attest a machine, authenticate an external runner, or protect against a caller replacing trusted JavaScript implementations. A hostile JSON document cannot issue these opaque capabilities or actual operation receipts.
+
+| Method | Result and authority |
+|---|---|
+| `bind({epoch, publishedRefs})` | Checks the complete current Store source pool, including an empty pool; records metadata identity and an original `beginRun` write ticket; returns an opaque RAM journal. |
+| `plan(journal, {id, kind})` | Restricted ID (1–64 ASCII letters/digits/`_.:-`, starting alphanumeric), `curation_lint` or `synthetic_replay`; creates only `PLANNED` / `NOT_STARTED`. Extra status/actual fields are rejected. |
+| `runCuration(journal, entry, requestJson)` | Parses the closed L1.a declaration before the gate, reserves capacity, then calls actual curation bind/lint/revalidate. Returns a deep-frozen entry only after a fresh write/source gate; raw exceptions never enter the journal. |
+| `runSynthetic(journal, entry, scenario)` | Chooses one fixed synthetic trace and reduces its phases. It cannot submit caller-authored actual receipts. |
+| `bindView(journal, {epoch})` | Requires the original scope/generation/consent and all original sources; captures the latest runtime for this view. A runtime change requires another view, while old writes remain permanently fenced. |
+| `read(view)` | Fresh whole-pool source/metadata/clock/runtime check, then a frozen metadata record marked `CURRENT_AUTHORIZED_LOCAL_VIEW`. This denotes current read permission, not semantic truth or external runner authentication. |
+| `exportJson(view)` / `exportMarkdown(view)` | Same fresh gate; closed `DECLARATION_ARCHIVE` JSON / safe declaration Markdown. No runtime capability, manifest, content hash or source body is exported. |
+| `parseGrowthArchive(json)` / `renderGrowthArchive(json)` | Pure bounded archive inspection, always `NOT_AUTHENTICATED`; even nested historical `CORE_OPERATION_OBSERVED` text remains an untrusted archive assertion. There is no import-to-journal method. |
+
+`epoch`, reference arrays and plan inputs are copied from closed plain data descriptors; Proxy/accessor/custom iterator inputs are rejected without running hooks. Source IDs and revisions are exported because provenance references are part of this bounded journal. They may still be sensitive metadata and remain under the original pool's read gate. Restricted plan IDs are declarations, not verified labels. Markdown does not interpolate source IDs, arbitrary narrative, annotations or exception messages.
+
+## Attempts, observed effects and deduplication
+
+Each entry has an independent plan kind, attempt state, actual operation fields and optional simulation state. Curation success means the wrapper observed those core functions return. A failure after lint preserves `lintCompleted` and counts; it does not assert that some unrelated external process did not train. `actual.parametricTrainingPerformed=false`, `modelCalls=0`, `artifactProduction=NOT_RUN` and `modelActivation=NOT_RUN` describe this service's executed paths only. Curation reports `semanticQuality=NOT_EVALUATED` even when admitted rows are nonzero or checks complete.
+
+A declared request digest is private RAM bookkeeping. The same entry/canonical request returns the recorded result only after the current gate, without another curation call; a different request conflicts. Malformed declarations fail before starting the attempt. A capacity refusal also leaves it `NOT_STARTED`. This is lifecycle-local deduplication, not permanent idempotency. Failed/refused/unknown entries are terminal; changing the scenario or input cannot retry, append a late effect or rewrite history. A separately planned entry is an explicit new attempt. There is no async completion callback or delayed external runner in J0.
+
+The seven synthetic scenarios are refusal, abort/failure after one step, unknown after start, artifact without evaluation, unknown evaluation, and activation followed by rollback. Their ordered reducer checks prerequisites and terminal states. Unknown after start uses `null` for unobserved training/artifact/ever-activated values; known steps/artifacts survive a later failure or unknown evaluation. Rollback changes simulated current activation to `ROLLED_BACK` while keeping `everActivated=true` and prior steps. Every non-plan receipt in these entries says `SYNTHETIC_REPLAY`; none can establish real model execution.
+
+All calls are synchronous. An authorization failure during an actual operation may leave minimal internal facts about calls already observed, but returns no old entry/counts/receipts and blocks read/export. No raw private input is retained. Source/clock failure invalidates the journal permanently; runtime-only failure fences writes but leaves valid historical view rebinding possible. Already exported caller-owned copies cannot be recalled or used as new access permission.
+
+## Bounds and recovery
+
+Before any actual call, reserve eight additional worst-case receipts and the maximum fixed metadata record; limits are conservative and may refuse before a nominal ceiling is exactly filled. All entries remain in one bounded RAM journal; handles are scoped to one service instance. JSON also inherits the closed Scene parser's 16-level, 4096-node, 2048 UTF-16 units per string and 32768 aggregate-string-unit budgets. No policy/metadata update silently truncates an existing journal.
+
+Schema 1, existing SQLite layout, global outbox and M2 storage are unchanged. Restarting loses the journal and all its capabilities. A new service can authorize sources and create a new empty journal; an exported archive can be reopened only as a declaration. M2 source recovery does not authenticate past journal receipts or restore planned/running work. Trusted persistent receipts and runner recovery need a separate storage/identity/transaction protocol.
+
+Run `npm run demo:journal` for one actual synthetic-source curation check and all seven simulations. It writes `journal.json` and `journal.md` under a fresh OS temporary directory, reopens the archive as unauthenticated, then verifies source revocation rejects live access. It performs **zero model calls and zero training**. The archive files are deliberately retained for inspection; this demo does not read an existing runtime directory.

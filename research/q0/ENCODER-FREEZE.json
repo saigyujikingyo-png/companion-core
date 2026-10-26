@@ -1,0 +1,83 @@
+{
+  "version": "q0-encoder-freeze-1",
+  "utc": "2026-10-26T18:55:15.704Z",
+  "status": "ENCODER_FROZEN_FORMAL_RUN_NOT_STARTED",
+  "reviewerCommitment": {
+    "commitmentSha256": "5d29c0a69a52dd95dfe26f81f6ef96debb11308c08ed6262defeabdef89c8d65",
+    "evaluatorSha256": "9152135b6b8044f3e139fc43ad2b5330c309c27e044dadb4d96569f4c25828be",
+    "privateSeedCommitmentSha256": "73f6dc1cb6147bd37b62edfabae0d44aa33accf0bffaec1275a49eb53a1f3bf6",
+    "receivedBeforeFreeze": true,
+    "authorReadPrivateCapsule": false,
+    "reportedIndependentOracleSelfCheck": "12/12; supplied by evaluator; not formal quality"
+  },
+  "runtime": {
+    "node": "v24.16.0",
+    "zstd": "1.5.7",
+    "platform": "win32",
+    "arch": "x64",
+    "executableBytes": 92279112,
+    "executableSha256": "b3094d0b49f9ad602262a9921551737bb97637c05dd357a06ae98188d7290aa3"
+  },
+  "files": [
+    {
+      "path": "scene.mjs",
+      "bytes": 4912,
+      "sha256": "02251019f284f9a355c52215bd8893379785d7f8871bc943d65fcc41951c572a"
+    },
+    {
+      "path": "codec.mjs",
+      "bytes": 7525,
+      "sha256": "93464384d76d975dd26b6d141f7765f0acc5597c4ed621b3c42216adeca473cd"
+    },
+    {
+      "path": "archive.mjs",
+      "bytes": 4765,
+      "sha256": "42cfb122266fdabaea52f0a759b3a3da55e3b7f55c6a3bec23ca1169b881538a"
+    },
+    {
+      "path": "dev-check.mjs",
+      "bytes": 7147,
+      "sha256": "b1542706262ca9e3f2e52c1bfae9fd673c71ff1b8909f364a4ad8c229bdd8fcf"
+    },
+    {
+      "path": "smoke.mjs",
+      "bytes": 1572,
+      "sha256": "08b2c619483d3b1ee2a124478fc82a01d955d8b1769c5c2d7e0c517af967d297"
+    },
+    {
+      "path": "protocol.json",
+      "bytes": 2315,
+      "sha256": "51368733e770a9315f802d438147fa033337881a5c6f547e3f452e88110bcebc"
+    },
+    {
+      "path": "INTERFACE.md",
+      "bytes": 10380,
+      "sha256": "548e2ba2159e4d05475a7a750a3af1d3cf761fb8ace2b27454436fac4f94fdf6"
+    },
+    {
+      "path": "PLAN.md",
+      "bytes": 8625,
+      "sha256": "fbbec9c86ae96b67498b3e4e8b02a5179b3c2bf619e4e1968c6e642600ddea63"
+    },
+    {
+      "path": "development/prototypes.json",
+      "bytes": 309,
+      "sha256": "2bd25bb6bd0acd88b4677b8088d8858c70b0aa71588cf8b96a0867d5f6df4717"
+    }
+  ],
+  "developmentEvidence": {
+    "latestReceipt": "development/validation-003/receipt.json",
+    "latestReceiptSha256": "652e8dd78ca40e2174336f8dd81777191cf3bb83960c8777a221895911631eb8",
+    "developmentOnly": true,
+    "heldoutGenerated": false,
+    "formalMetricsExist": false
+  },
+  "boundaries": {
+    "coreWrites": 0,
+    "realModelCalls": 0,
+    "gpuUsed": false,
+    "trainingJobs": 0,
+    "sourceChangedAfterHeldout": false
+  },
+  "nextGate": "Root explicit formal-run GO plus fresh resource admission; no post-freeze encoder/config/prototype change"
+}

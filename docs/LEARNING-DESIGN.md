@@ -2,6 +2,8 @@
 
 状态：**L1.a 的同步 RAM 声明 lint / 候选 manifest 已实现，其余学习路线 DESIGN_ONLY**。本批仅用合成数据验证结构、来源与隔离机制，没有训练、语义自动清洗、翻译质量验证、多模态采集、模型激活或新训练worker。`CURATION_LINT_PASS` 只表示检查完成，可包含全被隔离或空的候选；training/eval quality 始终 `NOT_EVALUATED`。
 
+[J0 GrowthJournal](GROWTH-JOURNAL.md)补充了受信本地 curation 包装器的有界 RAM 操作日记与安全声明导出：真实 lint/revalidate 与固定模拟训练/产物/评估/激活分别记录，失败或回滚不抹掉已有事实。它没有 trainer、外部runner认证或受信历史恢复，实际训练/模型调用仍为0；JSON与LLM叙述不能自报完成。
+
 ## L1.a 已实现的窄接口
 
 `MemoryStore.curationSnapshot(epoch, publishedRefs)` 在一个只读事务中先核当前 scope/consent/learningAllowed，再捕获一个非负安全整数 `asOf`。只收当前可见、有效的已发布 memory；原始 event、pending、跨 scope、未来生效、过期、撤销或版本冲突整次拒绝。旧 node 的历史 consent revision 不代替当前 scope 权限，也不会误阻止新授权读取仍合法的旧来源。

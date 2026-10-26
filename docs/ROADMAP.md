@@ -1,5 +1,7 @@
 # 实施与持续开发路线
 
+**本批 J0：** [GrowthJournal](GROWTH-JOURNAL.md)实现有界 RAM 计划/尝试/实际 curation 检查回执与固定模拟训练四维，当前权限复核、旧写入runtime fence、新当前历史视图及 JSON/安全 Markdown 声明导出。实际训练/模型调用0；不新增executor、DB migration或受信恢复。训练runner、持久可信回执与跨同意代际重新授权保持后续独立协议；本批作者/独立/whole/CI分层验收，不把lint完成或零admitted写成语义质量PASS。
+
 **本批 SP0A / AR0b0：** [真实Store来源绑定与有界RAM消费者](SCENE-AUTHORITY.md)已实现显式Scene logical v2、metadata-only来源快照、reset/全量替换/独立ACK、暂停与源撤销失效，以及M2源恢复后的显式新绑定。仅合成数据，claim质量NOT_EVALUATED，持久schema与outbox未改；[编号迁移/immutable journal/per-consumer checkpoint设计](ADR-AR0B-DURABLE.md)仍DESIGN_ONLY。最终验收按本批专项、独立审查、whole和对应提交CI分层记录；这不完成AR0b durablefanout或AR1质量实验。
 
 **本批 AR0：** [有界当前召回与同版 RAM 投影](AR0-RETRIEVAL.md)已通过作者139/139、独立最终6/6、本机一次whole413/413与strict TS/三个零模型调用demo；原12项L1差量仅保留TOOL_OUTPUT_ONLY历史证据、未重跑，分层不相加。CI以发布后对应提交Actions为准，当前不预报通过。只读当前memory与学习许可分离，局部全量重建不消费全局outbox ACK；生产未部署、质量NOT_EVALUATED。下一步按 **AR0b 持久 dispatcher/per-consumer 迁移与崩溃/重复/删除次序/重建基线 → AR1 真实 embedding/BM25/PPR/mean-vs-sampled 冻结实验** 推进；持久fanout未实现。

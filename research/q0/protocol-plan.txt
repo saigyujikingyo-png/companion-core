@@ -1,0 +1,54 @@
+# Q0: finite unannounced-query and rare-detail representation study
+
+2026-10-26. **DEVELOPMENT_ONLY; FORMAL_RUN_NOT_STARTED.** Author owns only this research directory. Core, prior research, original manuscripts and coordination root remain read-only. No model/API, GPU, training, perception, user data, social delivery or scheduler.
+
+The question is whether explicit object/event/source binding, complete standard compression, a task subset and frozen prototype/delta representations retain facts needed by later unannounced queries. This is a deterministic synthetic representation test. It is not LLM reasoning quality, autonomous sleep, biological state quality, real perception or production format/authentication acceptance.
+
+Queries provide exact event/object addresses: this is given-address representation recall, not vague-cue event retrieval or AR1/RAG improvement. Hard-anchor names are preannounced; exact retention of those three fields does not establish retention of every unanticipated rare attribute.
+
+## Scope fixed before held-out generation
+
+| Method | Information and purpose |
+|---|---|
+| FULL_JSON_ZSTD | Complete typed observations; primary strong baseline. |
+| FULL_BOUND_TEMPLATE_ZSTD | Reversible complete object-bound template text; no LLM summary, no bag-of-words weakening. |
+| TASK_SUBSET_ZSTD | Retains four announced attributes and all binding/relationship metadata; omitted cells explicit. Tests task-selection loss. |
+| PROTO_DELTA_LOSSLESS_ZSTD | Development modal prototypes, exact status mask and scalar differences/overrides. All observed attributes retained. No learned embedding or novel numerical algorithm claimed. |
+| PROTO_DELTA_Q_ZSTD | Same representation, fixed prototype-relative numeric scalar quantization. Never fills unknown cells. |
+| PROTO_DELTA_Q_ANCHOR_ZSTD | Identical quantization except exact `crack_mm`, `serial_tag`, `dose_mg` anchors. This paired contrast isolates the anchor rule. |
+
+All use Node's genuine Zstd implementation at level 3/checksum/workers=0 and independently decode each family. Prototype learning uses only the public 48-family development corpus (seed in protocol); no selected heldout statistics, dictionary refit, post-test parameter choice or query-dependent encoding. Public synthetic defaults are known generative structure, not learned visual concepts. Exact prototype modes are derived from development observations; the cost of storing them is charged.
+
+Public schema has 12 attributes, explicit units, relation booleans/unknowns, four events and three persistent objects per family. Suggested heldout = 600 families from three evaluator-private seeds, 200 each. Seed labels are not claims of independent experimental replications; all statistical resampling is clustered by family and seed-stratified. See [INTERFACE.md](INTERFACE.md) for ordering, query grammar and full status semantics.
+
+## Leakage control and freeze
+
+Independent evaluator first commits sampler/oracle/private-seed commitment against the public contract, before author encoder freeze. After source/profile/prototype hashes freeze, evaluator creates new query compositions and heldout observations. It never discloses query instances or score feedback to the encoder. Only then Root can authorize a formal run. Shared-host isolation is a recorded role/process protocol, not adversarial secrecy. This directory must contain no heldout observations, queries or expected answers before that authorization.
+
+Development runs verify exact round-trips, escape handling, explicit unknown/omitted states, quantified error bounds and exact anchor preservation. They do not estimate the heldout performance or adjust the already fixed quantum/rare thresholds. Any development failure is recorded with its repair; only the corrected candidate can freeze. No formal retry is hidden by subsequent fixes.
+
+## Measures and predetermined decision rule
+
+- Separate announced tasks, unannounced field selections, temporal/relationship compositions, intrinsic unknowns and rare attributes. Use exactly the sampler's frozen denominators. Incorrect source/object/event/time witness makes an otherwise correct value wrong.
+- Joint exact score has zero numeric tolerance. Approximate values and interval-induced indeterminate remain visible; tolerance/error statistics are secondary. Coverage/omission/unknown/unsupported/indeterminate are separate, not collapsed to false.
+- Primary rare-detail joint-exact precision/recall, plus secondary presence-only detection; also observed-negative false positives, positive prediction count, true positive count, and positive-family count. Undefined precision remains undefined. Fewer than 30 positive families per rare field is insufficient evidence for a category-wide acceptance claim.
+- Cost regimes: complete active archive (payload + metadata/index + profile/dictionary + decoder); cold source; audit tooling; runtime; full standalone sum. Report all without implying equivalence. Recompute 8/32/128/512-family amortization and fixed 128/256/512-byte per-object-observation archive-budget membership. Over-budget groups are retained.
+- Timing: encoder, decoder, and family random-read p50/p95 after one disclosed warm-up; deterministic ordering, no method-specific cherry-picking. Peak RSS is sampled/observed at bounded checkpoints and is not a proof of native allocator maximum. One CPU process, no GPU or worker concurrency.
+- If a nonstandard representation claims useful archive savings, require at least 15% fewer complete archive bytes than the best full standard baseline, while 95% seed-stratified family bootstrap lower confidence bound on exact-score difference is above -1 percentage point for announced and unannounced groups; rare precision/recall each satisfy the same noninferiority margin when defined with sufficient support. All designated anchors and source bindings must be exact. Report full standalone footprint separately: archive success alone is not standalone success.
+- A finite synthetic pass only supports the tested representation under these distributions. No advantage/inconclusive means retain full standard JSON+Zstd and stop complexity. A new binary container is out of scope even if a semantic representation is useful.
+
+Bootstrap uses 2,000 family resamples within each seed (not question-level IID resamples); evaluator fixes its sampler seed in its commitment. This remains a small synthetic benchmark, not evidence about human users or arbitrary future questions. Results are paired by family and all conditions must be reported.
+
+## Resource gates and stop lines
+
+Formal admission must freshly record at least 2,048 MiB free system RAM, Node version, codec versions and no pending research process owned by this task. One process with `--max-old-space-size=256`; observed RSS at most 512 MiB, total wall budget 180 seconds, artifacts at most 64 MiB, one input family at most 256 KiB. Do not kill others' work. If admission fails, record refusal and do not run; no silent retry.
+
+Any full-baseline round-trip mismatch, silent profile/dictionary mismatch, source binding corruption, fabricated observed value from unknown/omitted, private-query leakage, post-freeze encoder change or lost failure receipt invalidates the affected run and stops advancement. Synthetic hash consistency is not authority/security acceptance. Production permission/revocation testing remains elsewhere; no Core schema or runtime change is proposed here.
+
+Development fresh resource check: 2026-10-26T18:32:13.006Z, Node v24.16.0/Windows x64, built-in Zstd 1.5.7; free RAM 6,188 MiB, initial RSS 38 MiB. Initial CIM query failed (`cannot access CIM resources from client`); Node os.freemem provided the explicit alternate reading. This does not pre-authorize the later formal run.
+
+## Deliverables and integration boundary
+
+Public first-party protocol, generator, codecs, small decoder/CLI and development checks are suitable for a later copy by the Core sole writer into a research-only package. Independent evaluator supplies separate oracle/query/seed commitment and formal results after GO. A CI smoke can cover tiny round-trips; full quality run is manual and must not repeat automatically in every Core whole test. No user manuscript text is copied here.
+
+This is a new experiment, not a rerun of the previous 4-attribute/latent-error toy. It advances the existing [SCIENCE-NEXT](../2026-10-26-aemc-authority-research/SCIENCE-NEXT.md) and preserves the [v0.9 review](../2026-10-26-aemc-v09-review/REVIEW.md) quality mainline. No new literature search was necessary to implement the frozen standard-codec mechanism.

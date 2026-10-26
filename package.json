@@ -15,8 +15,11 @@
     "demo:retrieval": "node src/retrieval-demo.ts",
     "demo:scene": "node src/scene-demo.ts",
     "demo:scene-authority": "node src/scene-authority-demo.ts",
+    "demo:journal": "node src/growth-journal-demo.ts",
+    "research:q0:smoke": "node --max-old-space-size=256 research/q0/smoke.mjs",
+    "research:q0:prepare": "node --max-old-space-size=256 research/q0/replay.mjs --prepare",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene && npm run demo:scene-authority"
+    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene && npm run demo:scene-authority && npm run demo:journal && npm run research:q0:smoke && npm run research:q0:prepare"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

@@ -1,0 +1,13 @@
+PASS point scalar and exact source binding
+PASS changed and delta use separate event versions
+PASS unknown and omission remain distinct
+PASS interval threshold is indeterminate and endpoints are conservative
+PASS quantized equality is not asserted from matching centers
+PASS Kleene Boolean answer retains both atom witnesses
+PASS wrong source or time cannot pass point exact
+PASS rare detail and presence metrics differ on wrong magnitude
+PASS unsupported value from intrinsic unknown is counted
+PASS seeded sampler repeats exactly and obeys expression bounds
+PASS undefined rare precision remains null
+PASS family bootstrap reports degenerate empirical interval honestly
+{"stage":"EVALUATOR_PRECOMMIT_SELFCHECK_ONLY","passed":12,"failed":0,"formalRun":"NOT_STARTED","authorCodecImported":false,"heldoutGenerated":false}

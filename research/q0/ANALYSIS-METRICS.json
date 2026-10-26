@@ -1,0 +1,141 @@
+{
+  "version": "q0-analysis-derived-1",
+  "sourceSha256": "79b76a02136f98e8cb8e620a48dc735083cdb5f85374957cf3a0fe223904e2c0",
+  "derivedNotNewExperiment": true,
+  "rows": [
+    {
+      "method": "FULL_JSON_ZSTD",
+      "knownExact": 1,
+      "unannouncedExact": 1,
+      "rareDetailPrecision": 1,
+      "rareDetailRecall": 1,
+      "archiveBytes": 1643222,
+      "archiveBytesPerObjectObservation": 228.2252777777778,
+      "archiveSavingsPercent": 0,
+      "standaloneWithReproductionAuditBytes": 114195619,
+      "standaloneSavingsPercent": 0,
+      "unannouncedPairedCI": {
+        "replicates": 2000,
+        "definedReplicates": 2000,
+        "lower95": 0,
+        "upper95": 0,
+        "degenerate": true,
+        "interpretation": "DEGENERATE_EMPIRICAL_BOOTSTRAP_NOT_ZERO_FUTURE_RISK"
+      },
+      "gate": "NO_QUALIFYING_ADVANTAGE_OR_INCONCLUSIVE"
+    },
+    {
+      "method": "FULL_BOUND_TEMPLATE_ZSTD",
+      "knownExact": 1,
+      "unannouncedExact": 1,
+      "rareDetailPrecision": 1,
+      "rareDetailRecall": 1,
+      "archiveBytes": 1689009,
+      "archiveBytesPerObjectObservation": 234.58458333333334,
+      "archiveSavingsPercent": -2.7864159559694235,
+      "standaloneWithReproductionAuditBytes": 114241406,
+      "standaloneSavingsPercent": -0.040095233425718746,
+      "unannouncedPairedCI": {
+        "replicates": 2000,
+        "definedReplicates": 2000,
+        "lower95": 0,
+        "upper95": 0,
+        "degenerate": true,
+        "interpretation": "DEGENERATE_EMPIRICAL_BOOTSTRAP_NOT_ZERO_FUTURE_RISK"
+      },
+      "gate": "NO_QUALIFYING_ADVANTAGE_OR_INCONCLUSIVE"
+    },
+    {
+      "method": "TASK_SUBSET_ZSTD",
+      "knownExact": 1,
+      "unannouncedExact": 0.19375,
+      "rareDetailPrecision": null,
+      "rareDetailRecall": 0,
+      "archiveBytes": 1560179,
+      "archiveBytesPerObjectObservation": 216.69152777777776,
+      "archiveSavingsPercent": 5.053668950391366,
+      "standaloneWithReproductionAuditBytes": 114111347,
+      "standaloneSavingsPercent": 0.07379617601617205,
+      "unannouncedPairedCI": {
+        "replicates": 2000,
+        "definedReplicates": 2000,
+        "lower95": -0.8119791666666667,
+        "upper95": -0.8005208333333333,
+        "degenerate": false,
+        "interpretation": "CONDITIONAL_FROZEN_SYNTHETIC_FAMILY_DISTRIBUTION"
+      },
+      "gate": "NO_QUALIFYING_ADVANTAGE_OR_INCONCLUSIVE"
+    },
+    {
+      "method": "PROTO_DELTA_LOSSLESS_ZSTD",
+      "knownExact": 1,
+      "unannouncedExact": 1,
+      "rareDetailPrecision": 1,
+      "rareDetailRecall": 1,
+      "archiveBytes": 1565772,
+      "archiveBytesPerObjectObservation": 217.46833333333333,
+      "archiveSavingsPercent": 4.713301063398612,
+      "standaloneWithReproductionAuditBytes": 114118169,
+      "standaloneSavingsPercent": 0.06782221654230147,
+      "unannouncedPairedCI": {
+        "replicates": 2000,
+        "definedReplicates": 2000,
+        "lower95": 0,
+        "upper95": 0,
+        "degenerate": true,
+        "interpretation": "DEGENERATE_EMPIRICAL_BOOTSTRAP_NOT_ZERO_FUTURE_RISK"
+      },
+      "gate": "NO_QUALIFYING_ADVANTAGE_OR_INCONCLUSIVE"
+    },
+    {
+      "method": "PROTO_DELTA_Q_ZSTD",
+      "knownExact": 0.8522916666666667,
+      "unannouncedExact": 0.8001041666666666,
+      "rareDetailPrecision": 0.5386384544618216,
+      "rareDetailRecall": 0.39282120093928213,
+      "archiveBytes": 1553261,
+      "archiveBytesPerObjectObservation": 215.73069444444445,
+      "archiveSavingsPercent": 5.474671103478412,
+      "standaloneWithReproductionAuditBytes": 114107330,
+      "standaloneSavingsPercent": 0.0773138240968807,
+      "unannouncedPairedCI": {
+        "replicates": 2000,
+        "definedReplicates": 2000,
+        "lower95": -0.20739583333333333,
+        "upper95": -0.1925,
+        "degenerate": false,
+        "interpretation": "CONDITIONAL_FROZEN_SYNTHETIC_FAMILY_DISTRIBUTION"
+      },
+      "gate": "NO_QUALIFYING_ADVANTAGE_OR_INCONCLUSIVE"
+    },
+    {
+      "method": "PROTO_DELTA_Q_ANCHOR_ZSTD",
+      "knownExact": 0.8522916666666667,
+      "unannouncedExact": 0.8633333333333333,
+      "rareDetailPrecision": 1,
+      "rareDetailRecall": 1,
+      "archiveBytes": 1561416,
+      "archiveBytesPerObjectObservation": 216.86333333333334,
+      "archiveSavingsPercent": 4.978390016686729,
+      "standaloneWithReproductionAuditBytes": 114114841,
+      "standaloneSavingsPercent": 0.07073651398132874,
+      "unannouncedPairedCI": {
+        "replicates": 2000,
+        "definedReplicates": 2000,
+        "lower95": -0.14302083333333337,
+        "upper95": -0.13031250000000005,
+        "degenerate": false,
+        "interpretation": "CONDITIONAL_FROZEN_SYNTHETIC_FAMILY_DISTRIBUTION"
+      },
+      "gate": "NO_QUALIFYING_ADVANTAGE_OR_INCONCLUSIVE"
+    }
+  ],
+  "limits": {
+    "givenAddress": true,
+    "finitePublicSchema": true,
+    "preannouncedAnchorNames": true,
+    "sharedWholeResearchReader": true,
+    "realModelCalls": 0,
+    "newRun": false
+  }
+}

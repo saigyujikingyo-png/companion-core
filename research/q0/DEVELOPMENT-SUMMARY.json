@@ -1,0 +1,81 @@
+{
+  "version": "q0-development-summary-1",
+  "status": "DEVELOPMENT_PASS_NOT_HELDOUT_QUALITY",
+  "derivedSummary": true,
+  "originalReceiptSha256": "652e8dd78ca40e2174336f8dd81777191cf3bb83960c8777a221895911631eb8",
+  "utc": "2026-10-26T18:51:26.910Z",
+  "node": "v24.16.0",
+  "zstdVersion": "1.5.7",
+  "developmentFamilies": 48,
+  "checks": [
+    {
+      "name": "FULL_JSON_ZSTD development roundtrip/binding/status/bounds",
+      "families": 48,
+      "quantizedBoundsChecked": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "FULL_BOUND_TEMPLATE_ZSTD development roundtrip/binding/status/bounds",
+      "families": 48,
+      "quantizedBoundsChecked": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "TASK_SUBSET_ZSTD development roundtrip/binding/status/bounds",
+      "families": 48,
+      "quantizedBoundsChecked": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "PROTO_DELTA_LOSSLESS_ZSTD development roundtrip/binding/status/bounds",
+      "families": 48,
+      "quantizedBoundsChecked": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "PROTO_DELTA_Q_ZSTD development roundtrip/binding/status/bounds",
+      "families": 48,
+      "quantizedBoundsChecked": 3233,
+      "status": "PASS"
+    },
+    {
+      "name": "PROTO_DELTA_Q_ANCHOR_ZSTD development roundtrip/binding/status/bounds",
+      "families": 48,
+      "quantizedBoundsChecked": 2149,
+      "status": "PASS"
+    },
+    {
+      "name": "escaped strings and deterministic compression",
+      "status": "PASS"
+    },
+    {
+      "name": "profile/prototype/hash/checksum mismatch rejection",
+      "status": "PASS"
+    },
+    {
+      "name": "random changing relations, antisymmetric left_of and symmetric near",
+      "status": "PASS",
+      "changedRelations": 797
+    },
+    {
+      "name": "real standard directory/reader roundtrip and non-payload cost",
+      "status": "PASS",
+      "archiveBytes": 24733
+    }
+  ],
+  "elapsedMs": 360.5838,
+  "observedRSSMiB": 152,
+  "measurementBoundary": "RSS at checkpoint, not native peak; overlapping development checks are not independent quality samples",
+  "prototypeSha256": "2bd25bb6bd0acd88b4677b8088d8858c70b0aa71588cf8b96a0867d5f6df4717",
+  "sourceHashes": {
+    "protocol.json": "51368733e770a9315f802d438147fa033337881a5c6f547e3f452e88110bcebc",
+    "scene.mjs": "02251019f284f9a355c52215bd8893379785d7f8871bc943d65fcc41951c572a",
+    "codec.mjs": "93464384d76d975dd26b6d141f7765f0acc5597c4ed621b3c42216adeca473cd",
+    "archive.mjs": "42cfb122266fdabaea52f0a759b3a3da55e3b7f55c6a3bec23ca1169b881538a",
+    "dev-check.mjs": "b1542706262ca9e3f2e52c1bfae9fd673c71ff1b8909f364a4ad8c229bdd8fcf"
+  },
+  "readOnlySmoke": "PASS six methods / one public family / zero heldout",
+  "formalRunStatusAtSummaryCreation": "NOT_OBSERVED_BY_AUTHOR",
+  "realModelCalls": 0,
+  "gpuUsed": false
+}

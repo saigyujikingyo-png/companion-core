@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "status": "RUNNER_FROZEN_FORMAL_NOT_STARTED",
+  "frozenAt": "2026-10-26T19:04:27.811Z",
+  "source": "independent reviewer",
+  "files": [
+    {
+      "name": "formal-runner.mjs",
+      "bytes": 14854,
+      "sha256": "5b7d53b4b434db8e84edd72fd7547f5d27d64ac9ead1c9c25b4a235f6122ed91"
+    },
+    {
+      "name": "formal-config.json",
+      "bytes": 610,
+      "sha256": "2058d54c973ec182a977b2132b12974aed4b635cc65c7b255f0fbe99b4977e41"
+    },
+    {
+      "name": "LAUNCH-ONCE.ps1",
+      "bytes": 3023,
+      "sha256": "1e87a4a7cf6070da2d332428f943f6a8c09aef5492ea4a8014b4a4feadc41120"
+    },
+    {
+      "name": "runner-syntax.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "outputDirectory": "C:\\Users\\saigy\\AppData\\Local\\Temp\\companion-q0-formal-883178c9bd2f405d8f298fa5e2b51710",
+  "preparationFailurePreserved": "C:/Users/saigy/AppData/Local/Temp/companion-q0-runplan-D1TeXU/runner-syntax.log",
+  "resourceLimits": {
+    "minFreeRAMMiB": 2048,
+    "heapMiB": 256,
+    "maxRSSMiB": 512,
+    "maxWallSeconds": 180,
+    "maxArtifactMiB": 64,
+    "nodeComputeProcesses": 1
+  },
+  "queryAndMetricSource": "UNCHANGED_EVALUATOR_COMMITMENT",
+  "oneShot": true,
+  "noAutomaticRetry": true
+}

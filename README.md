@@ -4,6 +4,10 @@
 
 **当前是 0.1 开发原型：本轮验收仅合成数据，未迁移旧用户数据库。** 真实 provider 与宿主回合按独立证据验收，普通测试不会调用真实模型。它是现有六插件维护工作的独立实验核心；尚未替换、合并或发布到任一上游插件。
 
+**当前 [J0 GrowthJournal](docs/GROWTH-JOURNAL.md)：** 有界 RAM 日记把计划、实际 curation lint/revalidate、终态与固定模拟训练四维分开记录。每次读取/导出复核原来源池；合法 runtime 变化可新绑历史视图，旧写入永久失效；撤销、同意代际变化、到期或时钟倒退不能靠重绑恢复。JSON/安全 Markdown 只是声明档案，不能自行认证执行或恢复能力。实际模型调用/训练为0，数据库schema1和M2不变；作者专项、独立审查、whole和CI分层验收。
+
+[Q0 公开研究包](research/q0/README.md)保留独立正式实验及阴性结论：没有方法同时通过15%完整archive节省与冻结质量门。它是有限合成given-address表征回读，不是模型/感知/自然语言检索或生产证明；[portable replay](research/q0/REPLAY.md)默认只准备并核hash，full PUBLIC_REPLAY须显式运行。CI仅1公开family×6方法small smoke及prepare/hash检查，不跑600-family正式实验。
+
 **当前 [SP0A / AR0b0](docs/SCENE-AUTHORITY.md)：** 新增受信 Store 来源绑定和最多8个 RAM 消费者的 reset/完整替换协议；每次数据读取/交付复核全部绑定来源、当前权限、TTL与时钟，暂停清除旧正文/投递句柄，撤销终止旧数据能力。显式 Scene logical v2承载真实0 epoch，v1原规则/黄金字节和数据库schema1保持不变。M2只恢复来源，Scene须新绑定、新reset及显式重新提供JSON。作者专项226/226、strict TS及零模型demo通过，独立审查/whole/提交CI另行验收。来源有效不等于claim事实正确；持久fanout仍[仅设计](docs/ADR-AR0B-DURABLE.md)，未接真实宿主、数据或部署。
 
 **许可与公开边界：** 项目第一方代码、文档和合成测试采用 [Apache-2.0](LICENSE)；[第三方与数据边界](docs/THIRD-PARTY.md)单列。所有package仍保留 `private: true`，只防止误发npm，不限制本仓源码按Apache-2.0使用。源码与安全摘要不包含原始实验工件、凭据或本机部署环境；fresh clone可跑synthetic checks，不能仅clone后就复现原resident部署。
@@ -50,6 +54,8 @@ npm run check
 `npm run demo:retrieval` 演示 AR0 的直接/共享来源命中与撤销后拒绝，输出 `AR0_CONTRACT_PASS`、counts/codes 和质量 `NOT_EVALUATED`；仅新建 RAM 数据库，零 API，不打印正文或身份。`check` 将它追加在 curation 演示之后。真实使用跨 `await` 或送入 provider 前须再次 `resolve`，已经交出的副本不能物理召回。
 
 `npm run demo:scene` 演示独立 SP0/SF0 合成声明往返；输出 `SCENE_CONTRACT_PASS` 与 `PERCEPTION_NOT_RUN`、`SEMANTIC_QUALITY_NOT_EVALUATED`、`PRODUCTION_NOT_CONNECTED`。`check` 将它追加在 retrieval demo 之后；不打开数据库、读取媒体或调用模型。随后 `demo:scene-authority` 新建合成 RAM Store，验证双消费者和撤销清除，输出 `SCENE_AUTHORITY_PASS`；无模型调用、持久consumer或生产连接。
+
+`npm run demo:journal` 实际运行一次合成来源的 curation lint/revalidate，再回放七种明确标记的模拟场景；输出 `GROWTH_JOURNAL_PASS`、0训练/0模型与两个新建系统临时文件路径（JSON及安全Markdown，保留供检查）。档案重开仍为 `NOT_AUTHENTICATED`；不恢复受信日记。`check` 在此演示后仅追加Q0 small smoke和prepare/hash检查，不执行600-family正式实验。
 
 ## 已实现的切片
 

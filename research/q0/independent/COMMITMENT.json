@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "status": "EVALUATOR_COMMITTED_BEFORE_ENCODER_FREEZE",
+  "committedAt": "2026-10-26T18:54:14.837Z",
+  "role": "independent Astra max evaluator",
+  "publicFiles": [
+    {
+      "name": "INTERFACE.md",
+      "sha256": "548e2ba2159e4d05475a7a750a3af1d3cf761fb8ace2b27454436fac4f94fdf6",
+      "bytes": 10380
+    },
+    {
+      "name": "protocol.json",
+      "sha256": "51368733e770a9315f802d438147fa033337881a5c6f547e3f452e88110bcebc",
+      "bytes": 2315
+    },
+    {
+      "name": "PLAN.md",
+      "sha256": "fbbec9c86ae96b67498b3e4e8b02a5179b3c2bf619e4e1968c6e642600ddea63",
+      "bytes": 8625
+    }
+  ],
+  "files": [
+    {
+      "name": "evaluator.mjs",
+      "bytes": 15968,
+      "sha256": "9152135b6b8044f3e139fc43ad2b5330c309c27e044dadb4d96569f4c25828be"
+    },
+    {
+      "name": "selfcheck.mjs",
+      "bytes": 6114,
+      "sha256": "a54323068ddaebc0cbf44feac567013ffa95dd6e48f2b54868b7dff1beadb68b"
+    },
+    {
+      "name": "SAMPLER-RULES.md",
+      "bytes": 3377,
+      "sha256": "1e99a37c0fe7b9e30743b238832d228f41ecb34a4fe4ee73065596a7dd0400c0"
+    },
+    {
+      "name": "selfcheck.log",
+      "bytes": 821,
+      "sha256": "724f391fea98acd0433ca83a2a664ce3a782b36a5ffbb95987ab55df819c679f"
+    },
+    {
+      "name": "private-seeds.json",
+      "bytes": 144,
+      "sha256": "73f6dc1cb6147bd37b62edfabae0d44aa33accf0bffaec1275a49eb53a1f3bf6"
+    }
+  ],
+  "seedCommitment": "73f6dc1cb6147bd37b62edfabae0d44aa33accf0bffaec1275a49eb53a1f3bf6",
+  "families": 600,
+  "seeds": 3,
+  "familiesPerSeed": 200,
+  "queriesPerFamily": 24,
+  "formalRun": "NOT_STARTED",
+  "heldoutGenerated": false,
+  "authorCodecInspected": false,
+  "authorGeneratorInspected": false,
+  "coreWrites": 0,
+  "researchAuthorDirectoryWrites": 0,
+  "selfcheck": {
+    "status": "PASS",
+    "cases": 12,
+    "exitCode": 0
+  },
+  "isolation": "PROCEDURAL_SHARED_HOST_NOT_CRYPTOGRAPHIC",
+  "postPublication": "HELDOUT_BECOMES_REGRESSION_SET"
+}
