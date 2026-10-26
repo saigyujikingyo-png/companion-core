@@ -2,7 +2,7 @@
 
 **本批 AR0：** [有界当前召回与同版 RAM 投影](AR0-RETRIEVAL.md)已通过作者139/139、独立最终6/6、本机一次whole413/413与strict TS/三个零模型调用demo；原12项L1差量仅保留TOOL_OUTPUT_ONLY历史证据、未重跑，分层不相加。CI以发布后对应提交Actions为准，当前不预报通过。只读当前memory与学习许可分离，局部全量重建不消费全局outbox ACK；生产未部署、质量NOT_EVALUATED。下一步按 **AR0b 持久 dispatcher/per-consumer 迁移与崩溃/重复/删除次序/重建基线 → AR1 真实 embedding/BM25/PPR/mean-vs-sampled 冻结实验** 推进；持久fanout未实现。
 
-[AEMC v0.6 对象中心表征路线](AEMC-V06-REPRESENTATION.md)建议独立 SP0 RAM validator slice，可与 AR0b ADR 并行；SP1残差质量/SP2迁移及感知均未执行，不替代AR1检索协议。
+[AEMC v0.6 对象中心表征路线](AEMC-V06-REPRESENTATION.md)的 [SP0/SF0](SCENE-PACKET.md) 已实现独立 RAM 声明validator、精确概念/profile引用与可读 JSON 完整性交换；作者专项33/33与独立最终返验通过，whole/CI以本批回执及对应提交Actions为准，当前不预报通过。它不认证现实来源/权限、不接持久schema或感知；SP1/SF1质量与总成本、SP2映射迁移、SF2资产/撤销/崩溃及AR0b持久迁移仍是后续独立门，不替代AR1检索协议。
 
 **本批进度：** [L1.a](LEARNING-DESIGN.md#l1a-已实现的窄接口)已实现同步 RAM 声明 lint、权威有界只读 snapshot 与候选 manifest；只用合成数据验证，同源分组/时间切分/声明矛盾与旧能力失效可检查，语义/翻译质量和 training/eval quality 均 `NOT_EVALUATED`。其余学习阶段仍为 DESIGN_ONLY，不启动训练或部署。此前 source `05cbeea`已实现独立通信permission窗口，strict TS+300项+七步回放和独立63项通过；[原生零真实API接线](evidence/NATIVE-ACCEPTANCE.md#window-control)验证window60与原observed lease分离、重复不延期、off/pause/resume及clean退出。它不是自然主动送达PASS；先前NO_TRIGGER封存，不追加调用。
 

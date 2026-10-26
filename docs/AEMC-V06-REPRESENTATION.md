@@ -2,10 +2,11 @@
 
 基于本轮粘贴补充，未获得所述完整稿；**DESIGN_ONLY / EXPERIMENT_NOT_RUN**。日期：2026-10-26。
 本文不是所述1090行原稿，也未修改用户原稿；没有实现或运行新感知、压缩、映射、SAE或训练算法。
+后续增量：[SP0/SF0 声明合同](SCENE-PACKET.md)已实现纯 RAM schema与可读JSON交换，作者33项定向与独立最终返验通过；whole/CI以本批回执及对应提交Actions为准，当前不预报通过。本文研究协议与SP1/SP2保持上述未实验状态，不将结构合法解释为感知/事实质量或真实权限认证。
 它补充 [v0.5 研究评审](AEMC-V05-REVIEW.md)，不改变已验 [AR0 当前读取](AR0-RETRIEVAL.md)的运行代码与权限合同。
 Root/max 确定设计边界，Sol 整理；文献核对、typed schema 与合成 fixture 设想不等于感知或事实质量验收。
 
-[数据库、交换格式与压缩计划](AEMC-STORAGE-FORMAT.md)另行区分逻辑协议、权威事务、标准容器与codec；仍为DESIGN_ONLY / EXPERIMENT_NOT_RUN，不改本页已审表征合同。
+[数据库、交换格式与压缩计划](AEMC-STORAGE-FORMAT.md)另行区分逻辑协议、权威事务、标准容器与codec；研究部分仍为DESIGN_ONLY / EXPERIMENT_NOT_RUN，后续SF0窄实现单独列明，不改本页已审研究合同。
 
 ## 1. 采用外部权威与可替换映射
 
@@ -125,14 +126,14 @@ personal prototypes 保留 lineage；若不能精确撤除污染的 opaque laten
 
 | 阶段 | 建议内容 | 当前 |
 |---|---|---|
-| SP0 | 纯 RAM typed validator + projection 契约、不可变合成 registry/profile fixture 与 demo | 未开工；建议下一独立代码 slice |
+| SP0 | 纯 RAM typed validator + projection 契约、不可变合成 registry/profile fixture 与 demo | [窄声明合同已实现](SCENE-PACKET.md)，作者专项与独立返验通过；whole/CI以本批回执/对应提交Actions为准，无感知或authority接入 |
 | SP1 | 对象属性保留、原型/残差压缩的质量与总成本对照 | EXPERIMENT_NOT_RUN |
 | SP2 | 跨 encoder/profile 升级、adapter 与无原件降级 | EXPERIMENT_NOT_RUN |
 
 SP0 可与 AR0b ADR 并行；不接感知模型、媒体采集、持久 schema、宿主路由、外部 API 或生产数据。
-候选 SP0 输入上限为32 objects、64 relations、32 anchors、64KiB受限JSON；尚未开工冻结，不是现行容量。
-先冻结闭合字段、深度/长度/数量、版本/引用/单位与失效规则；synthetic registry/profile 不接受自行变更后冒充旧版。
-未来 demo 机制目标可叫 SCENE_CONTRACT_PASS，并同时保留 PERCEPTION_NOT_RUN；现在没有该实现或 PASS 结果。
+SP0 已固定32 objects、64 relations、32 anchors、完整envelope64KiB及独立总量/深度预算；具体闭合字段与限制见其实现合同，不保证最大组合同时可达。
+synthetic registry/profile在实例内固定；来源真实失效、授权、per-claim校准及资产可用性尚未接入，不能靠自报JSON获得权限。
+合成 demo 的 SCENE_CONTRACT_PASS 仅指声明合同往返，同时保留 PERCEPTION_NOT_RUN、SEMANTIC_QUALITY_NOT_EVALUATED 与 PRODUCTION_NOT_CONNECTED。
 结构 validator 只能检查合同，不能认证现实身份、物体检测真值、感知质量或生产安全。
 AR1 的真实 embedding/BM25/PPR 检索协议不被 ScenePacket 替代；语义检索与对象表征有各自对照和准入。
 durable ScenePacket 接入受 AR0b migration 门约束，不提前修改 Core 数据格式或现有 AR0/L1 读取用途。
@@ -184,4 +185,4 @@ durable ScenePacket 接入受 AR0b migration 门约束，不提前修改 Core �
 
 本轮代码许可核对记录：[google-research/slot_attention](https://github.com/google-research/google-research/tree/master/slot_attention) Apache-2.0；[concept-graphs](https://github.com/concept-graphs/concept-graphs) MIT；[MIT-SPARK/Hydra](https://github.com/MIT-SPARK/Hydra) BSD-2-Clause；[openai/sparse_autoencoder](https://github.com/openai/sparse_autoencoder) MIT。
 这些只限所核代码范围，不自动覆盖模型权重、数据、媒体或其他依赖；本文无需引入这些代码。
-下一步先由 Root/max 审阅本设计，再决定是否冻结 SP0 独立实现；AR0本批机制验收不能转记为SP0/SP1/SP2或感知PASS。
+后续SP0窄实现与独立审查以其合同/提交证据为准；AR0验收不能转记为SP0，SP0声明合同验收也不能转记为SP1/SP2或感知PASS。

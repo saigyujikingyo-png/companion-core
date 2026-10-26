@@ -13,8 +13,9 @@
     "demo": "node src/replay.ts",
     "demo:curation": "node src/curation-demo.ts",
     "demo:retrieval": "node src/retrieval-demo.ts",
+    "demo:scene": "node src/scene-demo.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval"
+    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

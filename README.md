@@ -12,7 +12,7 @@
 
 **[AR0 当前召回](docs/AR0-RETRIEVAL.md)** 已实现 memory-only 有界 snapshot 与同版 RAM 字面/共享来源投影；普通读取与学习许可分离，每次 query/resolve 复核全部绑定来源，旧 epoch、撤销、到期或时钟倒退拒绝旧能力。作者专项 139/139、独立最终 6/6、本机一次 whole 413/413 与 strict TS/三个合成 demo 通过；原12项 L1 差量仅保留 TOOL_OUTPUT_ONLY 历史证据、未重跑，各层不相加。CI 以发布后对应提交的 Actions 为准，当前不预报通过；未接全局 outbox ACK、持久 fanout、BM25/embedding/PPR 或真实部署，召回质量仍 `NOT_EVALUATED`。
 
-[AEMC v0.6 表征补充](docs/AEMC-V06-REPRESENTATION.md)讨论 ScenePacket、稳定概念registry与带版本原型/残差；仅 DESIGN_ONLY / EXPERIMENT_NOT_RUN，未实现感知或压缩算法。
+[AEMC v0.6 表征补充](docs/AEMC-V06-REPRESENTATION.md)的后续窄切片 [SP0/SF0](docs/SCENE-PACKET.md)已实现纯 RAM ScenePacket、固定概念/profile引用和可读自包含 JSON 交换：有界闭合解析、claim 对象/角色绑定、完整 envelope 预算及长度/hash校验。它仅验证声明一致性，始终标记 `NOT_AUTHENTICATED`；真实来源权限、感知、3D、residual decoder、压缩和质量实验均未实现。研究协议其余部分保持 DESIGN_ONLY / EXPERIMENT_NOT_RUN；本批作者专项33/33与独立最终返验通过，whole/CI以本批回执及对应提交Actions为准，当前不预报通过。
 
 **上一主动交接源码（2026-10-26）：** `4e3f246b5a7f0ce7ecbae9b8822d687096aa779b` 修复[主动投递与前台交接](docs/DSH-COUPLED.md)：ready在原生回合/ACK等待期间有界保留，原生完成且core ACK落定后，经受原租约约束的SDK `whenIdle()`再发布；新鲜人类输入停止旧调度，只有最新输入的成功ACK可按原到期时间重新调度。前台等待实际逻辑工作及raw permits清空后才领取入站/额度，暂停、撤销或到期拒绝等待，不轮询、不重试、不延长租约。作者strict TypeScript、272/272合成测试和七步回放PASS；独立Astra max 39项定向检查PASS。[实际SDK零真实API投递](docs/evidence/NATIVE-ACCEPTANCE.md#proactive-zero)已 **ZERO_NATIVE_DELIVERY_PASS**：fixture验证ready排队/单次消费及两个native ACK，未构造真实core/memory/HTTP。
 
@@ -46,6 +46,8 @@ npm run check
 运行 `npm run demo:curation` 可复现 L1.a 的固定合成声明检查。它仅使用全新 RAM 数据库，输出 counts/codes、`CURATION_LINT_PASS` 与质量 `NOT_EVALUATED`；不输出原文、来源身份、manifest digest，也不训练或调用 API。`check` 在原有回放之后运行此演示。候选包含私有正文，仅供受信代码在 RAM 中审阅，使用时必须再次验证；参见[实际 L1.a 接口与限制](docs/LEARNING-DESIGN.md#l1a-已实现的窄接口)。
 
 `npm run demo:retrieval` 演示 AR0 的直接/共享来源命中与撤销后拒绝，输出 `AR0_CONTRACT_PASS`、counts/codes 和质量 `NOT_EVALUATED`；仅新建 RAM 数据库，零 API，不打印正文或身份。`check` 将它追加在 curation 演示之后。真实使用跨 `await` 或送入 provider 前须再次 `resolve`，已经交出的副本不能物理召回。
+
+`npm run demo:scene` 演示独立 SP0/SF0 合成声明往返；输出 `SCENE_CONTRACT_PASS` 与 `PERCEPTION_NOT_RUN`、`SEMANTIC_QUALITY_NOT_EVALUATED`、`PRODUCTION_NOT_CONNECTED`。`check` 将它追加在 retrieval demo 之后；不打开数据库、读取媒体或调用模型。
 
 ## 已实现的切片
 

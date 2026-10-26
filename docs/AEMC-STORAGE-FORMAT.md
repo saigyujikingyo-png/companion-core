@@ -4,6 +4,7 @@
 本文回应本轮数据库/整体架构/专属文件格式与压缩增量，不是已实施的数据库迁移、新格式或 codec PASS。
 它承接 [v0.6 表征设计](AEMC-V06-REPRESENTATION.md)与 [v0.5 研究路线](AEMC-V05-REVIEW.md)，不改变已验 [AR0](AR0-RETRIEVAL.md)运行代码。
 本轮只做官方格式资料核对和设计评审；没有安装整套格式栈、下载媒体/权重、迁移数据或运行压缩基准。
+后续增量：[SP0/SF0](SCENE-PACKET.md)已实现独立RAM逻辑合同、自包含identity JSON manifest及完整性校验，作者33项专项与独立最终返验通过；whole/CI以本批回执及对应提交Actions为准，当前不预报通过。下述数据库/容器/codec研究仍未执行；本实现不认证现实来源，不读取外部资产或修改durable schema。
 
 ## 1. 决策：先公开逻辑协议，再选容器与 codec
 
@@ -12,7 +13,7 @@
 
 | 决策层 | 当前选择 | 研究进入条件 |
 |---|---|---|
-| ScenePacket / ConceptRegistry / MappingProfile 逻辑协议 | 应做公开规范、版本、类型、来源和权限合同；尚未实现 | SF0 可先纯 RAM schema/fixture/可读导出设计 |
+| ScenePacket / ConceptRegistry / MappingProfile 逻辑协议 | [SP0/SF0窄声明合同已实现](SCENE-PACKET.md)；现实来源与权限接入仍未实现 | 后续权威接入另过AR0b；结构合法不等于真实性 |
 | 标准 manifest+blob 目录 / 标准容器 profile | 优先，以资产用途选最少组件 | 固定逻辑 payload 后做独立合成 bench |
 | 专属二进制容器 | 延后，不因名称专属就有价值 | 标准方案不足的实测证据、独立 reader、测试向量、迁移/降级策略 |
 
@@ -145,11 +146,11 @@ parser/解压器设输入、解压后、分块、嵌套、字典和恢复次数�
 新 codec 只有在事前冻结的质量/成本门下有明确收益才继续；未达标就采用标准方案，不反复改门寻找胜出。
 基准规模、family split、seed、置信区间与具体数值门另冻，不借“十年目标”或理论推导宣布产品可靠。
 
-## 7. 可执行研究顺序（均未实施）
+## 7. 可执行研究顺序（SF0后续增量以独立合同为准）
 
 | 阶段 | 建议内容 | 门槛 |
 |---|---|---|
-| SF0 | 逻辑 schema + 标准 manifest、合成 fixture、可读导出计划 | 可随 SP0 纯 RAM 探索；不改 durable schema |
+| SF0 | [窄逻辑schema + identity JSON manifest、合成fixture和可读交换已实现](SCENE-PACKET.md) | 作者专项与独立返验通过；whole/CI以本批回执/对应提交Actions为准，不改durable schema或运行压缩 |
 | SF1 | 标准容器/codec baseline 的独立合成 bench | 固定同 payload 与总成本、独立 reader 和全部版本依赖 |
 | SF2 | 故障恢复、撤销与迁移验收 | 先冻结崩溃/损坏/旧快照矩阵，验证新库切换与旧库降级 |
 | SF3 | 压缩对照与消融 | 新 binary 仅在标准容器不足时研究；语义压缩按预先冻结的任务收益问题，与标准基线独立比较；质量门与成本门事前冻结 |
@@ -160,4 +161,4 @@ SF0 的 JSON Schema 版本、业务 schema_version 与容器/codec profile 分�
 新格式须有不依赖专属 LLM 的独立 reader、可审测试向量和 bounded 失败模式，权威事实不能锁死在 latent 中。
 durable 接入仍须通过 AR0b migration/consumer baseline/删除/崩溃恢复门，不因交换文件能读写就跳过。
 已有具体授权、预算与准入规则继续适用；本文研究设想不新增真实数据访问、上传、训练或部署权限。
-下一步由 Root/max 审阅本设计再选择最小 slice；当前没有数据库迁移、专属格式、压缩算法或存储基准 PASS。
+SP0/SF0窄增量不替代后续研究门；当前没有数据库迁移、专属二进制容器、压缩算法或存储基准 PASS。
