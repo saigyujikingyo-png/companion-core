@@ -4,6 +4,8 @@
 
 This implements a narrow engineering question: can different valid interaction histories lead to different motivation under identical present input and context, while idle computation stays event driven? It does not establish subjective experience, biological emotion, or better interaction quality. The existing female FlyWire mushroom-body ALPN/KC/MBON/DAN/APL experiment is not a male-fly P1/pCd circuit. This layer borrows the general ideas of persistence and context gating, and does not reproduce either circuit. Future ODE, SSM, CfC, or real-connectome variants should be compared behind the same authority and shadow-output boundary; none is silently substituted here.
 
+Future candidate selection follows the [target decisions](TARGET-DECISIONS.md) (**DESIGN_ONLY**): compare no-state, engineered state/ODE, SSM/small RNN and real fly subgraphs on companion naturalness, continuous state recovery, inference coordination, resource use and resident energy. Fly circuitry is replaceable and may be dropped without net benefit. Existing reset-on-restart and experimental results remain unchanged; no new continuity or quality PASS is claimed.
+
 ## State and idle dynamics
 
 Six bounded values are maintained: affiliative tone in `[-1,1]`, activation, uncertainty and fatigue in `[0,1]`, plus affiliation and withdrawal drives in `[0,1]`. They are engineered internal priors, not observations of a person's emotional state. Activation/uncertainty decay toward neutral with a 20-second time constant; tone/fatigue use 300 seconds.
