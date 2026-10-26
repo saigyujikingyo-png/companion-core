@@ -4,11 +4,15 @@
 
 **当前是 0.1 开发原型：本轮验收仅合成数据，未迁移旧用户数据库。** 真实 provider 与宿主回合按独立证据验收，普通测试不会调用真实模型。它是现有六插件维护工作的独立实验核心；尚未替换、合并或发布到任一上游插件。
 
-**最新状态（2026-10-26）：** [M2a 加密跨重启记忆](docs/M2-DURABLE.md)源码冻结于 `25cb0f8c6073dc91167c2507d9444a5500b560a7`；strict TypeScript、241/241 合成测试和七步回放通过，独立 Astra max 的八项定向返验通过。修复将 SQLite FTS5 完整 RAM COMMIT 放在序列化之前，随后完成加密检查点和独立安全账本提交才返回成功；不确定失败会封锁整个 store/vault。旧失败测试库封存、未解密；FTS缺陷由独立完整序列红绿复现确认，已知损坏检查点不会自动修复或接受。
+**最新源码（2026-10-26）：** `4e3f246b5a7f0ce7ecbae9b8822d687096aa779b` 修复[主动投递与前台交接](docs/DSH-COUPLED.md)：ready在原生回合/ACK等待期间有界保留，原生完成且core ACK落定后，经受原租约约束的SDK `whenIdle()`再发布；新鲜人类输入停止旧调度，只有最新输入的成功ACK可按原到期时间重新调度。前台等待实际逻辑工作及raw permits清空后才领取入站/额度，暂停、撤销或到期拒绝等待，不轮询、不重试、不延长租约。作者strict TypeScript、272/272合成测试和七步回放PASS；独立Astra max 39项定向检查PASS。[实际SDK零真实API投递](../dsh-plugin-maintenance/research/2026-10-26-native-proactive/ZERO-NATIVE-PASS.json)已 **ZERO_NATIVE_DELIVERY_PASS**：fixture验证ready排队/单次消费及两个native ACK，未构造真实core/memory/HTTP。
+
+[唯一自然时间试验](../dsh-plugin-maintenance/research/2026-10-26-native-proactive/RESULT.md)为 **NO_TRIGGER**：新源码、fresh M2单次boot下，约120秒内五次固定合成自述均获真实DeepSeek回复及native completed ACK，主动ready/送达0；reserve5/6、unknown0，暂停后重复同RPC没有新回合/调用，内外清理exit0/noForce/owned0。第六次封存、不退款或重试。此为有效阴性，既非传输失败，也非自然主动闭环或产品可用PASS；未直接暴露的shadow intent不据此判定不存在。新源码跨重启未重测，下面保留此前M2实际两次恢复证据。本轮未部署`4e3f246`，既有生产主动配置仍false，当前生产calls未重读。
+
+**已验收M2版本（2026-10-26）：** [M2a 加密跨重启记忆](docs/M2-DURABLE.md)当时源码冻结于 `25cb0f8c6073dc91167c2507d9444a5500b560a7`；strict TypeScript、241/241 合成测试和七步回放通过，独立 Astra max 的八项定向返验通过。修复将 SQLite FTS5 完整 RAM COMMIT 放在序列化之前，随后完成加密检查点和独立安全账本提交才返回成功；不确定失败会封锁整个 store/vault。旧失败测试库封存、未解密；FTS缺陷由独立完整序列红绿复现确认，已知损坏检查点不会自动修复或接受。
 
 原 `newcap8` 真实 DeepSeek/DSH 切片中 A/B/C/D 四次请求均有 native ACK；状态先验、下一输入消费显式反馈、暂停拒绝、首次恢复召回和 SDK 重复 RPC 抑制有局部证据。但撤销后的第二次恢复失败，E 未发送，故原链保留 PARTIAL。修复后独立新 vault 的0 API凭据/0模型调用原生检查，以及新 cap3 的 A→重启 B 召回→撤销 A→重启 C 排除均已通过；[三请求原生证据](../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-REAL-PASS.json)与[验证记录](docs/VALIDATION.md)保留分层结论。两批不是同一 vault 的连续 A→E；原4+新3合计7次已ACK、共享aggregate8上限，不退款、不重试。
 
-新 M2 桌面常驻已 **READY，UI_CONTROL_PENDING**：bootstrap创建并flush后干净卸载，最终同vault/identity以resume-only挂载；0/32、baseline、paused=true、available=false，未发送生产prompt。通过会话行菜单“打开 Companion Core 会话”进入新SID `37f962f8-5a4c-4cc5-8b44-f28bcdebf886`，先执行 `/companion-resume`；命令不调用模型或授予在场租约，新输入才提供短租约。新菜单实际点击回执/聊天输入框绑定仍待确认，不能复用旧SID的UI PASS。见[部署与用法](../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT.md)和[部署回执](../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT-PASS.json)。神经切换接口保留，M2+flywire原生组合本轮未测。
+此前 M2 桌面部署回执为 **READY，UI_CONTROL_PENDING**：bootstrap创建并flush后干净卸载，同vault/identity以resume-only挂载；回执当时0/32、baseline、paused=true、available=false，未发送生产prompt。通过会话行菜单“打开 Companion Core 会话”进入SID `37f962f8-5a4c-4cc5-8b44-f28bcdebf886`，先执行 `/companion-resume`；命令不调用模型或授予在场租约，新输入才提供短租约。该阶段新菜单实际点击回执/聊天输入框绑定待确认，不能复用旧SID的UI PASS。见[部署与用法](../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT.md)和[部署回执](../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT-PASS.json)。神经切换接口保留，M2+flywire原生组合未在本轮验证。
 
 以上证明机制与合成文字经过真实模型/宿主的有限链路，不证明自然交流品质、永久情感或意识。背景/神经状态在恢复时重置；`enableProactive:false` 的验收不证明主动投递。M2a 的同机恢复也不等于备份迁移、长期规模或十年可靠性；独立 `authority.sqlite` 被回滚到有效前缀仍为 `KNOWN_UNPROTECTED_LEDGER_ROLLBACK`。
 
