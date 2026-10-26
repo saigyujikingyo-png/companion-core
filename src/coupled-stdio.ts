@@ -1,6 +1,7 @@
 import type { Readable, Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { CoupledSession } from './coupled-runtime.ts';
+import type { UserInteraction } from './coupled-runtime.ts';
 import { HttpInteractionProvider } from './http-interaction.ts';
 import { InteractionResources, RequestBudget } from './interaction.ts';
 import type { InteractionProvider, PriorAdapter } from './interaction.ts';
@@ -25,7 +26,7 @@ const safeCodes=new Set(['INVALID_INPUT','INVALID_WIRE_SHAPE','INVALID_JSON','BO
   'DURABLE_CONFIG','DURABLE_UNSUPPORTED','DURABLE_KEY_INVALID','DURABLE_INCOMPLETE','DURABLE_CORRUPT','DURABLE_LOCKED',
   'DURABLE_IDENTITY_MISMATCH','DURABLE_BUDGET_MISMATCH','DURABLE_LIMIT','DURABLE_WRITE_FAILED','DURABLE_UNAVAILABLE',
   'DURABLE_CLOCK_ROLLBACK','DURABLE_REQUEST_REQUIRED','DURABLE_DELIVERY_CONFLICT','DURABLE_MEMORY_ONLY',
-  'UNSUPPORTED_SCHEMA','UNKNOWN_DATABASE','SCHEMA_MISMATCH']);
+  'UNSUPPORTED_SCHEMA','UNKNOWN_DATABASE','SCHEMA_MISMATCH','FOREGROUND_DRAIN_REFUSED']);
 function safeError(error:unknown):string {
   if(error instanceof CoreError&&safeCodes.has(error.code))return error.code;
   if(error instanceof Error&&error.name==='AbortError')return 'ABORTED';
@@ -54,6 +55,7 @@ class StdioHost {
   #worker:OwnedPrior|null=null;#workerClosing:Promise<PriorCloseResult|null>|null=null;#workerStarts=0;
   #workerCloses:PriorCloseResult[]=[];#neuralConfig:JsonlPriorConfig|undefined;
   #hostContext={quiet:true,available:false,expiresAt:0};#scheduleQuery:string|null=null;
+  #foregroundWait:AbortController|null=null;
   #shutdown:Promise<StdioExit>|null=null;#done:Promise<StdioExit>;#resolveDone!:(result:StdioExit)=>void;
   constructor(options:TrustedStdioOptions){this.#options=options;this.#clock=options.clock??(()=>performance.now());
     this.#done=new Promise(resolve=>{this.#resolveDone=resolve;});}
@@ -177,13 +179,14 @@ class StdioHost {
     const session=this.#session!;
     switch(request.command){
       case 'status':this.#shape(request,[]);return this.#status();
-      case 'pause':this.#shape(request,[]);this.#controlVersion++;session.pause();return this.#status();
+      case 'pause':this.#shape(request,[]);this.#controlVersion++;this.#foregroundWait?.abort();session.pause();return this.#status();
       case 'resume':this.#shape(request,['sessionId']);this.#requireSession(request);if(this.#management)fail('MANAGEMENT_IN_PROGRESS');session.resume();return this.#status();
       case 'context':{
         this.#shape(request,['sessionId','quiet','available','ttlMs'],['recallQuery']);this.#requireSession(request);
         if(typeof request.quiet!=='boolean'||typeof request.available!=='boolean'||!Number.isSafeInteger(request.ttlMs)
           ||(request.ttlMs as number)<1||(request.ttlMs as number)>30000)fail('INVALID_INPUT');
         if(request.recallQuery!==undefined&&request.recallQuery!==null)text(request.recallQuery,256);
+        this.#foregroundWait?.abort();
         const context={quiet:request.quiet,available:request.available,ttlMs:request.ttlMs as number};
         this.#hostContext={quiet:context.quiet,available:context.available,expiresAt:this.#clock()+context.ttlMs};session.setHostContext(context);
         if(request.recallQuery!==undefined&&request.recallQuery!==this.#scheduleQuery){
@@ -196,6 +199,23 @@ class StdioHost {
         }
         return this.#status();
       }
+      case 'schedule':{
+        this.#shape(request,['sessionId','recallQuery']);this.#requireSession(request);
+        if(request.recallQuery===null){session.stopScheduler();this.#scheduleQuery=null;return {scheduled:false};}
+        text(request.recallQuery,256);
+        if(this.#management||this.#submitting)fail('MANAGEMENT_IN_PROGRESS');
+        session.stopScheduler();this.#scheduleQuery=null;
+        if(session.status.paused||session.status.invalidated||this.#hostContext.quiet||!this.#hostContext.available
+          ||this.#clock()>=this.#hostContext.expiresAt)return {scheduled:false};
+        // Scheduling owns no presence grant: retain the existing absolute expiry.
+        this.#scheduleQuery=request.recallQuery;
+        session.startScheduler({recallQuery:this.#scheduleQuery,
+          refreshContext:()=>({quiet:this.#hostContext.quiet,available:this.#hostContext.available&&this.#clock()<this.#hostContext.expiresAt,
+            ttlMs:Math.max(1,Math.min(30000,Math.floor(this.#hostContext.expiresAt-this.#clock())))}),
+          onReady:result=>{if(!this.#stopping)this.#emit({version:1,event:'delivery-ready',sessionId:result.sessionId,deliveryId:result.deliveryId});},
+          onError:code=>{if(!this.#stopping)this.#emit({version:1,event:'scheduler-error',code:safeCodes.has(code)?code:'INTERNAL_ERROR'});}});
+        return {scheduled:true};
+      }
       case 'submit':{
         this.#shape(request,['sessionId','messageId','selectedText'],['recallQuery','feedback']);this.#requireSession(request);
         if(this.#management)fail('MANAGEMENT_IN_PROGRESS');if(this.#submitting)fail('SUBMIT_IN_PROGRESS');
@@ -204,7 +224,7 @@ class StdioHost {
         let feedback:{deliveryId:string;outcome:'engaged'|'declined'|'neutral'}|undefined;
         if(request.feedback!==undefined){const f=fields(request.feedback,['deliveryId','outcome']);text(f.deliveryId,128);
           if(!['engaged','declined','neutral'].includes(f.outcome as string))fail('INVALID_INPUT');feedback=f as typeof feedback;}
-        const operation=session.submit({sessionId:session.sessionId,id:request.messageId,selectedText:request.selectedText,
+        const operation=this.#submitWhenIdle({sessionId:session.sessionId,id:request.messageId,selectedText:request.selectedText,
           ...(request.recallQuery===undefined?{}:{recallQuery:request.recallQuery}),...(feedback===undefined?{}:{feedback})});
         const task=operation.then(()=>{},()=>{});this.#submitting=task;
         void task.then(()=>{if(this.#submitting===task)this.#submitting=null;});
@@ -214,10 +234,10 @@ class StdioHost {
       case 'take':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.takeDelivery(request.deliveryId);
       case 'ack':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);return session.acknowledgeDelivery(request.deliveryId);
       case 'feedback-check':this.#shape(request,['sessionId','deliveryId']);this.#requireSession(request);text(request.deliveryId,128);session.validateFeedback(request.deliveryId);return {valid:true};
-      case 'reset':this.#shape(request,['sessionId']);this.#requireSession(request);this.#controlVersion++;session.reset();return this.#status();
+      case 'reset':this.#shape(request,['sessionId']);this.#requireSession(request);this.#controlVersion++;this.#foregroundWait?.abort();session.reset();return this.#status();
       case 'revoke':
       case 'purge':{
-        this.#shape(request,['sessionId',...(request.command==='revoke'?['ref']:[])]);this.#requireSession(request);this.#controlVersion++;
+        this.#shape(request,['sessionId',...(request.command==='revoke'?['ref']:[])]);this.#requireSession(request);this.#controlVersion++;this.#foregroundWait?.abort();
         if(request.command==='revoke'){const ref=fields(request.ref,['id','revision']);text(ref.id,128);
           if(!Number.isSafeInteger(ref.revision)||(ref.revision as number)<1)fail('INVALID_INPUT');session.revoke({id:ref.id,revision:ref.revision as number});}
         else session.purge();
@@ -229,13 +249,30 @@ class StdioHost {
         if(!['baseline','no-state','flywire'].includes(request.backend as string))fail('BACKEND_UNAVAILABLE');
         if(this.#management)fail('MANAGEMENT_IN_PROGRESS');const backend=request.backend as 'baseline'|'no-state'|'flywire';
         if(backend==='flywire'&&!this.#neuralConfig)fail('NEURAL_NOT_CONFIGURED');
-        const version=++this.#controlVersion;session.pause();session.stopScheduler();this.#scheduleQuery=null;
+        const version=++this.#controlVersion;this.#foregroundWait?.abort();session.pause();session.stopScheduler();this.#scheduleQuery=null;
         const task=this.#switch(backend,version);this.#management=task;
         void task.then(()=>{if(this.#management===task)this.#management=null;},()=>{if(this.#management===task)this.#management=null;});return task;
       }
       case 'stop':this.#shape(request,[]);return this.#stop('parent-stop',request.id as string);
       default:fail('UNKNOWN_COMMAND');
     }
+  }
+  async #submitWhenIdle(input:UserInteraction){
+    const session=this.#session!,version=this.#controlVersion,deadline=Math.min(this.#hostContext.expiresAt,this.#clock()+30000);
+    if(session.status.invalidated)fail('SESSION_REBIND_REQUIRED');if(session.status.paused)fail('SESSION_PAUSED');
+    if(this.#hostContext.quiet||!this.#hostContext.available||this.#clock()>=deadline)fail('HOST_CONTEXT_BLOCKED');
+    // Stop only background ownership. Cancellation never frees any raw permit.
+    session.stopScheduler();this.#scheduleQuery=null;
+    const controller=new AbortController();this.#foregroundWait=controller;
+    const timer=setTimeout(()=>controller.abort(),Math.max(1,Math.ceil(deadline-this.#clock())));
+    try{
+      await session.waitForIdle(controller.signal);
+      if(controller.signal.aborted||this.#stopping||version!==this.#controlVersion||session!==this.#session
+        ||this.#clock()>=deadline||session.status.paused||session.status.invalidated)fail('FOREGROUND_DRAIN_REFUSED');
+    }catch{fail('FOREGROUND_DRAIN_REFUSED');}
+    finally{clearTimeout(timer);controller.abort();if(this.#foregroundWait===controller)this.#foregroundWait=null;}
+    // No ingress, memory or quota mutation occurs until this single admission.
+    return session.submit(input);
   }
   async #switch(backend:'baseline'|'no-state'|'flywire',version:number):Promise<unknown>{
     const session=this.#session!;await this.#submitting;
@@ -270,6 +307,7 @@ class StdioHost {
   }
   #stop(reason:string,stopId?:string):Promise<StdioExit>{
     if(this.#shutdown)return this.#shutdown;this.#stopping=true;this.#controlVersion++;
+    this.#foregroundWait?.abort();
     this.#options.input.pause();this.#options.input.removeListener('data',this.#onData);this.#buffer=Buffer.alloc(0);
     try{this.#session?.pause();}catch{this.#partial=true;}this.#session?.stopScheduler();this.#scheduleQuery=null;
     this.#shutdown=(async()=>{

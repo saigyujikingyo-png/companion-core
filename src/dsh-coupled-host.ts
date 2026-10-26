@@ -171,11 +171,21 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
     const agent=handle.agent;
     bridge=new DshCoupledBridge(backend,{sessionId:config.sessionId,provider,model,onEvent:emit,realProvider:config.launcher.mode==='resident',requireManualResume:!!config.launcher.persistence,
       initialConsumedRequests:bootState?.requests.total??0,
-      ...(config.enableProactive?{publishPrepared:async(deliveryId:string,attach:(id:string)=>boolean)=>{
-        if(disposed)return false;try{return await agent.runMaintenance((signal:AbortSignal)=>{
-          if(signal.aborted||disposed)return false;const message=sdk.createUserMessage({content:[{type:'text',text:bridge!.preparedNotice(deliveryId)}],
+      ...(config.enableProactive?{publishPrepared:async(deliveryId:string,attach:(id:string)=>boolean,permission:AbortSignal)=>{
+        if(disposed||permission.aborted)return false;
+        let onAbort:(()=>void)|undefined;
+        try{
+          // SDK whenIdle has no cancellation argument. Stop local waiting at the
+          // original offer lease; a late SDK settlement grants no permission.
+          await Promise.race([agent.whenIdle(),new Promise<never>((_,reject)=>{
+            onAbort=()=>reject(new Error('DSH_PREPARED_CANCELLED'));permission.addEventListener('abort',onAbort,{once:true});
+          })]);
+          if(disposed||permission.aborted)return false;
+          return await agent.runMaintenance((signal:AbortSignal)=>{
+          if(signal.aborted||permission.aborted||disposed)return false;const message=sdk.createUserMessage({content:[{type:'text',text:bridge!.preparedNotice(deliveryId)}],
             source:{kind:'companion-prepared-delivery'}});
           if(!attach(message.id))return false;agent.followup(message);return true;});}catch{return false;}
+        finally{if(onAbort)permission.removeEventListener('abort',onAbort);}
       },cancelNativePrepared:()=>{void cancel();}}:{})});
     offs.push(agent.ctx.on('agent/inbox/inserted',({message}:any)=>{try{bridge!.inboxInserted(message);}catch{safeFailure();}}));
     offs.push(agent.ctx.on('agent/inbox/claimed',({message,turn}:any)=>{try{bridge!.inboxClaimed(message,turn);}catch{safeFailure();}}));

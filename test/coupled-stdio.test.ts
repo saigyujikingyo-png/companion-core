@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { runTrustedStdio } from '../src/coupled-stdio.ts';
 import type { TrustedStdioOptions } from '../src/coupled-stdio.ts';
-import type { InteractionRequest, InteractionResponse } from '../src/interaction.ts';
+import type { InteractionRequest, InteractionResponse, InteractionResources } from '../src/interaction.ts';
 const response:InteractionResponse={version:1,responseText:'SYNTHETIC_REPLY_ONLY_ON_TAKE',appraisal:{kind:'appraisal-hypothesis',confidence:0,
   valence:0,arousal:0,uncertainty:0,fatigue:0},memoryProposal:null};
 const tick=()=>new Promise<void>(resolve=>setImmediate(resolve));
@@ -63,6 +63,76 @@ async function activate(h:ReturnType<typeof fixture>,maxCalls=4,extra:Record<str
   assert.equal((await h.send('context',{sessionId,quiet:false,available:true,ttlMs:30000})).ok,true);
   assert.equal((await h.send('resume',{sessionId})).ok,true);return sessionId;
 }
+
+test('foreground waits for every cancelled raw permit before its only ingress and request admission',async t=>{
+  let resources!:InteractionResources,calls=0;const h=fixture(t,{providerFactory:(_config,shared)=>{resources=shared;return {
+    interact:async input=>{calls++;shared.budget.reserve(input.requestId);return response;}};}});
+  const persistence={directory:mkdtempSync(join(tmpdir(),'companion-drain-')),identity:'SYNTHETIC_DRAIN',keyBase64:randomBytes(32).toString('base64')};
+  const token=await activate(h,4,{persistence});
+  const raw=[resources.calls,resources.transport,resources.neural].map(permit=>{
+    const done=deferred<void>(),cancel=new AbortController(),task=permit.run(cancel.signal,()=>done.promise);
+    const rejected=assert.rejects(task,{name:'AbortError'});cancel.abort();return {done,rejected,permit};});
+  await Promise.all(raw.map(item=>item.rejected));
+  const pending=h.send('submit',{sessionId:token,messageId:'human-after-cancel',selectedText:'SYNTHETIC fresh human'});await tick();
+  let state=(await h.send('status')).result;assert.equal(state.submitting,true);assert.equal(state.persistence.ingressCount,0);assert.equal(calls,0);
+  assert.equal((await h.send('submit',{sessionId:token,messageId:'second',selectedText:'SYNTHETIC second'})).error.code,'SUBMIT_IN_PROGRESS');
+  raw[0]!.done.resolve();raw[1]!.done.resolve();await tick();assert.equal(calls,0);assert.equal(raw[2]!.permit.active,true);
+  raw[2]!.done.resolve();assert.equal((await pending).ok,true);state=(await h.send('status')).result;
+  assert.equal(calls,1);assert.equal(state.requests.total,1);assert.equal(state.persistence.ingressCount,1);
+});
+
+for(const invalidation of ['timeout','pause','new-context','stop'] as const){
+  test(`foreground raw drain ${invalidation} refuses without ingress, quota or releasing raw work`,async t=>{
+    let resources!:InteractionResources,calls=0;const h=fixture(t,{providerFactory:(_config,shared)=>{resources=shared;return {
+      interact:async()=>{calls++;return response;}};}});
+    const persistence={directory:mkdtempSync(join(tmpdir(),'companion-drain-refuse-')),identity:'SYNTHETIC_REFUSE',keyBase64:randomBytes(32).toString('base64')};
+    const token=await activate(h,4,{persistence}),done=deferred<void>(),cancel=new AbortController();
+    const raw=resources.calls.run(cancel.signal,()=>done.promise);const rejected=assert.rejects(raw,{name:'AbortError'});cancel.abort();await rejected;
+    if(invalidation==='timeout')await h.send('context',{sessionId:token,quiet:false,available:true,ttlMs:20});
+    const pending=h.send('submit',{sessionId:token,messageId:'refused',selectedText:'SYNTHETIC must remain unclaimed'});await tick();
+    if(invalidation==='pause')await h.send('pause');
+    if(invalidation==='new-context')await h.send('context',{sessionId:token,quiet:false,available:true,ttlMs:30000});
+    let stopped:Promise<any>|undefined;if(invalidation==='stop')stopped=h.send('stop');
+    assert.equal((await pending).error.code,'FOREGROUND_DRAIN_REFUSED');assert.equal(calls,0);assert.equal(resources.calls.active,true);
+    if(stopped){assert.equal((await stopped).result.rawCallsActive,true);await h.run;}
+    else{const state=(await h.send('status')).result;assert.equal(state.persistence.ingressCount,0);assert.equal(state.requests.total,0);}
+    done.resolve();await tick();assert.equal(resources.calls.active,false);assert.equal(calls,0);
+  });
+}
+
+test('schedule uses only existing availability and cannot revive an expired original lease',async t=>{
+  let now=0,calls=0;const h=fixture(t,{clock:()=>now,providerFactory:()=>({interact:async()=>{calls++;return response;}})});
+  const sessionId=await activate(h);assert.equal((await h.send('status')).result.scheduled,false);
+  now=29990;assert.equal((await h.send('schedule',{sessionId,recallQuery:'synthetic'})).result.scheduled,true);
+  now=30000;assert.equal((await h.send('status')).result.available,false);
+  assert.equal((await h.send('schedule',{sessionId,recallQuery:'synthetic'})).result.scheduled,false);assert.equal(calls,0);
+});
+test('idempotent background schedule stop cannot cancel an already waiting foreground admission',async t=>{
+  let resources!:InteractionResources,calls=0;const h=fixture(t,{providerFactory:(_config,shared)=>{resources=shared;return {
+    interact:async()=>{calls++;return response;}};}});
+  const sessionId=await activate(h),done=deferred<void>(),raw=resources.transport.run(new AbortController().signal,()=>done.promise);
+  const pending=h.send('submit',{sessionId,messageId:'human-A',selectedText:'SYNTHETIC A'});await tick();
+  for(let i=0;i<2;i++)assert.equal((await h.send('schedule',{sessionId,recallQuery:null})).result.scheduled,false);
+  assert.equal((await h.send('status')).result.submitting,true);assert.equal(resources.transport.active,true);assert.equal(calls,0);
+  done.resolve();await raw;assert.equal((await pending).ok,true);assert.equal(calls,1);
+});
+test('foreground drain checks original lease after raw settlement even when the timeout callback has not run',async t=>{
+  let now=0,resources!:InteractionResources,calls=0;const h=fixture(t,{clock:()=>now,providerFactory:(_config,shared)=>{resources=shared;return {interact:async()=>{calls++;return response;}};}});
+  const sessionId=await activate(h),done=deferred<void>(),raw=resources.transport.run(new AbortController().signal,()=>done.promise);
+  const pending=h.send('submit',{sessionId,messageId:'expired',selectedText:'SYNTHETIC unclaimed'});await tick();now=30000;done.resolve();await raw;
+  assert.equal((await pending).error.code,'FOREGROUND_DRAIN_REFUSED');assert.equal(calls,0);assert.equal((await h.send('status')).result.lastSourceRef,null);
+});
+test('revoke immediately rejects a foreground drain without adding a second durable ingress',async t=>{
+  let resources!:InteractionResources,calls=0;const h=fixture(t,{providerFactory:(_config,shared)=>{resources=shared;return {
+    interact:async input=>{shared.budget.reserve(input.requestId);calls++;return response;}};}});
+  const persistence={directory:mkdtempSync(join(tmpdir(),'companion-drain-revoke-')),identity:'SYNTHETIC_REVOKE_WAIT',keyBase64:randomBytes(32).toString('base64')};
+  const sessionId=await activate(h,4,{persistence});await h.send('submit',{sessionId,messageId:'source',selectedText:'SYNTHETIC source'});
+  const source=(await h.send('status')).result.lastSourceRef,done=deferred<void>(),raw=resources.calls.run(new AbortController().signal,()=>done.promise);
+  const pending=h.send('submit',{sessionId,messageId:'unclaimed',selectedText:'SYNTHETIC unclaimed'});await tick();
+  assert.equal((await h.send('revoke',{sessionId,ref:source})).ok,true);assert.equal((await pending).error.code,'FOREGROUND_DRAIN_REFUSED');
+  const state=(await h.send('status')).result;assert.equal(state.persistence.ingressCount,1);assert.equal(state.requests.total,1);assert.equal(calls,1);
+  assert.equal(resources.calls.active,true);done.resolve();await raw;
+});
 test('zero-call boot needs no key/provider and cannot be upgraded by stdin commands',async t=>{
   let factories=0;const h=fixture(t,{providerFactory:()=>{factories++;throw new Error('must not construct HTTP');}});
   const sessionId=await activate(h,0);const status=await h.send('status');assert.equal(status.result.requestsEnabled,false);

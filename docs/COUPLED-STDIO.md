@@ -27,6 +27,7 @@ The boot response returns `sessionId`. Except `status`, `pause` and `stop`, ever
 | `pause` | none | Immediately cancels local output, including while submit/switch is awaiting a provider |
 | `resume` | `sessionId` | Explicitly resumes; does not grant availability or auto-ACK anything |
 | `context` | `sessionId`, `quiet`, `available`, `ttlMs` | Trusted parent availability lease, `1..30000` ms |
+| `schedule` | `sessionId`, `recallQuery:string|null` | Installs scheduling using existing absolute lease only, or cancels old scheduling; no presence grant |
 | `submit` | `sessionId`, `messageId`, `selectedText`; optional `recallQuery`, `feedback` | One native user message; returns only delivery/request metadata and appraisal status |
 | `take` | `sessionId`, `deliveryId` | One-shot local payload consumption; this is the only command that returns response text and recall statements |
 | `ack` | `sessionId`, `deliveryId` | Parent confirms actual delivery after a successful `take`; ACK is not engagement |
@@ -41,9 +42,13 @@ The boot response returns `sessionId`. Except `status`, `pause` and `stop`, ever
 
 `submit` does not block the reader: `status`, `pause`, `stop` and source-control commands remain serviceable during inference. Only one submit and one management operation can be in flight. Concurrent management/resume attempts fail closed; there is no queued series of worker starts or provider retries.
 
+Before its first core submission, a foreground request stops background scheduling and waits for logical cancellation plus actual call/transport/neural settlement. One waiter is bounded by the captured original availability expiry (at most 30 seconds); timer starvation cannot extend it. Until admission, it creates no ingress claim, memory or request reservation. Pause, revoke, context replacement, stop or expiry returns fixed `FOREGROUND_DRAIN_REFUSED`, removes subscriptions, and leaves unsettled raw permits occupied. There is no automatic retry or refund. A provider admitted after waiting receives only the remaining original lease.
+
 ## Optional proactive scheduling
 
 `context` may additionally contain `recallQuery:"..."` to enable the existing one-shot scheduler, or `recallQuery:null` to stop it. Omitting the field preserves the current scheduler setting. The parent must derive `available` from actual current host/user context; a resident process alone is not proof of availability.
+
+The native DSH path always disables scheduling for foreground context. After the latest human turn's native ACK, it sends `schedule` separately; that command neither calls `setHostContext` nor replaces the recorded expiry. Paused/invalid/expired contexts return `scheduled:false`. A fresh human arrival sends `schedule` with null before admission, cancelling old background ownership without releasing its raw permits.
 
 The scheduler's refresh callback only reads the parent's still-valid lease and remaining duration. It does not renew that lease internally. Expired availability prevents proactive work until a new explicit context command arrives. A proactive completion emits only `{version:1,event:'delivery-ready',sessionId,deliveryId}`. The parent must explicitly take the payload and separately ACK actual delivery. There is no automatic local display, social delivery, reward or positive feedback.
 

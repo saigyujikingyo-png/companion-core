@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CoreError, fail, text } from './validation.ts';
 import { mapEvent } from './wire.ts';
+import { bounded } from './runtime.ts';
 import type { DshCoupledBackend, DshBackendClose } from './dsh-coupled-backend.ts';
 
 export type DshNativeChunk={type:'block-start';index:0;blockType:'text'}|{type:'text-delta';index:0;text:string}
@@ -11,13 +12,15 @@ export type DshCoupledEvent={kind:string;status:string;sessionId:string;turn?:nu
   code?:string;elapsedMs?:number;usageSnapshotKnown?:boolean};
 type Selected={id:string;key:string;text:string;hash:string;arrivedAt:number};
 type Prepared={messageId:string;deliveryId:string;generation:number;expiresAt:number;consumed:boolean;cancelled:boolean};
+type PreparedOffer={deliveryId:string;generation:number;expiresAt:number};
 type Turn={number:number;claims:Set<string>;started:boolean;stopping:boolean;ended:boolean;cancelled:boolean;streamStarted:boolean;
-  streamComplete:boolean;deliveryId:string|null;reply:string|null;assistantId:string|null;prepared:boolean;controller:AbortController;offAbort:()=>void};
+  streamComplete:boolean;deliveryId:string|null;reply:string|null;assistantId:string|null;prepared:boolean;acknowledged:boolean;
+  generation:number;scheduleQuery:string|null;humanId:string|null;controller:AbortController;offAbort:()=>void};
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
 const object=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 const safeFailureCodes=new Set(['INFERENCE_TIMEOUT','PROVIDER_NETWORK','PROVIDER_HTTP_STATUS','PROVIDER_CONTENT_TYPE','PROVIDER_RESPONSE_TOO_LARGE',
   'PROVIDER_RESPONSE_INVALID','ABORTED','BUDGET_DISABLED','REQUEST_BUDGET_EXHAUSTED','INTERACTION_TERMINATED','INTERACTION_STALE',
-  'HOST_CONTEXT_BLOCKED','SESSION_PAUSED','DSH_BACKEND_PROTOCOL','DSH_BACKEND_COMMAND_TIMEOUT','DSH_BACKEND_CLOSED','DSH_CANCELLED']);
+  'HOST_CONTEXT_BLOCKED','SESSION_PAUSED','DSH_BACKEND_PROTOCOL','DSH_BACKEND_COMMAND_TIMEOUT','DSH_BACKEND_CLOSED','DSH_CANCELLED','FOREGROUND_DRAIN_REFUSED']);
 function contentText(value:unknown):string{
   if(!Array.isArray(value)||value.length<1||value.length>32)fail('DSH_UNSUPPORTED_CONTENT');
   const parts=value.map(part=>{if(!object(part)||part.type!=='text')fail('DSH_UNSUPPORTED_CONTENT');text(part.text,4096);return part.text;});
@@ -29,19 +32,21 @@ function contentText(value:unknown):string{
 export class DshCoupledBridge {
   readonly #backend:DshCoupledBackend;readonly #sessionId:string;readonly #provider:string;readonly #model:string;
   readonly #clock:()=>number;readonly #event:(event:DshCoupledEvent)=>void;
-  readonly #publish:((deliveryId:string,attach:(messageId:string)=>boolean)=>Promise<boolean>)|undefined;
+  readonly #publish:((deliveryId:string,attach:(messageId:string)=>boolean,signal:AbortSignal)=>Promise<boolean>)|undefined;
   readonly #cancelNativePrepared:(()=>void)|undefined;readonly #offPrepared:(()=>void)|undefined;
   readonly #realProvider:boolean;
   #mounted=true;#generation=1;#lastTime=0;#leaseExpires=0;#latestTurn=0;#requests=0;#acks=0;#realCalls=0;
   #selected=new Map<string,Selected>();#handled=new Set<string>();#turns=new Map<number,Turn>();
   #arrivals=new Map<string,{time:number;hash:string}>();
   #prepared=new Map<string,Prepared>();#preparedDeliveries=new Set<string>();#publishing=false;
+  #waitingPrepared=new Map<string,PreparedOffer>();#activePrepared:string|null=null;
+  #publicationAbort:AbortController|null=null;#latestHumanId:string|null=null;#schedulerStopping:Promise<void>|null=null;
   #pausing:Promise<void>|null=null;#close:Promise<DshBackendClose>|null=null;
   #manualPaused=false;#switching=false;#manualVersion=0;
   #pendingFeedback:{deliveryId:string;outcome:'engaged'|'declined'|'neutral'}|null=null;
   #usageKnown=true;
   constructor(backend:DshCoupledBackend,options:{sessionId:string;provider:string;model:string;clock?:()=>number;
-    onEvent?:(event:DshCoupledEvent)=>void;publishPrepared?:(deliveryId:string,attach:(messageId:string)=>boolean)=>Promise<boolean>;
+    onEvent?:(event:DshCoupledEvent)=>void;publishPrepared?:(deliveryId:string,attach:(messageId:string)=>boolean,signal:AbortSignal)=>Promise<boolean>;
     cancelNativePrepared?:()=>void;realProvider?:boolean;requireManualResume?:boolean;initialConsumedRequests?:number}){
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.sessionId))fail('DSH_DEDICATED_SESSION_REQUIRED');
     text(options.provider,128);text(options.model,128);this.#backend=backend;this.#sessionId=options.sessionId;
@@ -67,11 +72,11 @@ export class DshCoupledBridge {
     if(!Number.isSafeInteger(number)||(number as number)<1)fail('DSH_TURN_INVALID');
     const n=number as number;let turn=this.#turns.get(n);
     if(!turn){if(this.#turns.size>=128)fail('DSH_SESSION_CAPACITY');turn={number:n,claims:new Set(),started:false,stopping:false,ended:false,
-      cancelled:false,streamStarted:false,streamComplete:false,deliveryId:null,reply:null,assistantId:null,prepared:false,
+      cancelled:false,streamStarted:false,streamComplete:false,deliveryId:null,reply:null,assistantId:null,prepared:false,acknowledged:false,generation:0,scheduleQuery:null,humanId:null,
       controller:new AbortController(),offAbort:()=>{}};this.#turns.set(n,turn);}return turn;
   }
   #invalidatePrepared():void{
-    this.#generation++;
+    this.#generation++;this.#waitingPrepared.clear();this.#activePrepared=null;this.#publicationAbort?.abort();
     for(const prepared of this.#prepared.values())prepared.cancelled=true;
     const active=this.#turns.get(this.#latestTurn);
     if(active?.prepared&&!active.ended){this.#cancel(active,'human-input-preempted');try{this.#cancelNativePrepared?.();}catch{}}
@@ -81,7 +86,12 @@ export class DshCoupledBridge {
     if(message.source.kind==='user'){
       text(message.id,256);const hash=digest(contentText(message.content)),old=this.#arrivals.get(message.id);
       if(old&&old.hash!==hash)fail('DSH_IDEMPOTENCY_CONFLICT');
-      if(!old){if(this.#arrivals.size>=128)fail('DSH_SESSION_CAPACITY');this.#arrivals.set(message.id,{time:this.#now(),hash});}
+      if(!old){if(this.#arrivals.size>=128)fail('DSH_SESSION_CAPACITY');this.#arrivals.set(message.id,{time:this.#now(),hash});this.#latestHumanId=message.id;
+        if(this.#publish&&!this.#schedulerStopping){
+          const stopping=this.#backend.command('schedule',{recallQuery:null}).then(()=>{},()=>{void this.pause();});this.#schedulerStopping=stopping;
+          void stopping.then(()=>{if(this.#schedulerStopping===stopping)this.#schedulerStopping=null;});
+        }
+      }
       this.#invalidatePrepared();
     }
   }
@@ -128,10 +138,21 @@ export class DshCoupledBridge {
     }
     if(event.type==='turn/end'){
       if(turn.ended)return;turn.ended=true;turn.offAbort();
+      // A terminal native turn also consumes inputs rejected before stream
+      // admission. They cannot block later fresh input or gain a replay lease.
+      for(const id of turn.claims)if(this.#arrivals.has(id))this.#handled.add(id);
       const completed=object(data.reason)&&data.reason.kind==='completed';
       if(!completed||turn.cancelled||!turn.streamComplete||!turn.assistantId||!turn.deliveryId){this.#cancel(turn,'native-not-completed');this.#log('turn-end','not-acknowledged',turn.number);return;}
-      try{await this.#backend.command('ack',{deliveryId:turn.deliveryId});if(!this.#mounted||turn.cancelled)return;
-        this.#acks++;this.#log('delivery-ack','native-commit-and-completed',turn.number,{deliveryId:turn.deliveryId});this.#log('turn-end','completed',turn.number);
+      const generation=turn.generation;
+      try{await this.#backend.command('ack',{deliveryId:turn.deliveryId});if(!this.#mounted||turn.cancelled||generation!==this.#generation)return;
+        turn.acknowledged=true;this.#acks++;this.#log('delivery-ack','native-commit-and-completed',turn.number,{deliveryId:turn.deliveryId});this.#log('turn-end','completed',turn.number);
+        if(turn.prepared&&this.#activePrepared&&this.#prepared.get(this.#activePrepared)?.deliveryId===turn.deliveryId)this.#activePrepared=null;
+        if(this.#publish&&!turn.prepared&&turn.scheduleQuery&&turn.humanId===this.#latestHumanId&&!this.#foregroundWaiting()&&this.#now()<this.#leaseExpires){
+          await this.#backend.command('schedule',{recallQuery:turn.scheduleQuery});
+          if(!this.#mounted||turn.cancelled||generation!==this.#generation)return;
+        }
+        // Do not await native maintenance from its own turn-end callback.
+        void this.#drainPrepared().catch(()=>{void this.pause();});
       }catch{this.#log('delivery-ack','rejected',turn.number);await this.pause();}
     }
   }
@@ -167,16 +188,19 @@ export class DshCoupledBridge {
         ||lastUser.source.kind!=='companion-prepared-delivery'||contentText(lastUser.content)!==this.preparedNotice(prepared.deliveryId))fail('DSH_UNOWNED_NOTIFICATION');
       prepared.consumed=true;turn.prepared=true;
     }
-    turn.streamStarted=true;
+    turn.streamStarted=true;turn.generation=this.#generation;
     const abort=()=>this.#cancel(turn,'native-signal');options.signal.addEventListener('abort',abort,{once:true});
     turn.offAbort=()=>options.signal!.removeEventListener('abort',abort);
     let stage='context';const startedAt=this.#now();
     try{
       await this.#pausing;
       if(human){
-        if(options.signal.aborted||!this.#mounted)fail('DSH_CANCELLED');this.#leaseExpires=selected!.arrivedAt+30000;
+        await this.#schedulerStopping;
+        if(options.signal.aborted||!this.#mounted||this.#manualPaused||this.#switching||turn.cancelled||turn.controller.signal.aborted)fail('DSH_CANCELLED');
+        this.#leaseExpires=selected!.arrivedAt+30000;turn.humanId=selected!.id;
         const ttlMs=Math.floor(this.#leaseExpires-this.#now());if(ttlMs<1)fail('DSH_INPUT_EXPIRED');
-        await this.#backend.command('context',{quiet:false,available:true,ttlMs,...(this.#publish?{recallQuery:selected!.text.slice(0,256)}:{})},turn.controller.signal);
+        turn.scheduleQuery=this.#publish?selected!.text.slice(0,256):null;
+        await this.#backend.command('context',{quiet:false,available:true,ttlMs,recallQuery:null},turn.controller.signal);
         stage='resume';await this.#backend.command('resume',{},turn.controller.signal);this.#check(turn,options.signal);
         this.#usageKnown=!this.#realProvider;
         this.#requests++;this.#log('provider-request','selected-native-user',turn.number,{messageId:selected!.id});
@@ -205,27 +229,53 @@ export class DshCoupledBridge {
   }
   preparedNotice(deliveryId:string):string{return `Machine notification: companion prepared delivery ${deliveryId}. This is not a human message or feedback.`;}
   async #offerPrepared(deliveryId:string):Promise<void>{
-    if(!this.#mounted||this.#manualPaused||this.#switching||!this.#publish||this.#publishing||this.#now()>=this.#leaseExpires||this.#preparedDeliveries.has(deliveryId))return;
-    const turn=this.#turns.get(this.#latestTurn);if(turn&&!turn.ended)return;
-    if(this.#preparedDeliveries.size>=128)return;this.#preparedDeliveries.add(deliveryId);this.#publishing=true;const generation=this.#generation;
+    text(deliveryId,128);
+    if(!this.#mounted||this.#manualPaused||this.#switching||!this.#publish||this.#foregroundWaiting()||this.#now()>=this.#leaseExpires||this.#preparedDeliveries.has(deliveryId))return;
+    if(this.#preparedDeliveries.size>=128)return;this.#preparedDeliveries.add(deliveryId);
+    // Keep the original one-shot result, generation and lease while a native
+    // turn/ACK or publisher is busy. No provider work or lease refresh occurs.
+    this.#waitingPrepared.set(deliveryId,{deliveryId,generation:this.#generation,expiresAt:this.#leaseExpires});
+    await this.#drainPrepared();
+  }
+  #offerValid(offer:PreparedOffer):boolean{
+    return this.#mounted&&!this.#manualPaused&&!this.#switching&&!this.#foregroundWaiting()&&offer.generation===this.#generation
+      &&this.#now()<offer.expiresAt&&this.#now()<this.#leaseExpires;
+  }
+  #foregroundWaiting():boolean{const now=this.#now();return [...this.#arrivals].some(([id,arrival])=>!this.#handled.has(id)&&now<arrival.time+30000);}
+  #nativeSettled():boolean{
+    const turn=this.#turns.get(this.#latestTurn);return this.#activePrepared===null&&!!turn&&turn.ended&&turn.acknowledged&&!turn.cancelled;
+  }
+  async #drainPrepared():Promise<void>{
+    if(this.#publishing||!this.#publish)return;this.#publishing=true;
     try{
-      await this.#refreshUsage();
-      const accepted=await this.#publish(deliveryId,messageId=>{
-        if(!this.#mounted||generation!==this.#generation||this.#now()>=this.#leaseExpires||this.#prepared.has(messageId))return false;text(messageId,256);
-        const active=this.#turns.get(this.#latestTurn);if(active&&!active.ended)return false;
-        this.#prepared.set(messageId,{messageId,deliveryId,generation:this.#generation,expiresAt:this.#leaseExpires,consumed:false,cancelled:false});return true;
-      });
-      if(!accepted)for(const item of this.#prepared.values())if(item.deliveryId===deliveryId)item.cancelled=true;
-      this.#log('prepared-notification',accepted?'machine-followup-queued':'not-queued');
-    }catch{for(const item of this.#prepared.values())if(item.deliveryId===deliveryId)item.cancelled=true;
-      this.#log('prepared-notification','rejected');}finally{this.#publishing=false;}
+      while(this.#waitingPrepared.size){
+        const offer=this.#waitingPrepared.values().next().value!;
+        if(!this.#offerValid(offer)){this.#waitingPrepared.delete(offer.deliveryId);continue;}
+        if(!this.#nativeSettled())return;
+        await this.#refreshUsage();
+        if(!this.#offerValid(offer)){this.#waitingPrepared.delete(offer.deliveryId);continue;}
+        if(!this.#nativeSettled())return;
+        this.#waitingPrepared.delete(offer.deliveryId);
+        const publication=new AbortController();this.#publicationAbort=publication;
+        try{
+          const accepted=await bounded(publication.signal,Math.max(1,Math.ceil(offer.expiresAt-this.#now())),signal=>this.#publish!(offer.deliveryId,messageId=>{
+            if(signal.aborted||!this.#offerValid(offer)||!this.#nativeSettled()||this.#prepared.has(messageId))return false;text(messageId,256);
+            this.#prepared.set(messageId,{messageId,deliveryId:offer.deliveryId,generation:offer.generation,expiresAt:offer.expiresAt,consumed:false,cancelled:false});this.#activePrepared=messageId;return true;
+          },signal));
+          if(!accepted)for(const item of this.#prepared.values())if(item.deliveryId===offer.deliveryId){item.cancelled=true;if(this.#activePrepared===item.messageId)this.#activePrepared=null;}
+          this.#log('prepared-notification',accepted?'machine-followup-queued':'not-queued');
+        }catch{for(const item of this.#prepared.values())if(item.deliveryId===offer.deliveryId){item.cancelled=true;if(this.#activePrepared===item.messageId)this.#activePrepared=null;}
+          this.#log('prepared-notification','rejected');}
+        finally{publication.abort();if(this.#publicationAbort===publication)this.#publicationAbort=null;}
+      }
+    }finally{this.#publishing=false;}
   }
   #cancel(turn:Turn,reason:string):void{
     if(turn.cancelled)return;turn.cancelled=true;turn.controller.abort();turn.offAbort();this.#log('cancelled',reason,turn.number);void this.pause();
   }
   pause():Promise<void>{
     this.#pendingFeedback=null;
-    this.#generation++;this.#leaseExpires=0;for(const item of this.#prepared.values())item.cancelled=true;
+    this.#generation++;this.#leaseExpires=0;this.#waitingPrepared.clear();this.#activePrepared=null;this.#publicationAbort?.abort();for(const item of this.#prepared.values())item.cancelled=true;
     for(const turn of this.#turns.values())if(!turn.ended){turn.cancelled=true;turn.controller.abort();turn.offAbort();}
     if(this.#pausing)return this.#pausing;
     const task=this.#backend.command('pause').then(async()=>{

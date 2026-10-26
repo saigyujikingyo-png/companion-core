@@ -1,8 +1,8 @@
-# Session-only coupled interaction prototype
+# Coupled interaction prototype
 
 `CoupledSession` connects selected user text, legal memory recall, engineered background state, a structured interaction provider and a local delivery receipt. It defaults to paused and quiet/unavailable. There is no personal database migration, global configuration, credential discovery, social-message transport, startup installation or model call in its constructor.
 
-M2 encrypted persistence/revocation recovery is still absent. A resident development host must use a new in-memory `MemoryStore` and random session on every boot, keep personal text off disk, and disclose that process exit loses its memory/state. The session ID is required on submitted messages and receipts are scoped to the issuing session. This is session deduplication, not durable cross-restart exactly-once continuity. Old sessions/worker states cannot be restored or silently relabelled.
+The default RAM host loses memory and quota on exit. Optional [M2a encrypted persistence](M2-DURABLE.md) retains selected memory, ingress consumption, quota and revocation authority through encrypted checkpoints and an independent safety ledger. Both modes use in-memory SQLite and a fresh runtime session on every boot, paused and quiet/unavailable. Background/neural state, presence and output permissions are not restored. Receipts remain scoped to the issuing runtime; this is not cross-restart exactly-once delivery or arbitrary rollback protection.
 
 ## Host entry points
 
@@ -10,7 +10,7 @@ M2 encrypted persistence/revocation recovery is still absent. A resident develop
 const resources = new InteractionResources(new RequestBudget({ total: 8, hourly: 8, daily: 8 }));
 const provider = new HttpInteractionProvider({ transport: 'cloud_https', endpoint, model }, resources, { apiKey });
 const session = new CoupledSession(store, epoch, { provider, resources });
-session.setHostContext({ quiet: false, available: true, ttlMs: 60_000 });
+session.setHostContext({ quiet: false, available: true, ttlMs: 30_000 });
 session.resume();
 const receipt = await session.submit({ sessionId: session.sessionId, id: nativeId, selectedText, recallQuery });
 const output = session.takeDelivery(receipt.deliveryId);
@@ -42,6 +42,12 @@ Recall starts from `MemoryStore.search` results after authority validation. A de
 
 Optional `startScheduler({recallQuery,refreshContext,onReady,onError})` arms one timeout at the next analytical state deadline or host-availability expiry. It refreshes trusted host context when fired and never replays ticks. In-flight raw operations prevent a past deadline from creating a busy loop. `stopScheduler` invalidates its generation, cancels its pending proactive operation and suppresses obsolete consumers/outbox entries; ordinary user requests have separate ownership. Consumer throws/rejected promises are contained. The default has no timer.
 
+The DSH adapter stops old scheduling on a fresh human arrival and sends foreground context with scheduling disabled. Only that latest human turn's matching native commit, completed end and settled core ACK may install scheduling, using a separate private command that retains the existing expiry. A machine turn never installs scheduling or renews presence. The native lease remains at most 30 seconds from the original arrival; the background drive time constant remains 60 seconds. Cold state may need later genuine input to provide another finite lease. Tests do not lower the threshold, manufacture presence or treat accelerated clocks as native elapsed-time evidence.
+
+Private stdio foreground admission has one bounded waiter for cancelled logical work and all raw call/transport/neural permits. It subscribes to actual settlement without polling, claiming ingress, publishing memory or reserving quota. Cancellation removes only the waiter. Pause, revocation, context replacement, shutdown or the original absolute expiry rejects admission with `FOREGROUND_DRAIN_REFUSED`; no retry is scheduled. After settlement the original control/session/expiry fences are rechecked and at most one submit begins. Its fixed provider/delivery deadline is also capped by the remaining host lease.
+
+Prepared native offers retain their original delivery ID, generation and expiry in a bounded pending set. An active human turn, pending ACK or publisher cannot silently lose the one-shot ready event. There is at most one attached machine notice awaiting its native turn/ACK; distinct offers cannot be batched into an ambiguous turn. Human input, pause, switch, revoke, expiry and close invalidate pending offers. The host waits for public SDK `whenIdle()` before `runMaintenance`; that SDK promise has no cancellation API, so local waiting is bounded by the original offer lease and late settlement grants no permission. Attach rechecks authority immediately before the machine followup.
+
 ## Optional CPU graph worker
 
 `JsonlPriorAdapter.start` accepts explicit absolute Python/worker/archive paths and expected SHA256s. The worker pins the three original neural source hashes and verifies the saved 3,136-node graph archive and structural digest; it does not reload the 15-million-row source table. It checks at least 1.5 GiB available host RAM before Torch import, again after imports, and before each step; uses CPU with two threads; never trains, downloads or writes runtime data. GPU is not selected by this worker.
@@ -54,4 +60,4 @@ The native bridge admits at most one resident child in its process. Its resident
 
 ## Verification boundary
 
-`test/coupled-runtime.test.ts` covers history-dependent legal ordering, zero-bias ablation, structured appraisal, source-bound delivered feedback, idempotency, original run/conditioning revocation, exact 5/15-second boundaries, pause/raw-permit retention, reset/rebind/switch, rolling request caps and scheduler cancellation/consumer failure. `test/jsonl-prior.test.ts` runs an actual synthetic Node child to check JSONL ready/step/reset/stop, malformed/oversized/hung output and cancellation through child close. These fixtures make zero real model calls and do not qualify the physical Python graph runtime. Real DeepSeek, physical CPU worker and resident host acceptance belong to separate Root-run evidence. No test here proves human-level emotion, long-term reliability or personal persistence.
+`test/coupled-runtime.test.ts` covers history-dependent legal ordering, zero-bias ablation, structured appraisal, source-bound delivered feedback, idempotency, original run/conditioning revocation, exact 5/15-second boundaries, pause/raw-permit retention, reset/rebind/switch, rolling request caps and scheduler cancellation/consumer failure. The stdio/native-shaped fixtures additionally cover foreground settlement admission, ready/ACK/publisher races, fixed leases and stale machine notifications. `test/jsonl-prior.test.ts` runs an actual synthetic Node child to check JSONL ownership and shutdown. These fixtures make zero real model calls and do not qualify native proactive delivery or the physical Python graph runtime. M2's separate tests and finite native memory evidence do not establish long-term reliability, natural motivation or human-level emotion.

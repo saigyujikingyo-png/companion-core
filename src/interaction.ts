@@ -49,7 +49,19 @@ export function interactionResponse(input: unknown): InteractionResponse {
 /** Caller cancellation is prompt; the sole raw permit survives until actual settlement. */
 export class RawOperationPermit {
   #active = false;
+  #idleWaiter: (() => void) | null = null;
   get active(): boolean { return this.#active; }
+  /** One local observer; cancellation only removes it, never releases raw work. */
+  waitForIdle(signal:AbortSignal):Promise<void> {
+    if(signal.aborted)return Promise.reject(abortError());
+    if(!this.#active)return Promise.resolve();
+    if(this.#idleWaiter)return Promise.reject(new CoreError('INTERACTION_BACKPRESSURE'));
+    return new Promise((resolve,reject)=>{
+      const cleanup=()=>{signal.removeEventListener('abort',cancel);if(this.#idleWaiter===ready)this.#idleWaiter=null;};
+      const ready=()=>{cleanup();resolve();},cancel=()=>{cleanup();reject(abortError());};
+      this.#idleWaiter=ready;signal.addEventListener('abort',cancel,{once:true});
+    });
+  }
   run<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
     if (signal.aborted) return Promise.reject(abortError());
     if (this.#active) return Promise.reject(new CoreError('INTERACTION_BACKPRESSURE'));
@@ -65,7 +77,8 @@ export class RawOperationPermit {
       signal.addEventListener('abort', cancel, { once:true });
       let raw: Promise<T>;
       try { raw = Promise.resolve(operation()); } catch (error) { raw = Promise.reject(error); }
-      void raw.then(value => { this.#active = false; finish(true, value); }, error => { this.#active = false; finish(false, error); });
+      void raw.then(value => { this.#active = false; finish(true, value); this.#idleWaiter?.(); },
+        error => { this.#active = false; finish(false, error); this.#idleWaiter?.(); });
     });
   }
 }

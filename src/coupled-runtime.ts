@@ -3,7 +3,7 @@ import type { Epoch, MemoryRecord, Proposal, RunTicket, SourceRef } from './cont
 import { BackgroundState } from './background-state.ts';
 import type { BackgroundView, ShadowIntent } from './background-state.ts';
 import { MemoryStore } from './store.ts';
-import { bounded, timeoutMs } from './runtime.ts';
+import { abortError, bounded, timeoutMs } from './runtime.ts';
 import { CoreError, fail, text } from './validation.ts';
 import { InteractionResources, interactionResponse, validatePrior } from './interaction.ts';
 import type { BackendMode, InteractionProvider, Prior, PriorAdapter, RecallAudit } from './interaction.ts';
@@ -64,6 +64,7 @@ export class CoupledSession {
   #inputs = new Map<string,PendingInput>(); #deliveries = new Map<string,DeliveryEntry>(); #intents = new Set<string>();
   #pending: AbortController | null = null; #timer: ReturnType<typeof setTimeout> | undefined;
   #schedulerVersion = 0; #pendingSchedulerVersion: number | null = null;
+  #idleWaiter:(()=>void)|null=null;
   #scheduler: { recallQuery:string; onReady:(result:InteractionResult) => void; onError:(code:string) => void;
     refreshContext:() => {quiet:boolean;available:boolean;ttlMs:number} } | undefined;
   constructor(store: MemoryStore, epoch: Epoch, options: { provider: InteractionProvider; resources: InteractionResources;
@@ -221,6 +222,22 @@ export class CoupledSession {
     finally { this.#arm(); }
   }
   considerShadow(): ShadowIntent | null { this.#guard(true); return this.#state.consider().intent; }
+  /** Foreground admission waits for cancelled background work to actually drain.
+   * The trusted host owns its original deadline and cancellation signal. */
+  async waitForIdle(signal:AbortSignal):Promise<void>{
+    this.#guard(true);signal.throwIfAborted();
+    if(this.#idleWaiter)fail('INTERACTION_BACKPRESSURE');
+    const cleanupController=new AbortController(),waiting=AbortSignal.any([signal,cleanupController.signal]);
+    const logical=this.#pending?new Promise<void>((resolve,reject)=>{
+      const cleanup=()=>{waiting.removeEventListener('abort',cancel);if(this.#idleWaiter===ready)this.#idleWaiter=null;};
+      const ready=()=>{cleanup();resolve();},cancel=()=>{cleanup();reject(abortError());};
+      this.#idleWaiter=ready;waiting.addEventListener('abort',cancel,{once:true});
+    }):Promise.resolve();
+    try{await Promise.all([logical,...[this.#resources.calls,this.#resources.transport,this.#resources.neural].map(p=>p.waitForIdle(waiting))]);}
+    finally{cleanupController.abort();}
+    signal.throwIfAborted();this.#guard(true);
+    if(this.#pending||this.#resources.calls.active||this.#resources.transport.active||this.#resources.neural.active)fail('INTERACTION_BACKPRESSURE');
+  }
   async considerProactive(query: string, suppliedIntent?: ShadowIntent): Promise<InteractionResult | null> {
     return this.#proactive(query,suppliedIntent,null);
   }
@@ -242,7 +259,7 @@ export class CoupledSession {
   async #perform(input: {requestId:string;selectedText:string|null;query:string|undefined;anchor?:SourceRef;event?:SourceRef;
     kind:'user'|'proactive';motive:'affiliation'|'withdrawal'|null;schedulerVersion?:number|null}): Promise<InteractionResult> {
     const startedAt = this.#guard(true), generation = this.#generation, contextRevision = this.#contextRevision;
-    const deadline = startedAt + this.#duration; // Never refreshed by heartbeat or re-validating a shadow token.
+    const deadline = Math.min(startedAt + this.#duration,this.#host.expiresAt); // Fixed even after drain or heartbeat refresh.
     const controller = new AbortController(); this.#pending = controller; this.#pendingSchedulerVersion = input.schedulerVersion ?? null;
     const valid = () => { const now = this.#guard(true); if (controller.signal.aborted || generation !== this.#generation
       || contextRevision !== this.#contextRevision || now >= deadline) fail('INTERACTION_STALE'); };
@@ -294,7 +311,7 @@ export class CoupledSession {
       this.#deliveries.set(deliveryId,{value:delivery,generation,contextRevision,status:'ready',feedbackId:null,schedulerVersion:input.schedulerVersion??null});
       return {sessionId:this.sessionId,requestId:input.requestId,deliveryId,status:'ready',recall,appraisalStatus};
     } catch(error) { if (this.#backend === 'flywire') this.#adapterNeedsReset = true; throw error; }
-    finally { if (this.#pending === controller) { this.#pending = null; this.#pendingSchedulerVersion = null; } }
+    finally { if (this.#pending === controller) { this.#pending = null; this.#pendingSchedulerVersion = null;this.#idleWaiter?.(); } }
   }
   #delivery(id: string): DeliveryEntry {
     const now = this.#guard(true), entry = this.#deliveries.get(id);

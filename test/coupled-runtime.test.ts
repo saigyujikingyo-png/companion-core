@@ -4,7 +4,7 @@ import type { TestContext } from 'node:test';
 import { CoupledSession } from '../src/coupled-runtime.ts';
 import { BackgroundState } from '../src/background-state.ts';
 import { HttpInteractionProvider } from '../src/http-interaction.ts';
-import { InteractionResources, RequestBudget } from '../src/interaction.ts';
+import { InteractionResources, RawOperationPermit, RequestBudget } from '../src/interaction.ts';
 import type { InteractionRequest, InteractionResponse, PriorAdapter } from '../src/interaction.ts';
 import { MemoryStore } from '../src/store.ts';
 import { CoreError } from '../src/validation.ts';
@@ -170,6 +170,34 @@ test('stopScheduler cancels its active proactive request and suppresses the stal
   f.session.startScheduler({recallQuery:'topic',refreshContext:()=>({quiet:false,available:true,ttlMs:300_000}),onReady:()=>{delivered++;},onError:()=>{errors++;}});
   const hold=setTimeout(()=>started.resolve(),1000);await started.promise;clearTimeout(hold);
   assert.equal(f.requests.length,4);f.session.stopScheduler();late.resolve(positive);await tick();await tick();assert.equal(delivered,0);assert.equal(errors,0);
+});
+test('cancelled scheduler logical work and its raw provider must both drain before foreground admission',async t=>{
+  const started=deferred<void>(),late=deferred<InteractionResponse>();
+  const f=fixture(t,async request=>{if(request.kind==='proactive'){started.resolve();return late.promise;}return positive;});
+  f.ready();for(let i=0;i<3;i++)await f.send(`warm-idle-${i}`);
+  f.clock.now=f.session.background().nextWakeAt!+1;
+  f.session.startScheduler({recallQuery:'synthetic',refreshContext:()=>({quiet:false,available:true,ttlMs:300000}),onReady:()=>assert.fail('cancelled proactive must not deliver'),onError:()=>{}});
+  const guard=setTimeout(()=>started.resolve(),1000);await started.promise;clearTimeout(guard);assert.equal(f.requests.length,4);
+  f.session.stopScheduler();let idle=false;const waiting=f.session.waitForIdle(new AbortController().signal).then(()=>{idle=true;});
+  await tick();assert.equal(idle,false);assert.equal(f.resources.calls.active,true);
+  late.resolve(positive);await waiting;assert.equal(f.resources.calls.active,false);
+  await f.send('new-foreground');assert.equal(f.requests.length,5);assert.equal(f.requests.at(-1)!.kind,'user');
+});
+test('raw idle observer cancellation removes only the waiter and permits one subsequent observer',async()=>{
+  const permit=new RawOperationPermit(),done=deferred<void>(),runAbort=new AbortController();
+  const running=permit.run(runAbort.signal,()=>done.promise),aborted=assert.rejects(running,{name:'AbortError'});runAbort.abort();await aborted;
+  const one=new AbortController(),first=permit.waitForIdle(one.signal);const rejected=assert.rejects(first,{name:'AbortError'});
+  await assert.rejects(permit.waitForIdle(new AbortController().signal),/INTERACTION_BACKPRESSURE/);
+  one.abort();await rejected;assert.equal(permit.active,true);
+  let settled=false;const second=permit.waitForIdle(new AbortController().signal).then(()=>{settled=true;});await tick();assert.equal(settled,false);
+  done.resolve();await second;assert.equal(permit.active,false);
+});
+test('foreground admitted after drain keeps only the original remaining host lease',async t=>{
+  const f=fixture(t,async()=>neutral);f.ready();f.session.setHostContext({quiet:false,available:true,ttlMs:30000});
+  const raw=deferred<void>(),operation=f.resources.transport.run(new AbortController().signal,()=>raw.promise);
+  const waiting=f.session.waitForIdle(new AbortController().signal);f.clock.now=29000;raw.resolve();await operation;await waiting;
+  const result=await f.send('after-long-drain'),delivery=f.session.takeDelivery(result.deliveryId);
+  assert.equal(delivery.expiresAtMonotonicMs,30000);
 });
 test('scheduler contains thrown and async rejecting consumers',async t=>{
   const f=fixture(t,async()=>positive);f.ready();f.memory('topic chat');for(let i=0;i<3;i++)await f.send(`warm-${i}`);

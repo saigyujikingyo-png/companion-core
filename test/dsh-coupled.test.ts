@@ -128,6 +128,89 @@ test('owned machine notification consumes prepared reply with no submit, memory 
   assert.equal(frames[1].text,'PREPARED_SYNTHETIC_REPLY');assert.equal(h.backend.calls.filter(c=>c.command==='submit').length,1);
   assert.equal(h.bridge.status.sourceCount,1);assert.equal(h.bridge.status.leaseRemainingMs,lease);assert.equal(h.bridge.status.ackCount,2);
 });
+test('prepared ready during human turn is retained until native commit, completed and settled ACK',async t=>{
+  const notices:any[]=[];const h=fixture(t,{publishPrepared:async(id,attach)=>{const notice={id:randomUUID(),role:'user',
+    source:{kind:'companion-prepared-delivery'},content:[{type:'text',text:h.bridge.preparedNotice(id)}]};
+    if(!attach(notice.id))return false;notices.push(notice);return true;}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));
+  const lease=h.bridge.status.leaseRemainingMs,contexts=h.backend.calls.filter(c=>c.command==='context').length;
+  const id=h.backend.prepared();h.backend.callback?.(id);await tick();assert.equal(notices.length,0);
+  await finish(h,'SYNTHETIC_REPLY');await tick();assert.equal(notices.length,1);
+  h.backend.callback?.(id);await tick();assert.equal(notices.length,1);
+  await begin(h,notices[0],2);await collect(h.bridge.stream(h.options([first,notices[0]])));await finish(h,'PREPARED_SYNTHETIC_REPLY',2);
+  assert.equal(h.bridge.status.ackCount,2);assert.equal(h.bridge.status.sourceCount,1);
+  assert.equal(h.bridge.status.leaseRemainingMs,lease);assert.equal(h.backend.calls.filter(c=>c.command==='context').length,contexts);
+  assert.equal(h.backend.calls.filter(c=>c.command==='submit').length,1);assert.equal(h.backend.calls.some(c=>'feedback' in c.fields),false);
+});
+test('prepared ready cannot publish while native ACK is still pending',async t=>{
+  let published=0;const ack=deferred<void>(),ackStarted=deferred<void>();
+  const h=fixture(t,{publishPrepared:async(_id,attach)=>{if(!attach(randomUUID()))return false;published++;return true;}});
+  const original=h.backend.command.bind(h.backend);h.backend.command=async(command,fields,signal)=>{
+    if(command==='ack'){ackStarted.resolve();await ack.promise;}return original(command,fields,signal);};
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));
+  const ending=finish(h,'SYNTHETIC_REPLY');await ackStarted.promise;
+  h.backend.prepared();await tick();assert.equal(published,0);
+  ack.resolve();await ending;await tick();assert.equal(published,1);
+});
+test('queued prepared offers never batch two notices before the first native turn and ACK',async t=>{
+  const notices:any[]=[],entered=deferred<void>(),release=deferred<void>();let publishes=0;
+  const h=fixture(t,{publishPrepared:async(id,attach)=>{publishes++;if(publishes===1){entered.resolve();await release.promise;}
+    const notice={id:randomUUID(),role:'user',source:{kind:'companion-prepared-delivery'},content:[{type:'text',text:h.bridge.preparedNotice(id)}]};
+    if(!attach(notice.id))return false;notices.push(notice);return true;}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');
+  const one=h.backend.prepared();await entered.promise;const two=h.backend.prepared();h.backend.callback?.(two);
+  release.resolve();await tick();assert.equal(publishes,1);assert.equal(notices.length,1);
+  h.backend.callback?.(one);await tick();assert.equal(publishes,1);
+  await begin(h,notices[0],2);await collect(h.bridge.stream(h.options([first,notices[0]])));await finish(h,'PREPARED_SYNTHETIC_REPLY',2);await tick();
+  assert.equal(publishes,2);assert.equal(notices.length,2);assert.equal(h.backend.calls.filter(c=>c.command==='submit').length,1);
+});
+for(const invalidation of ['pause','human','expiry','revoke','switch','dispose'] as const){
+  test(`waiting prepared offer is discarded on ${invalidation} without a new request`,async t=>{
+    let published=0;const h=fixture(t,{publishPrepared:async(_id,attach)=>{if(!attach(randomUUID()))return false;published++;return true;}});
+    const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));h.backend.prepared();await tick();
+    if(invalidation==='pause')await h.bridge.manualPause();
+    if(invalidation==='human')h.bridge.inboxInserted(human());
+    if(invalidation==='expiry')h.advance(30000);
+    if(invalidation==='revoke')await h.bridge.revoke({id:randomUUID(),revision:1});
+    if(invalidation==='switch')await h.bridge.switchBackend('no-state');
+    if(invalidation==='dispose')await h.bridge.dispose();
+    await finish(h,'SYNTHETIC_REPLY');await tick();assert.equal(published,0);
+    assert.equal(h.backend.calls.filter(c=>c.command==='submit').length,1);assert.equal(h.backend.calls.some(c=>'feedback' in c.fields),false);
+  });
+}
+test('pause during pending native ACK cannot publish a waiting offer or count a stale ACK',async t=>{
+  const ack=deferred<void>(),started=deferred<void>();let published=0;
+  const h=fixture(t,{publishPrepared:async()=>{published++;return true;}}),original=h.backend.command.bind(h.backend);
+  h.backend.command=async(command,fields,signal)=>{if(command==='ack'){started.resolve();await ack.promise;}return original(command,fields,signal);};
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));h.backend.prepared();
+  const ending=finish(h,'SYNTHETIC_REPLY');await started.promise;await h.bridge.manualPause();ack.resolve();await ending;await tick();
+  assert.equal(published,0);assert.equal(h.bridge.status.ackCount,0);assert.equal(h.bridge.status.leaseRemainingMs,0);
+});
+test('foreground stops scheduling before context and only its native ACK arms the unchanged lease',async t=>{
+  const h=fixture(t,{publishPrepared:async()=>false}),first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));
+  assert.ok(h.backend.calls.some(c=>c.command==='schedule'&&c.fields.recallQuery===null));
+  assert.ok(h.backend.calls.filter(c=>c.command==='context').every(c=>c.fields.recallQuery===null));
+  assert.equal(h.backend.calls.some(c=>c.command==='schedule'&&typeof c.fields.recallQuery==='string'),false);
+  const lease=h.bridge.status.leaseRemainingMs;await finish(h,'SYNTHETIC_REPLY');
+  assert.equal(h.backend.calls.filter(c=>c.command==='schedule'&&typeof c.fields.recallQuery==='string').length,1);
+  assert.equal(h.bridge.status.leaseRemainingMs,lease);
+});
+for(const moment of ['before-stream','during-stream'] as const)test(`new human ${moment} prevents an older turn ACK from arming its old query`,async t=>{
+  const h=fixture(t,{publishPrepared:async()=>false}),first=human('SYNTHETIC old'),second=human('SYNTHETIC new');
+  await begin(h,first);if(moment==='before-stream')h.bridge.inboxInserted(second);
+  await collect(h.bridge.stream(h.options([first])));if(moment==='during-stream')h.bridge.inboxInserted(second);
+  // Replayed old arrival must not change the latest fresh human identity.
+  h.bridge.inboxInserted(first);await finish(h,'SYNTHETIC_REPLY');
+  assert.equal(h.backend.calls.some(c=>c.command==='schedule'&&typeof c.fields.recallQuery==='string'),false);
+});
+test('a terminal paused input cannot permanently block scheduling after a fresh resumed human turn',async t=>{
+  const h=fixture(t,{publishPrepared:async()=>false}),refused=human('SYNTHETIC refused');await h.bridge.manualPause();await begin(h,refused);
+  await assert.rejects(collect(h.bridge.stream(h.options([refused]))),/DSH_MANUALLY_PAUSED/);
+  await h.bridge.nativeEvent(h.sessionId,{type:'turn/end',data:{turn:1,reason:{kind:'error'}}});await h.bridge.manualResume();
+  const fresh=human('SYNTHETIC fresh');await begin(h,fresh,2);await collect(h.bridge.stream(h.options([fresh])));await finish(h,'SYNTHETIC_REPLY',2);
+  assert.equal(h.backend.calls.filter(c=>c.command==='schedule'&&c.fields.recallQuery==='SYNTHETIC fresh').length,1);
+  await begin(h,refused,3);await assert.rejects(collect(h.bridge.stream(h.options([refused]))),/DSH_MESSAGE_ALREADY_HANDLED/);
+});
 test('unknown machine notification and matching user text cannot steal prepared delivery',async t=>{
   let notice:any;const h=fixture(t,{publishPrepared:async(id,attach)=>{notice={id:randomUUID(),role:'user',source:{kind:'companion-prepared-delivery'},
     content:[{type:'text',text:h.bridge.preparedNotice(id)}]};return attach(notice.id);}});
@@ -152,6 +235,15 @@ test('publication in flight is invalidated by a new human input',async t=>{
   const h=fixture(t,{publishPrepared:async(_id,attach)=>{ready.resolve();await go.promise;accepted=attach(randomUUID());return accepted;}});
   const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');h.backend.prepared();await ready.promise;
   h.bridge.inboxInserted(human());go.resolve();await tick();assert.equal(accepted,false);assert.equal(h.bridge.status.preparedCount,0);
+});
+test('publisher waiting is bounded by the original remaining lease and a late attach is refused',async t=>{
+  const entered=deferred<void>(),cancelled=deferred<void>(),late=deferred<void>();let accepted=true;
+  const h=fixture(t,{publishPrepared:async(_id,attach,signal)=>{signal.addEventListener('abort',()=>cancelled.resolve(),{once:true});entered.resolve();
+    await late.promise;accepted=attach(randomUUID());return accepted;}});
+  const first=human();await begin(h,first);await collect(h.bridge.stream(h.options([first])));await finish(h,'SYNTHETIC_REPLY');h.advance(29995);
+  h.backend.prepared();await entered.promise;
+  const guard=setTimeout(()=>cancelled.resolve(),1000);await cancelled.promise;clearTimeout(guard);
+  late.resolve();await tick();assert.equal(accepted,false);assert.equal(h.bridge.status.preparedCount,0);
 });
 test('manual pause blocks fresh native input until explicit resume and switch remains paused',async t=>{
   const h=fixture(t),message=human();await h.bridge.manualPause();await begin(h,message);
@@ -178,7 +270,7 @@ function mockHost(sessionId:string){
   const hooks=new Map<string,Function>(),commands=new Map<string,any>(),effects:Array<()=>Promise<void>>=[],queue:any[]=[];let adapter:any,cancelled=0,disposed=0;
   const on=(name:string,fn:Function)=>{hooks.set(name,fn);return()=>{hooks.delete(name);};};
   const agent={session:{id:sessionId},ctx:{on,inject:(_services:any,fn:Function)=>fn({commands:{register:(definition:any)=>{commands.set(definition.name,definition);return()=>commands.delete(definition.name);}}})},
-    cancel:async()=>{cancelled++;},followup:(message:any)=>queue.push(message),runMaintenance:async(fn:Function)=>fn(new AbortController().signal)};
+    cancel:async()=>{cancelled++;},followup:(message:any)=>queue.push(message),whenIdle:async()=>{},runMaintenance:async(fn:Function)=>fn(new AbortController().signal)};
   const ctx={llm:{registerAdapter:(_ids:any,value:any)=>{adapter=value;return()=>{};}},agents:{get:()=>null,create:async()=>({agent,dispose:async()=>{disposed++;}})},
     sessions:{get:()=>null,flush:async()=>{}},on,effect:(fn:Function)=>{effects.push(fn());}};
   return {ctx,agent,queue,effects,hooks,commands,get adapter(){return adapter;},get cancelled(){return cancelled;},get disposed(){return disposed;}};
@@ -188,6 +280,19 @@ async function hostConfig():Promise<DshPluginConfig>{const path=await mkdtemp(jo
   parentControl:true,launcher:{mode:'synthetic',corePath:resolve('.'),nodePath:process.execPath,runtimeRoot:path,maxCalls:2}};}
 function outputFrames(output:PassThrough){const frames:any[]=[];let buffer='';output.on('data',chunk=>{buffer+=chunk.toString();let at;
   while((at=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,at);buffer=buffer.slice(at+1);assert.ok(line.startsWith('COMPANION_COUPLED_EVENT:'));frames.push(JSON.parse(line.slice(24)));}});return frames;}
+
+for(const outcome of ['idle','pause','human','dispose'] as const)test(`host waits for actual SDK idle before maintenance; ${outcome} retains original permission`,async t=>{
+  const config=await hostConfig();config.enableProactive=true;
+  const host=mockHost(config.sessionId),backend=new FakeBackend(),idle=deferred<void>();let idleCalls=0,maintenance=0,isIdle=false;
+  host.agent.whenIdle=()=>{idleCalls++;return idle.promise;};
+  host.agent.runMaintenance=async(fn:Function)=>{assert.equal(isIdle,true);maintenance++;return fn(new AbortController().signal);};
+  const output=new PassThrough();output.resume();const mounted=await mountDshCoupled(host.ctx,config,sdk,{startBackend:async()=>backend,input:new PassThrough(),output});
+  t.after(()=>mounted.cleanup());const bridge=mounted.bridge!,h={bridge,sessionId:config.sessionId},first=human();
+  await begin(h,first);await collect(bridge.stream({sessionId:config.sessionId,provider:'companion-core',model:'coupled',messages:[first],signal:new AbortController().signal}));
+  backend.prepared();await finish(h,'SYNTHETIC_REPLY');await tick();assert.equal(idleCalls,1);assert.equal(maintenance,0);assert.equal(host.queue.length,0);
+  if(outcome==='pause')await bridge.manualPause();if(outcome==='human')bridge.inboxInserted(human());if(outcome==='dispose')await mounted.cleanup();
+  isIdle=true;idle.resolve();await tick();await tick();assert.equal(maintenance,outcome==='idle'?1:0);assert.equal(host.queue.length,outcome==='idle'?1:0);
+});
 
 test('host private parent control binds auditId, shutdown closes backend then interrupts official host',async()=>{
   const config=await hostConfig(),host=mockHost(config.sessionId),backend=new FakeBackend(),input=new PassThrough(),output=new PassThrough(),frames=outputFrames(output);let interrupted=0;
