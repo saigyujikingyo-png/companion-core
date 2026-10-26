@@ -1,6 +1,6 @@
 # TrainingRun：真实训练履历与冷存储设计
 
-状态：**TJ0 离线合成磁盘协议已实现；真实训练 TJ1 仍 DESIGN_ONLY / NOT_IMPLEMENTED**，2026-10-26。当前 [TJ0 合同](TJ0-DISK-FORMAT.md)提供有界声明 schema/reducer、identity/Zstd、跨进程回读/索引重建，始终 NOT_AUTHENTICATED。没有 trainer、真实训练、模型调用或部署；作者/独立/whole/跨平台验收分层记录。原 f98eba6 的 J0、549 项 whole 与四平台 CI 历史保留，不作为 TJ0 或真实训练验收。
+状态：**TJ0 离线合成磁盘协议与独立 TJ1 Windows 小 readout canary 已实现**，2026-10-26。TJ1 已完成一次真实 CPU64步、参数 delta/export/新进程 reload/独立 eval，详见 [TJ1 合同与分层证据](TJ1-CANARY.md)；预训练/LLM 微调、通用训练服务与激活仍为后续目标。当前 [TJ0 合同](TJ0-DISK-FORMAT.md)提供有界声明 schema/reducer、identity/Zstd、跨进程回读/索引重建，始终 NOT_AUTHENTICATED。TJ0 本身没有 trainer；TJ1 有真实本地模型计算，其外部 provider/付费 API/网络调用路径为0，未部署或激活；作者/独立/实际运行/whole/跨平台验收分层记录。原 f98eba6 的 J0、549 项 whole 与四平台 CI 历史保留，不作为 TJ0 或真实训练验收。
 
 资产公开/私有分类遵循[目标决策矩阵](TARGET-DECISIONS.md)：私人或可泄露的派生数据、个性 Adapter、训练履历正文继承私有；通用履历仅在全字段无私密且许可允许时可公开，指针/hash 也逐项分类。运行原件默认私有；经逐字段/许可审查的通用履历公开副本是独立产物与版本，不替代权威原件。逻辑格式可公开不代表实例记录可公开。
 
@@ -49,7 +49,7 @@ executionMode（真实/模拟/未知）与 datasetOrigin（合成/采集/许可�
 
 JSONL + Zstd 无损 baseline、可选确定性 binary 都是待研究候选，不宣称新自有格式已经定案。先保可靠无损 fallback，再研究字典、模板差分、列式和指标 delta。叙事摘要是可重建派生视图，不能替代关键事实、step/loss 或产物身份。
 
-拟议 roundtrip 门须同时定义逻辑值与规范字节：整数计数用十进制整数字符串，避免 JSON/JavaScript 大整数精度丢失；loss/指标保留 dtype、shape 与原始位模式或等价确定性十六进制编码，明确负零、NaN payload、正负 infinity，不以普通 JSON number 承载这些精确值，不能隐式转 null；metric 同时保留原精度/单位，unknown 为独立状态。普通文本按明确 UTF-8/字段顺序/转义规范生成 canonical bytes；不能静默 Unicode 归一化。无损只针对已定义 canonical logical bytes，不表示来源真实。codec 必须逐字节还原该 canonical event stream，并核精确数值位模式及引用身份；原 runner receipt 原字节另附受控 hash 引用，规范化不冒充原始字节。当前 TJ0 合成 v1 schema/canonicalization 见[已冻结合同](TJ0-DISK-FORMAT.md)，更广的真实运行 schema 仍待 TJ1 冻结；不接受仅“数值近似相同”的无损声明。
+拟议 roundtrip 门须同时定义逻辑值与规范字节：整数计数用十进制整数字符串，避免 JSON/JavaScript 大整数精度丢失；loss/指标保留 dtype、shape 与原始位模式或等价确定性十六进制编码，明确负零、NaN payload、正负 infinity，不以普通 JSON number 承载这些精确值，不能隐式转 null；metric 同时保留原精度/单位，unknown 为独立状态。普通文本按明确 UTF-8/字段顺序/转义规范生成 canonical bytes；不能静默 Unicode 归一化。无损只针对已定义 canonical logical bytes，不表示来源真实。codec 必须逐字节还原该 canonical event stream，并核精确数值位模式及引用身份；原 runner receipt 原字节另附受控 hash 引用，规范化不冒充原始字节。当前 TJ0 合成 v1 schema/canonicalization 见[已冻结合同](TJ0-DISK-FORMAT.md)，独立 TJ1 小 canary 的身份 codec/ledger 见[专用合同](TJ1-CANARY.md)，更广的真实训练 schema 仍待后续冻结；不接受仅“数值近似相同”的无损声明。
 
 Q0 的场景表征阴性结论不能外推训练日记 codec 无收益；此对象需要自身合成训练事件语料与冻结基准。比较总 archive 成本，包含字典、索引、header、校验与 reader/版本依赖成本；另测随机读取、跨版本兼容、截断/损坏恢复、压缩/解压时间与峰值 RAM。不得用只计 payload 或平均压缩率替代可靠性与总成本门。本轮不运行压缩实验。
 
@@ -64,7 +64,7 @@ Q0 的场景表征阴性结论不能外推训练日记 codec 无收益；此对�
 | 切片 | 未来范围 | 必须独立验收 |
 |---|---|---|
 | TJ0：离线合成声明已实现，NOT_AUTHENTICATED | [有界 v1 合同](TJ0-DISK-FORMAT.md)、严格 reducer、identity/Zstd 磁盘读写与当前权限回调；不认证真实执行 | 跨重启回读/索引重建、规范字节与数值精确 roundtrip、有界解压/随机读、版本/损坏/半写反例；计划/实际和各阶段独立、重复/冲突/晚到终态、部分效果/unknown、synthetic 永不晋升、当前权限投影；不能称真实训练交付 |
-| TJ1：DESIGN_ONLY / NOT_IMPLEMENTED | 可信 runner/durable append-only journal 身份与跨重启 reconcile，受控本地小 trainer receipt | 独立资源/许可准入；真实 optimizer step/参数 delta、export/hash、新进程 reload、独立 eval；成功/失败/中断/unknown、重试/持久去重、撤销/权限变化与跨重启不复活；每阶段分别结论 |
+| TJ1：独立 Windows 小 canary 已实现/单次实跑 | [受控本地 CPU readout 与观察 ledger](TJ1-CANARY.md)，非预训练/LLM 微调；live 事实分级，冷读仍声明/需 reconcile | 一次64 optimizer steps、首步/delta/export/reload/eval各自通过；读回76记录/64步，重复调用启动前拒绝且原件未变。通用 runner、外部认证/anchor、激活与长期运维仍未交付 |
 | 后续后端：DESIGN_ONLY / NOT_IMPLEMENTED | Nemotron 或 cloud target、规模/长任务 | 按具体模型、资源、训练/上传许可、额度与 provider receipt 独立验收；不要求每次真实小训练使用 Nemotron 120B |
 
 TJ0 合成盘回读不是受信真实训练恢复；TJ1 结构/恢复通过及小训练完成，也不自动证明持续学习收益、长期质量或生产激活资格。质量/激活沿用[学习设计](LEARNING-DESIGN.md)的独立冻结评测与当前权威门。Root 在实现前冻结具体合同与预算；本设计不启动工作负载。

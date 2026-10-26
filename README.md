@@ -6,7 +6,9 @@
 
 [目标决策](docs/TARGET-DECISIONS.md)明确：果蝇是可替换候选；Student v1 优先自然中文与陪伴质量，科学/工具/来源/执行真实性独立硬回归；通用公开底座与私有实例记忆/个性层分离。均为 **DESIGN_ONLY**，不变更既有实现验收。
 
-**成长日记的产品目标是记录真实微调与持续学习训练履历，并以源码/OneDrive 外私有硬盘冷存储为权威**。[TJ0 离线磁盘协议](docs/TJ0-DISK-FORMAT.md)已实现有界合成声明 schema/reducer、identity/Zstd、跨进程回读与索引重建，始终 `NOT_AUTHENTICATED`；真实 trainer/TJ1 仍 **NOT_IMPLEMENTED**。见 [TrainingRun 设计与下一切片](docs/TRAINING-RUN-JOURNAL.md)：固定版本化格式支持后续专属无损压缩/解压研究，RAM 仅作近期缓存。当前 J0 尚未交付真实训练日记，不能回填不存在的训练历史。
+**成长日记的产品目标是记录真实微调与持续学习训练履历，并以源码/OneDrive 外私有硬盘冷存储为权威**。[TJ0 离线磁盘协议](docs/TJ0-DISK-FORMAT.md)已实现有界合成声明 schema/reducer、identity/Zstd、跨进程回读与索引重建，始终 `NOT_AUTHENTICATED`；独立 [TJ1 Windows canary](docs/TJ1-CANARY.md)已完成一次 CPU 小 readout 的真实 64 步训练、导出、新进程 reload/独立 eval；它不是预训练/LLM 微调或通用训练服务。跨重开仅 `RECORDED_CLAIMS_ONLY / RECONCILE_REQUIRED`，激活未实现。见 [TrainingRun 设计与下一切片](docs/TRAINING-RUN-JOURNAL.md)：固定版本化格式支持后续专属无损压缩/解压研究，RAM 仅作近期缓存。当前 J0 尚未交付真实训练日记，不能回填不存在的训练历史。
+
+[导师—教师—Student 工作流](docs/MENTOR-TEACHER-STUDENT-WORKFLOW.md)是 **DESIGN_ONLY** 的分阶段研究入口：职责隔离不自动满足防蒸馏条款，候选生成、许可、训练、质量、量化与激活各守独立门。
 
 **当前 [J0 GrowthJournal](docs/GROWTH-JOURNAL.md)：** 有界 RAM 日记把计划、实际 curation lint/revalidate、终态与固定模拟训练四维分开记录。每次读取/导出复核原来源池；合法 runtime 变化可新绑历史视图，旧写入永久失效；撤销、同意代际变化、到期或时钟倒退不能靠重绑恢复。JSON/安全 Markdown 只是声明档案，不能自行认证执行或恢复能力。实际模型调用/训练为0，数据库schema1和M2不变；作者专项、独立审查、whole和CI分层验收。
 
