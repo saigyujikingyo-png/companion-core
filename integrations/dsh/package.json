@@ -2,6 +2,7 @@
   "name": "@companion/dsh-coupled-session",
   "version": "0.1.0-dev.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": { ".": "./lib/index.js", "./cordis.patch.yml": "./cordis.patch.yml" },

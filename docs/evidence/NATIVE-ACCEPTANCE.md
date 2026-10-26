@@ -82,4 +82,4 @@ child graceful/exit0/signal=null/forced=false/residual0/coreStatus=closed；inst
 
 所有native语料均为合成验收，不是长期用户体验。M2只在最新完整authority ledger保持的前提下提供当前恢复边界；有效前缀回滚、容量/迁移/备份产品、跨重启情绪连续性等限制不因本摘要改变。宿主自己的会话记录不在core加密保证内。
 
-私有保存源码并不授开源许可；当前没有LICENSE。公开发行、模型/数据许可、迁移真实用户资料或上传训练数据需独立方案。本摘要及未来学习文档不构成模型训练、上线或新额度授权。
+本项目第一方代码与文档现采用[Apache-2.0](../../LICENSE)，[外部组件与数据](../THIRD-PARTY.md)仍按各自条件处理。此前private push/CI receipt保留为当时的历史事实；本次公开不改写旧结果或阴性。迁移真实资料、上传训练数据、运行模型与上线仍需各自验收，本摘要和学习设计不授予新额度或训练授权。

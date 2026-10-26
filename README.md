@@ -4,7 +4,7 @@
 
 **当前是 0.1 开发原型：本轮验收仅合成数据，未迁移旧用户数据库。** 真实 provider 与宿主回合按独立证据验收，普通测试不会调用真实模型。它是现有六插件维护工作的独立实验核心；尚未替换、合并或发布到任一上游插件。
 
-**私有原型保存边界：** 本仓没有LICENSE，私有推送不授予开源许可。源码与安全摘要不包含原始实验工件、凭据或本机部署环境；fresh clone可跑synthetic checks，不能仅clone后就复现原resident部署。
+**许可与公开边界：** 项目第一方代码、文档和合成测试采用 [Apache-2.0](LICENSE)；[第三方与数据边界](docs/THIRD-PARTY.md)单列。所有package仍保留 `private: true`，只防止误发npm，不限制本仓源码按Apache-2.0使用。源码与安全摘要不包含原始实验工件、凭据或本机部署环境；fresh clone可跑synthetic checks，不能仅clone后就复现原resident部署。
 
 **本批源码（2026-10-26）：** `05cbeeac9411af87081282ca43223d767eca09f3` 分离[observed presence与显式陪伴窗口](docs/PRESENCE-WINDOW.md)。窗口是通信permission，不是人在场证据；默认禁用，不修改state阈值、奖励或原生30秒观察租约。strict TS、300/300 tests、七步回放及独立Astra63项通过。[实际SDK窗口接线](docs/evidence/NATIVE-ACCEPTANCE.md#window-control)为 **WINDOW_CONTROL_WIRING_PASS**：真实synthetic Node child、1次合成provider/原生ACK、真实API0；grant60后原输入观测+31秒时available=false而window仍有效，重复grant不延期，off/pause/resume不恢复permission，child/outer均clean。它不是自然主动触发或UI体验验收，本批未部署生产。
 
@@ -88,4 +88,4 @@ flowchart LR
 
 `purge/revoke` 实现逻辑撤销与当前表/FTS 清除，不承诺 RAM、WAL 历史页、旧快照、SSD 介质或供应商已接收数据立即物理擦除。用户已授权有限个人试用常驻；面向长期生产运维仍需备份恢复、迁移与规模验证，当前有限容量原型不提供十年保证。
 
-本仓使用原创实现，参考研究保留在同级 `dsh-plugin-maintenance/research/2026-10-25-architecture`。尚未选择公开分发许可或创建远端；`private: true` 防止意外 npm 发布。
+本仓第一方实现按 [Apache-2.0](LICENSE) 发布；项目地址为 [companion-core](https://github.com/saigyujikingyo-png/companion-core)。参考研究与历史实验工件仍在本地独立保留；它们及第三方SDK、数据、模型权重不因本仓许可而重新授权。`private: true` 继续防止意外npm发布。
