@@ -13,3 +13,11 @@ __pycache__/
 *.pyc
 *.pt
 *.npz
+
+# Local runtime material; keep legitimate source/test fixtures visible.
+*.dpapi
+checkpoint-*.bin
+*.claimed
+memory-key.init-claimed
+/runtime/
+/vault/

@@ -8,10 +8,10 @@ Astra max focused checks. The 241 include the explicitly known-negative
 The repaired source passed a separate native run with no API credentials loaded
 and zero model calls; its vault still uses an independent memory key. It had
 clean inner/outer exit and no remaining owned process; see
-[REPAIRED-ZERO-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-ZERO-PASS.json).
+[修复后零请求摘要](evidence/NATIVE-ACCEPTANCE.md#m2-repaired-three-call).
 The original real cohort retains four ACKs and a failed second restore after
 revocation, with E unsent. A repaired independent three-request vault passed
-[REPAIRED-REAL-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-REAL-PASS.json):
+[修复后三请求摘要](evidence/NATIVE-ACCEPTANCE.md#m2-repaired-three-call):
 three real native ACKs/appraisals, two paused restores preserving consumed quota,
 B recalling A and C excluding revoked A event/memory refs from recall,
 conditioning and background state. Three inner/outer exits were clean with no
@@ -20,7 +20,7 @@ force, remaining owned process or undrained output. A retained
 Old four plus new three consume seven of aggregate8; no refund or retry occurred.
 It does not complete the original vault's A→E chain. The bounded personal-trial
 desktop deployment is
-[PASS_M2_DESKTOP_RESIDENT_READY_UI_CONTROL_PENDING](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT-PASS.json):
+[PASS_M2_DESKTOP_RESIDENT_READY_UI_CONTROL_PENDING](evidence/NATIVE-ACCEPTANCE.md#m2-desktop):
 bootstrap create+flush then clean unload, followed by native resume-only READY
 with the same vault/identity, baseline, paused/unavailable and 0/32 calls.
 Old/bootstrap children exited and the DSH main process was not restarted.
@@ -30,9 +30,9 @@ collected and a complete desktop restart was not tested. Open the new dedicated
 session and explicitly `/companion-resume`; resume itself grants no presence
 lease. The M2+flywire native combination is untested in this batch. This release
 still depends on fixed external launcher/config scripts; see
-[deployment and usage](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT.md),
+[deployment and usage](evidence/NATIVE-ACCEPTANCE.md#m2-desktop),
 [current validation](VALIDATION.md) and the
-[coordinator record](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/README.md).
+[coordinator record](evidence/NATIVE-ACCEPTANCE.md#m2-repaired-three-call).
 
 This bounded opt-in slice preserves selected sources, derived memories/FTS,
 revocations, ingress deduplication and consumed quota on the same machine. It is
@@ -96,7 +96,7 @@ The original SQLite schema v1 is unchanged; M2 runs it exclusively in RAM, with
 temporary storage restricted to memory. Both `DatabaseSync.serialize` and
 `deserialize` are feature-gated; absent APIs fail closed without plaintext
 fallback. Observed test runtime: Node v24.16.0, SQLite 3.53.0,
-`C:\Program Files\nodejs\node.exe`. An engines range is not proof that every
+`<NODE_EXECUTABLE>`. An engines range is not proof that every
 Node build provides these APIs.
 
 `writer.sqlite` contains only an empty lock table and holds an exclusive
@@ -227,3 +227,5 @@ acceptance. DPAPI launcher fixtures and actual native runs are separate records.
 The separately labeled valid-prefix ledger rollback test records a known
 unprotected boundary. Ordinary crash, deduplication, quota and revocation claims
 require the complete latest independent ledger to remain intact.
+
+`NODE_EXECUTABLE` is an explicit local executable path; `LOCAL_LAB` denotes a separately configured absolute runtime root outside the source checkout/OneDrive. A fresh clone does not discover the original machine runtime or credentials.

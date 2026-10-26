@@ -1,6 +1,9 @@
 # 实施与持续开发路线
 
-2026-10-26。用户已认可总体架构。每个里程碑形成可运行证据，不因更大模型或更多硬件跳过正确性门槛；M0已交付，M1已完成JSON/绑定/取消/薄映射及真实DeepSeek、完整Codex单回合验收。最新源码`4e3f246`的主动ready队列、原生ACK/SDK空闲发布门及前台实际settlement交接已通过strict TS+272项+七步合成回放、独立39项定向检查；[实际SDK零真实API投递](../../dsh-plugin-maintenance/research/2026-10-26-native-proactive/ZERO-NATIVE-PASS.json)机制PASS。唯一自然时间试验中fresh M2单次boot下5次真实合成输入全部native ACK，但主动投递0，结果NO_TRIGGER；新源码跨重启未重测、未部署，既有生产proactive配置false，当前生产calls未重读。此前`25cb0f8`的[M2a加密同机跨重启记忆](M2-DURABLE.md)两次原生恢复/撤销排除及部署回执保留，详见[当前验证](VALIDATION.md)。M2–M6未整体完成；M3/M4的[有限在线耦合](COUPLED-RUNTIME.md)也不是自然交流质量、人类情感或永久记忆资格。
+**本批进度：** source `05cbeea`已实现独立通信permission窗口，strict TS+300项+七步回放和独立63项通过；[原生零真实API接线](evidence/NATIVE-ACCEPTANCE.md#window-control)验证window60与原observed lease分离、重复不延期、off/pause/resume及clean退出。它不是自然主动送达PASS；先前NO_TRIGGER封存，不追加调用，本批未部署。后续学习按[DESIGN_ONLY合同](LEARNING-DESIGN.md)从synthetic curation/manifest linter逐步推进，不在本批启动训练。
+
+
+2026-10-26。用户已认可总体架构。每个里程碑形成可运行证据，不因更大模型或更多硬件跳过正确性门槛；M0已交付，M1已完成JSON/绑定/取消/薄映射及真实DeepSeek、完整Codex单回合验收。此前主动交接源码`4e3f246`的主动ready队列、原生ACK/SDK空闲发布门及前台实际settlement交接已通过strict TS+272项+七步合成回放、独立39项定向检查；[实际SDK零真实API投递](evidence/NATIVE-ACCEPTANCE.md#proactive-zero)机制PASS。唯一自然时间试验中fresh M2单次boot下5次真实合成输入全部native ACK，但主动投递0，结果NO_TRIGGER；新源码跨重启未重测、未部署，既有生产proactive配置false，当前生产calls未重读。此前`25cb0f8`的[M2a加密同机跨重启记忆](M2-DURABLE.md)两次原生恢复/撤销排除及部署回执保留，详见[当前验证](VALIDATION.md)。M2–M6未整体完成；M3/M4的[有限在线耦合](COUPLED-RUNTIME.md)也不是自然交流质量、人类情感或永久记忆资格。
 
 | 里程碑 | 工作包 | 接受标准 |
 |---|---|---|
@@ -24,9 +27,9 @@ M2a 当前新增[加密跨重启切片](M2-DURABLE.md)：只实现同机恢复�
 6. [本地回路能力策略](NEURAL-LOCAL-POLICY.md)与[连接组CLI](M4-NEURAL-LAB.md)已实现，真实3136节点子图四种GPU操作与三种子24条件已完成研究验收；真实图未优于无回路基线。本批另完成事件驱动CPU在线worker、reset/carry、baseline/no-state切换与无回路对照。下一步补更强时序/GRU及质量评测，个人数据接入仍先完成M2。本机物理NPU缺席，其他NPU/ROCm/Metal后端仍需各自设备实测。
 7. 多语言与子标注清洗先做离线派生节点：原文、翻译、实体、情绪推断、清洗结果、训练样本分别绑定来源revision与许可。先以中英日、混合语句、否定/条件/引语和同源译文分组切分做小语料回放，再接向量检索与训练。当前仅有保持原语言的DeepSeek单例修复，通用多语言流水线尚未实现。详细设计在同级维护研究目录的2026-10-25-native-acceptance/04-MULTILINGUAL-CURATION.md。
 8. [背景状态切片](BACKGROUND-STATE.md)的影子意图现可由[耦合器](COUPLED-RUNTIME.md)单次消费为有限provider任务；回忆重排、明确反馈、来源撤销和一次性调度已验证，真实DSH有限链路见当前验证。最新主动调度交接修复先经独立原生准入，不复用此前`enableProactive:false`的M2原生记录；不得降低冷状态阈值或延长30秒原生presence租约制造PASS。其后比较ODE/SSM/小GRU/CfC/真实图及自然交流质量；不因连接组较小而预设其低功耗或优于简单基线。同源派生记忆不能重复奖励，传感器反馈须补可信来源合同。M2a恢复的是记忆与安全状态，背景/神经状态和待消费反馈会重置；跨重启情绪连续性尚未实现。功耗实验仍是独立证据，不代表完整常驻系统能耗。
-9. 针对本轮NO_TRIGGER，先设计可信PresenceProvider/用户明确陪伴窗口及自然时序基准，检验状态60秒时常与原生30秒租约的交互；条件估算不替代真实触发/送达。封存本轮5/6试验，不追加第六次、不换cohort重跑或据此开启生产主动性。
+9. 显式陪伴window已实现且官方SDK控制接线PASS；后续设计可信PresenceProvider及自然时序/质量基准，继续检验状态60秒时常与原生30秒observed租约、独立window的交互。条件估算和控制接线不替代真实自然触发/送达；旧NO_TRIGGER的5/6试验保持封存，不追加第六次、不换cohort重跑或据此开启生产主动性。
 
-未来学习设计（待做）：经历先成为精选证据，再形成带source revision、语言标注、curation许可、删除代际和父checkpoint的dataset manifest；小codec、readout、LoRA等分离训练，经过跨语言、旧能力、纠正与漂移评测和shadow观察后，才进入activate/rollback。易变事实、身份和撤销继续由权威库管理；自摘要/RAG不是独立真值，metadata撤销不等于权重遗忘。两台DGX Spark候选仅预留training backend/model registry接口，资源方案待实际模型、精度和分布式验证后确定；本轮不采购、训练或迁移。
+未来学习实现（[设计合同已落盘](LEARNING-DESIGN.md)，仍为DESIGN_ONLY）：经历先成为精选证据，再形成带source revision、语言标注、curation许可、删除代际和父checkpoint的dataset manifest；小codec、readout、LoRA等分离训练，经过跨语言、旧能力、纠正与漂移评测和shadow观察后，才进入activate/rollback。易变事实、身份和撤销继续由权威库管理；自摘要/RAG不是独立真值，metadata撤销不等于权重遗忘。两台DGX Spark候选仅预留training backend/model registry接口，资源方案待实际模型、精度和分布式验证后确定；本轮不采购、训练或迁移。
 
 ## 与六插件贡献的关系
 

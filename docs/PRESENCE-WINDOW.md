@@ -1,6 +1,6 @@
 # Observed presence and explicit companionship permission
 
-This is a source implementation with synthetic verification. Native SDK control acceptance, natural model triggering and production deployment remain separate and pending for this source. It neither changes the earlier natural `NO_TRIGGER` result nor lowers background thresholds to obtain a trigger.
+Source `05cbeeac9411af87081282ca43223d767eca09f3` has synthetic verification and actual official-SDK [WINDOW_CONTROL_WIRING_PASS](evidence/NATIVE-ACCEPTANCE.md#window-control). Natural triggering, real-API window interaction, cross-restart window behavior and production deployment remain unverified for this source. This does not change the earlier natural `NO_TRIGGER` result or lower background thresholds to obtain a trigger.
 
 ## Independent authority
 
@@ -66,3 +66,8 @@ companionWindow.generation                  local authorization generation, or n
 No command text, new feedback, claim of presence or reward is included. Expired/off metadata reports inactive, null source/expiry/generation and zero remaining duration.
 
 Synthetic tests exercise original 30-second behavior, explicit enable/ACK admission, replay/active-window refusal, source separation, pause/quiet/reset/revoke/switch/restart, grant/off/ACK races, old prepared output and delayed check/SDK results, fresh human preemption, and foreground raw settlement. The real `BackgroundState` implementation also receives five fixed synthetic positive appraisals at 0/20/40/60/80 seconds, confidence 0.4: unchanged dynamics cross at approximately 119.579 seconds, after observed presence expires at 110 seconds. An independent 180-second grant at 80 seconds permits the synthetic scheduler at that crossing without changing latent values, targets or the source ledger at grant time. This is a deterministic clock test, not a replay of the real model's appraisals or new natural elapsed-time/model acceptance.
+
+
+## External resident prerequisites
+
+The versioned Python resident launcher, approved named DPAPI bridge and machine-specific neural runtime live in a separate local lab; they are not shipped in this core repository. A fresh clone can run synthetic checks but cannot by itself reproduce that resident deployment. Window support requires explicitly selecting `run-coupled-durable-resident-window-v1.py`, SHA256 `2a14118e1aa08b718d0313318a0a44bf00e2e00c8e125ed0e804e396b60231be`, with the documented private boot protocol. Old launchers/configurations are unchanged. This push preserves core implementation, contracts and safe evidence summaries; original experiment artifacts and credential helpers remain local.

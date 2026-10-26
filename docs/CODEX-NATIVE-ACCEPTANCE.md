@@ -13,7 +13,7 @@ Exactly three real `turn/start` requests were issued across all attempts: the in
 
 ## Evidence and retained failure
 
-All paths below are under `C:\Users\saigy\AppData\Local\Temp`:
+All paths below are under `<LOCAL_LAB>/temp`:
 
 | Evidence | Status and scope |
 |---|---|
@@ -39,7 +39,7 @@ Ten focused tests cover late tools after 600 notifications, bad/missing close/ex
 ## Reproduce only with authorization for new native calls
 
 ```powershell
-node scripts/codex-native-probe.ts --allow-real-model --completion-only --codex 'C:\Users\saigy\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009\codex.exe' --disable-mcp matlab-companion --disable-mcp node_repl --disable-mcp origin-agent
+node scripts/codex-native-probe.ts --allow-real-model --completion-only --codex '<CODEX_CLI>' --disable-mcp matlab-companion --disable-mcp node_repl --disable-mcp origin-agent
 ```
 
 This command was run once after the additional explicit authorization. Repeating it is a new real call, not an offline test. `--completion-only` performs the completed turn, native ingress/store/recall and selected-event duplicate replay, then closes and audits the transport. It cannot send `turn/interrupt` or a second `turn/start`, enforced at the actual request-send boundary. The previously confirmed interrupted terminal need not be reissued.
@@ -59,3 +59,5 @@ The lifecycle helper binds terminal events by thread/turn, tolerates terminal-be
 Protocol semantics were checked against [official Codex App Server documentation](https://learn.chatgpt.com/docs/app-server), then the installed binary's generated schemas. The installed schema uses string `runtimeStatus` values, including `disabled`; current web examples can differ from this build.
 
 The real DeepSeek acceptance separately exposed unwanted translation of Chinese selected evidence. `http-inference.ts` now asks for the source language, entities and key terms to be preserved. Root independently verified the same hash (`714a34160a796ed89d15bb35f56246819e790aee5e0dcbead367629b8e94c320`) with a new real API call; details belong to the coordinator's `research/2026-10-25-native-acceptance/01-REAL-API.md`. This prompt improves observed behavior but is not a guarantee of multilingual semantic correctness.
+
+Path placeholders are intentional: replace LOCAL_LAB with an absolute local runtime directory outside the source checkout/OneDrive, and CODEX_CLI with the explicitly selected installed executable. The historical command is not permission to replay a consumed model attempt.

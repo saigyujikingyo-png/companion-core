@@ -33,8 +33,8 @@ The LTD-only rule is deliberately not given an invented recovery term: odor-only
 Use the existing isolated runtime (Python 3.12.14, torch 2.11.0+cu128, numpy 2.5.4, pyarrow 26.0.0, psutil 7.2.2). No environment installation or modification is performed by the CLI.
 
 ```powershell
-& 'C:\Users\saigy\AppData\Local\CompanionCoreLab\neural-20261025-v1\venv\Scripts\python.exe' -B -m unittest discover -s neural -p 'test_*.py' -v
-& 'C:\Users\saigy\AppData\Local\CompanionCoreLab\neural-20261025-v1\venv\Scripts\python.exe' -B neural/run_experiment.py --data-dir 'C:\Users\saigy\AppData\Local\CompanionCoreLab\neural-20261025-v1\data\flywire-v783' --runs-dir 'C:\Users\saigy\AppData\Local\CompanionCoreLab\neural-20261025-v1\runs'
+& '<LOCAL_LAB>/neural-runtime\venv\Scripts\python.exe' -B -m unittest discover -s neural -p 'test_*.py' -v
+& '<LOCAL_LAB>/neural-runtime\venv\Scripts\python.exe' -B neural/run_experiment.py --data-dir '<LOCAL_LAB>/neural-runtime\data\flywire-v783' --runs-dir '<LOCAL_LAB>/neural-runtime\runs'
 ```
 
 Every run creates a unique UTC/UUID directory outside OneDrive, including exact hash-verified copies of the three execution source files. A failed or partial run keeps `failure.json` and all earlier evidence. No old result, source data, checkpoint or environment is overwritten. Python bytecode creation is disabled.
@@ -73,3 +73,5 @@ Real mean accuracy was 0.75 with sample standard deviation 0.25. No-circuit mean
 There are 24,654 trainable real KC→MBON gains plus 98 head parameters; all three real BPTT runs changed circuit parameters (maximum theta deltas 1.18669/1.29210/1.40026). This is not a count of individually changed edges. Readout-only theta and all no-learning states stayed unchanged. All 24 reloaded states were exact; maximum logit difference was 2.38419e-7 within the declared rtol 2e-4 / atol 2e-5. The independent reviewer checked 102 artifact hashes, 48 checkpoint files and all eight aggregate rows without executing training again.
 
 Six exact probes passed the TypeScript workload hash and policy contract at their evidence timestamps. Synthetic authority checks rejected changed checkpoints, expired probes, invalid lineage and withdrawn learning permission. This does not renew expiry or implement online authorization. Physical NPU was absent on the tested 9955HX host; no NPU execution/training is claimed. The next experiment needs stronger sequence tasks, a GRU comparator and biologically constrained recovery/extinction rules before any claim of more natural affect.
+
+Replace `LOCAL_LAB` with an explicitly configured absolute lab directory outside this checkout/OneDrive. Interpreter, graph paths, versions and hashes require independent local validation; these placeholders do not install a runtime or authorize new training/model work.
