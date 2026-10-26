@@ -5,6 +5,10 @@
 L1.a 已实现的是[声明 lint 与候选 manifest](LEARNING-DESIGN.md#l1a-已实现的窄接口)，不能据此宣布 AEMC、完整学习或记忆质量通过。
 本页由 Root/max 研究评审确定边界，Sol 整理；来源访问、元数据/摘要/README 核对均不等于实验复现。
 
+[v0.6 对象中心表征补充](AEMC-V06-REPRESENTATION.md)基于用户本轮粘贴增量，未取得所述完整稿；分离稳定概念registry与可替换latent/原型残差，建议后续SP0独立slice。它不修改本页既有研究记录，也不将ScenePacket或SP1/SP2写成已实现/已实验。
+
+**后续实现注记（2026-10-26）：** [AR0 有界当前召回与同版 RAM 投影](AR0-RETRIEVAL.md)已通过作者139/139、独立最终6/6与本机一次whole413/413；原12项L1差量仅保留TOOL_OUTPUT_ONLY历史证据、未重跑，不将各层相加。CI以发布后对应提交的Actions为准，当前不预报通过。它补齐下面Snapshot缺口中的当前memory-only读取与局部投影重建，不提供原文核验、历史召回或持久fanout；本页算法研究与AR1仍为DESIGN_ONLY / EXPERIMENT_NOT_RUN。
+
 ## 1. 采纳的方向
 
 四域分工值得保留：Evidence 保留精选原件，Trace 组织经历痕迹，Schema 表达可泛化结构，Reconstruction 生成带来源的重建。
@@ -87,6 +91,8 @@ entropy、图分数、LLM 自信与缺失比例均不能直接解释为校准的
 状态仍是未冻结、未执行的建议，不称 preregistered；下列数字是候选协议，不是科学 power 证明或产品容量。
 
 ### AR0：合同与失效 fixture
+
+下段保留初始研究计划；后续已实现范围和未完成的 AR0b 持久投影门见[AR0 合同及验收矩阵](AR0-RETRIEVAL.md)。
 
 先冻结 query/source scope、来源 revision、读取用途、时间可见性、输出预算与当前权限复核入口。
 覆盖撤销、consent off→on、空/非空 scope purge、解绑、未来事件、越权邻居和重复根的阴性 fixture。
@@ -176,4 +182,4 @@ R 编号沿用用户 RDD，本文不声称已核全部 G 项目的实现；下�
 | R15 [Ranganath/Ritchey 2026](https://www.annualreviews.org/content/journals/10.1146/annurev-psych-042126-090849) | *Episodic Memory: Dynamic Modes for Constructing Episodes*，21 Oct advance online，vol78 in press/版权2027；生成与情境模式是综述框架，非可直接部署算法。 |
 | [Graphiti 官方 README](https://github.com/getzep/graphiti) | 应用方仍负责 ingestion、tenancy、access control 与运维；图存储/检索能力不能替代 Core 权威或自动解决多端权限。 |
 
-后续先完成 AR0 的读取/失效合同与可审协议，再决定是否执行 AR1；本页所有新实验仍为 EXPERIMENT_NOT_RUN。
+AR0 当前读取/局部重建已有合成合同验收；后续先收敛 AR0b ADR 与 AR1 可审协议，再决定执行质量实验。本页所有新实验仍为 EXPERIMENT_NOT_RUN。

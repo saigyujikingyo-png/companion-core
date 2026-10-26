@@ -8,8 +8,12 @@ import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
 import * as v from './validation.ts';
 import { CURATION_LIMITS, frozenCopy } from './curation-types.ts';
 import type { CurationSnapshot, CurationNode, CurationEdge } from './curation-types.ts';
+import { RETRIEVAL_LIMITS } from './retrieval-types.ts';
+import type { RetrievalSnapshot } from './retrieval-types.ts';
 
 type Row = Record<string, string | number | null>;
+type SourceNode = { meta:CurationNode; body:Evidence|Proposal; parents:SourceRef[] };
+type SourceBudget = { bytes:number; prefix:'CURATION'|'RETRIEVAL'; limits:{ nodes:number; edges:number; bytes:number } };
 export type Clock = { wall(): number; monotonic(): number };
 const clock: Clock = { wall: Date.now, monotonic: () => performance.now() };
 
@@ -368,6 +372,77 @@ export class MemoryStore {
     }, true);
   }
 
+  #sourceCharge(budget:SourceBudget, amount:number):void {
+    if (!Number.isSafeInteger(amount) || amount < 0 || amount > budget.limits.bytes - budget.bytes) v.fail(budget.prefix + '_LIMIT');
+    budget.bytes += amount;
+  }
+  /** Shared bounded collector; called only inside the caller's synchronous read transaction. */
+  #collectSources(scope:Scope, requested:SourceRef[], asOf:number, budget:SourceBudget) {
+    const size = (value:unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+    const revisions = new Map<string,number>(), queue:SourceRef[] = [];
+    const enqueue = (ref:SourceRef): void => {
+      v.refs([ref]);
+      if (revisions.has(ref.id)) {
+        if (revisions.get(ref.id) !== ref.revision) v.fail(budget.prefix + '_VERSION_CONFLICT');
+        return;
+      }
+      if (revisions.size >= budget.limits.nodes) v.fail(budget.prefix + '_LIMIT');
+      revisions.set(ref.id, ref.revision); queue.push({ id:ref.id, revision:ref.revision });
+    };
+    requested.forEach(enqueue);
+    const nodes = new Map<string,SourceNode>();
+    const edges:CurationEdge[] = [];
+    for (let index = 0; index < queue.length; index++) {
+      const ref = queue[index]!;
+      // Do not read an arbitrarily large body before checking its UTF-8 cost.
+      const row = this.#one(`SELECT type,revision,generation,consent_revision,status,created_at,valid_from,valid_to,
+        length(CAST(body AS BLOB)) AS body_bytes FROM nodes WHERE id=? AND scope_id=?`, ref.id, scope.id);
+      if (!row) v.fail('SOURCE_NOT_FOUND');
+      if (row.status !== 'active' || row.revision !== ref.revision || row.generation !== scope.generation ||
+        (row.valid_from !== null && (row.valid_from as number) > asOf) ||
+        (row.valid_to !== null && (row.valid_to as number) <= asOf)) v.fail('STALE_SOURCE');
+      if (row.body_bytes === null || !['event','memory'].includes(row.type as string)) v.fail(budget.prefix + '_SOURCE_INVALID');
+      v.timestamp(row.created_at); v.timestamp(row.valid_from); v.timestamp(row.valid_to);
+      const meta:CurationNode = { ...ref, type:row.type as CurationNode['type'], generation:row.generation as number,
+        consentRevision:row.consent_revision as number, recordedAt:row.created_at as number,
+        validFrom:row.valid_from as number|null, validTo:row.valid_to as number|null };
+      // Historical node consent revisions do not override the current scope's permission.
+      this.#sourceCharge(budget, size(meta) + (row.body_bytes as number));
+      let body:Evidence|Proposal;
+      try {
+        const parsed:unknown = JSON.parse(this.#one('SELECT body FROM nodes WHERE id=? AND scope_id=?', ref.id, scope.id)!.body as string);
+        body = meta.type === 'event' ? v.evidence(parsed as Evidence, scope.subjectId) : v.proposal(parsed as Proposal);
+      } catch { v.fail(budget.prefix + '_SOURCE_INVALID'); }
+      if (meta.type === 'memory' && ((body as Proposal).validFrom !== meta.validFrom || (body as Proposal).validTo !== meta.validTo)) v.fail(budget.prefix + '_SOURCE_INVALID');
+      const remaining = budget.limits.edges - edges.length;
+      const parents = this.#all(`SELECT CASE WHEN length(CAST(parent_id AS BLOB))<=512 THEN parent_id ELSE NULL END AS parent_id,
+        parent_revision FROM dependencies WHERE child_id=? ORDER BY parent_id LIMIT ?`, ref.id, remaining + 1);
+      if (parents.length > remaining) v.fail(budget.prefix + '_LIMIT');
+      if (meta.type === 'event' && parents.length) v.fail(budget.prefix + '_GRAPH_INVALID');
+      const refs:SourceRef[] = [];
+      for (const parent of parents) {
+        const parentRef = { id:parent.parent_id as string, revision:parent.parent_revision as number };
+        enqueue(parentRef);
+        const edge = { child:{ ...ref }, parent:parentRef };
+        this.#sourceCharge(budget, size(edge)); edges.push(edge); refs.push(parentRef);
+      }
+      nodes.set(ref.id, { meta, body, parents:refs });
+    }
+    return { nodes, edges };
+  }
+  #sourceRoots(id:string, nodes:Map<string,SourceNode>, visiting:Set<string>, roots:Map<string,SourceRef[]>, prefix:string):SourceRef[] {
+    if (visiting.has(id)) v.fail(prefix + '_CYCLE');
+    if (roots.has(id)) return roots.get(id)!;
+    visiting.add(id);
+    const node = nodes.get(id)!;
+    const found = new Map<string,SourceRef>();
+    if (node.meta.type === 'event') found.set(id, { id, revision:node.meta.revision });
+    for (const parent of node.parents) for (const root of this.#sourceRoots(parent.id, nodes, visiting, roots, prefix)) found.set(root.id, root);
+    if (!found.size) v.fail('EVENT_PROVENANCE_REQUIRED');
+    const result = [...found.values()].sort((a,b) => a.id.localeCompare(b.id));
+    visiting.delete(id); roots.set(id, result); return result;
+  }
+
   /** Bounded, read-only curation authority. No unbounded ancestry helper is used.
    * bytes conservatively accounts for read metadata/raw bodies/edges AND the
    * complete returned representation, including repeated selected-root mappings.
@@ -382,84 +457,21 @@ export class MemoryStore {
       const requested = publishedRefs.length ? v.refs(publishedRefs) : [];
       const authority = { id:scope.id, generation:scope.generation, consentRevision:scope.consentRevision,
         runtimeEpoch:scope.runtimeEpoch, learningAllowed:true as const };
-      let bytes = 0;
-      const addBytes = (amount:number): void => {
-        if (!Number.isSafeInteger(amount) || amount < 0 || amount > CURATION_LIMITS.bytes - bytes) v.fail('CURATION_LIMIT');
-        bytes += amount;
-      };
+      const budget:SourceBudget = { bytes:0, prefix:'CURATION', limits:CURATION_LIMITS };
+      const addBytes = (amount:number):void => this.#sourceCharge(budget, amount);
       const size = (value:unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
       // Reserve the complete envelope and maximum-width count metadata up front.
       addBytes(size({ version:1, authority, asOf, selected:[], events:[], closure:{ nodes:[], edges:[] },
         counts:{ selected:32, nodes:128, edges:512, bytes:CURATION_LIMITS.bytes } }));
-      const revisions = new Map<string,number>(), queue:SourceRef[] = [];
-      const enqueue = (ref:SourceRef): void => {
-        v.refs([ref]);
-        if (revisions.has(ref.id)) {
-          if (revisions.get(ref.id) !== ref.revision) v.fail('CURATION_VERSION_CONFLICT');
-          return;
-        }
-        if (revisions.size >= CURATION_LIMITS.nodes) v.fail('CURATION_LIMIT');
-        revisions.set(ref.id, ref.revision); queue.push({ id:ref.id, revision:ref.revision });
-      };
-      requested.forEach(enqueue);
-      const nodes = new Map<string,{ meta:CurationNode; body:Evidence|Proposal; parents:SourceRef[] }>();
-      const edges:CurationEdge[] = [];
-      for (let index = 0; index < queue.length; index++) {
-        const ref = queue[index]!;
-        // Do not read an arbitrarily large body before checking its UTF-8 cost.
-        const row = this.#one(`SELECT type,revision,generation,consent_revision,status,created_at,valid_from,valid_to,
-          length(CAST(body AS BLOB)) AS body_bytes FROM nodes WHERE id=? AND scope_id=?`, ref.id, scope.id);
-        if (!row) v.fail('SOURCE_NOT_FOUND');
-        if (row.status !== 'active' || row.revision !== ref.revision || row.generation !== scope.generation ||
-          (row.valid_from !== null && (row.valid_from as number) > asOf) ||
-          (row.valid_to !== null && (row.valid_to as number) <= asOf)) v.fail('STALE_SOURCE');
-        if (row.body_bytes === null || !['event','memory'].includes(row.type as string)) v.fail('CURATION_SOURCE_INVALID');
-        v.timestamp(row.created_at); v.timestamp(row.valid_from); v.timestamp(row.valid_to);
-        const meta:CurationNode = { ...ref, type:row.type as CurationNode['type'], generation:row.generation as number,
-          consentRevision:row.consent_revision as number, recordedAt:row.created_at as number,
-          validFrom:row.valid_from as number|null, validTo:row.valid_to as number|null };
-        // Historical node consent revisions do not override the current scope's permission.
-        addBytes(size(meta) + (row.body_bytes as number));
-        let body:Evidence|Proposal;
-        try {
-          const parsed:unknown = JSON.parse(this.#one('SELECT body FROM nodes WHERE id=? AND scope_id=?', ref.id, scope.id)!.body as string);
-          body = meta.type === 'event' ? v.evidence(parsed as Evidence, scope.subjectId) : v.proposal(parsed as Proposal);
-        } catch { v.fail('CURATION_SOURCE_INVALID'); }
-        if (meta.type === 'memory' && ((body as Proposal).validFrom !== meta.validFrom || (body as Proposal).validTo !== meta.validTo)) v.fail('CURATION_SOURCE_INVALID');
-        const remaining = CURATION_LIMITS.edges - edges.length;
-        const parents = this.#all(`SELECT CASE WHEN length(CAST(parent_id AS BLOB))<=512 THEN parent_id ELSE NULL END AS parent_id,
-          parent_revision FROM dependencies WHERE child_id=? ORDER BY parent_id LIMIT ?`, ref.id, remaining + 1);
-        if (parents.length > remaining) v.fail('CURATION_LIMIT');
-        if (meta.type === 'event' && parents.length) v.fail('CURATION_GRAPH_INVALID');
-        const refs:SourceRef[] = [];
-        for (const parent of parents) {
-          const parentRef = { id:parent.parent_id as string, revision:parent.parent_revision as number };
-          enqueue(parentRef);
-          const edge = { child:{ ...ref }, parent:parentRef };
-          addBytes(size(edge)); edges.push(edge); refs.push(parentRef);
-        }
-        nodes.set(ref.id, { meta, body, parents:refs });
-      }
+      const { nodes, edges } = this.#collectSources(scope, requested, asOf, budget);
       const visiting = new Set<string>(), roots = new Map<string,SourceRef[]>();
-      const rootsFor = (id:string):SourceRef[] => {
-        if (visiting.has(id)) v.fail('CURATION_CYCLE');
-        if (roots.has(id)) return roots.get(id)!;
-        visiting.add(id);
-        const node = nodes.get(id)!;
-        const found = new Map<string,SourceRef>();
-        if (node.meta.type === 'event') found.set(id, { id, revision:node.meta.revision });
-        for (const parent of node.parents) for (const root of rootsFor(parent.id)) found.set(root.id, root);
-        if (!found.size) v.fail('EVENT_PROVENANCE_REQUIRED');
-        const result = [...found.values()].sort((a,b) => a.id.localeCompare(b.id));
-        visiting.delete(id); roots.set(id, result); return result;
-      };
       const selected = requested.map(ref => {
         const node = nodes.get(ref.id)!;
         if (node.meta.type !== 'memory') v.fail('SOURCE_NOT_PUBLISHED');
         const memory:MemoryRecord = { ...(node.body as Proposal), ...ref, scopeId:scope.id,
           generation:node.meta.generation, consentRevision:node.meta.consentRevision,
           sourceRefs:node.parents, recordedAt:node.meta.recordedAt };
-        const item = { memory, contentKind:'derived_memory' as const, rootEventRefs:rootsFor(ref.id) };
+        const item = { memory, contentKind:'derived_memory' as const, rootEventRefs:this.#sourceRoots(ref.id, nodes, visiting, roots, 'CURATION') };
         addBytes(size(item) + 1); return item;
       });
       const events = [...nodes.values()].filter(node => node.meta.type === 'event').map(node => {
@@ -471,7 +483,35 @@ export class MemoryStore {
       for (const node of metadata) addBytes(size(node) + 1);
       for (const edge of edges) addBytes(size(edge) + 1);
       return frozenCopy({ version:1 as const, authority, asOf, selected, events, closure:{ nodes:metadata, edges },
-        counts:{ selected:selected.length, nodes:nodes.size, edges:edges.length, bytes } });
+        counts:{ selected:selected.length, nodes:nodes.size, edges:edges.length, bytes:budget.bytes } });
+    }, true);
+  }
+  /** Current memory-only authority; ordinary recall never borrows learning consent.
+   * Ancestors are validated internally, never returned as evidence/body text. */
+  retrievalSnapshot(epoch:Epoch, publishedRefs:SourceRef[]):RetrievalSnapshot {
+    return this.#tx(() => {
+      const scope = this.#epoch(epoch), asOf = this.#clock.wall();
+      if (!Number.isSafeInteger(asOf) || asOf < 0) v.fail('INVALID_INPUT');
+      if (!Array.isArray(publishedRefs) || publishedRefs.length > RETRIEVAL_LIMITS.selected) v.fail('RETRIEVAL_LIMIT');
+      const requested = publishedRefs.length ? v.refs(publishedRefs) : [];
+      const authority = { id:scope.id, generation:scope.generation, consentRevision:scope.consentRevision, runtimeEpoch:scope.runtimeEpoch };
+      const budget:SourceBudget = { bytes:0, prefix:'RETRIEVAL', limits:RETRIEVAL_LIMITS };
+      const size = (value:unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+      this.#sourceCharge(budget, size({ version:1, authority, asOf, selected:[],
+        counts:{ selected:32, nodes:128, edges:512, bytes:RETRIEVAL_LIMITS.bytes } }));
+      const { nodes, edges } = this.#collectSources(scope, requested, asOf, budget);
+      const visiting = new Set<string>(), roots = new Map<string,SourceRef[]>();
+      const selected = requested.map(ref => {
+        const node = nodes.get(ref.id)!;
+        if (node.meta.type !== 'memory') v.fail('SOURCE_NOT_PUBLISHED');
+        const memory:MemoryRecord = { ...(node.body as Proposal), ...ref, scopeId:scope.id,
+          generation:node.meta.generation, consentRevision:node.meta.consentRevision,
+          sourceRefs:node.parents, recordedAt:node.meta.recordedAt };
+        const item = { memory, rootEventRefs:this.#sourceRoots(ref.id, nodes, visiting, roots, 'RETRIEVAL') };
+        this.#sourceCharge(budget, size(item) + 1); return item;
+      });
+      return frozenCopy({ version:1 as const, authority, asOf, selected,
+        counts:{ selected:selected.length, nodes:nodes.size, edges:edges.length, bytes:budget.bytes } });
     }, true);
   }
   search(epoch: Epoch, query: string, limit = 20, asOf = this.#clock.wall()): MemoryRecord[] {

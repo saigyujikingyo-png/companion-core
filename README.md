@@ -10,6 +10,10 @@
 
 [学习设计](docs/LEARNING-DESIGN.md)的 **L1.a 已实现 RAM 内声明 lint 与候选 manifest**：只读核对当前授权/来源、同源分组、时间切分及人工声明的冲突；其余训练、评测、激活、多模态和长job/大dataset路线仍为 **DESIGN_ONLY**。标注输入仍需人工或未来模型另行生成；linter 不识别语义真值、不验证翻译质量，也不授予训练许可。
 
+**[AR0 当前召回](docs/AR0-RETRIEVAL.md)** 已实现 memory-only 有界 snapshot 与同版 RAM 字面/共享来源投影；普通读取与学习许可分离，每次 query/resolve 复核全部绑定来源，旧 epoch、撤销、到期或时钟倒退拒绝旧能力。作者专项 139/139、独立最终 6/6、本机一次 whole 413/413 与 strict TS/三个合成 demo 通过；原12项 L1 差量仅保留 TOOL_OUTPUT_ONLY 历史证据、未重跑，各层不相加。CI 以发布后对应提交的 Actions 为准，当前不预报通过；未接全局 outbox ACK、持久 fanout、BM25/embedding/PPR 或真实部署，召回质量仍 `NOT_EVALUATED`。
+
+[AEMC v0.6 表征补充](docs/AEMC-V06-REPRESENTATION.md)讨论 ScenePacket、稳定概念registry与带版本原型/残差；仅 DESIGN_ONLY / EXPERIMENT_NOT_RUN，未实现感知或压缩算法。
+
 **上一主动交接源码（2026-10-26）：** `4e3f246b5a7f0ce7ecbae9b8822d687096aa779b` 修复[主动投递与前台交接](docs/DSH-COUPLED.md)：ready在原生回合/ACK等待期间有界保留，原生完成且core ACK落定后，经受原租约约束的SDK `whenIdle()`再发布；新鲜人类输入停止旧调度，只有最新输入的成功ACK可按原到期时间重新调度。前台等待实际逻辑工作及raw permits清空后才领取入站/额度，暂停、撤销或到期拒绝等待，不轮询、不重试、不延长租约。作者strict TypeScript、272/272合成测试和七步回放PASS；独立Astra max 39项定向检查PASS。[实际SDK零真实API投递](docs/evidence/NATIVE-ACCEPTANCE.md#proactive-zero)已 **ZERO_NATIVE_DELIVERY_PASS**：fixture验证ready排队/单次消费及两个native ACK，未构造真实core/memory/HTTP。
 
 [唯一自然时间试验](docs/evidence/NATIVE-ACCEPTANCE.md#proactive-natural)为 **NO_TRIGGER**：新源码、fresh M2单次boot下，约120秒内五次固定合成自述均获真实DeepSeek回复及native completed ACK，主动ready/送达0；reserve5/6、unknown0，暂停后重复同RPC没有新回合/调用，内外清理exit0/noForce/owned0。第六次封存、不退款或重试。此为有效阴性，既非传输失败，也非自然主动闭环或产品可用PASS；未直接暴露的shadow intent不据此判定不存在。新源码跨重启未重测，下面保留此前M2实际两次恢复证据。`4e3f246`及本批`05cbeea`均未部署，原部署回执proactive=false；本批未变更生产，当前状态/用量未重读。
@@ -40,6 +44,8 @@ npm run check
 `check` 执行严格 TypeScript 检查、SQLite 合成回归和端到端合成回放。单独 `npm run demo` 会在系统临时目录创建一个全新的数据库，打印路径并保留供检查，不读取现有文件。演示不需要 API key、GPU、摄像头或麦克风。
 
 运行 `npm run demo:curation` 可复现 L1.a 的固定合成声明检查。它仅使用全新 RAM 数据库，输出 counts/codes、`CURATION_LINT_PASS` 与质量 `NOT_EVALUATED`；不输出原文、来源身份、manifest digest，也不训练或调用 API。`check` 在原有回放之后运行此演示。候选包含私有正文，仅供受信代码在 RAM 中审阅，使用时必须再次验证；参见[实际 L1.a 接口与限制](docs/LEARNING-DESIGN.md#l1a-已实现的窄接口)。
+
+`npm run demo:retrieval` 演示 AR0 的直接/共享来源命中与撤销后拒绝，输出 `AR0_CONTRACT_PASS`、counts/codes 和质量 `NOT_EVALUATED`；仅新建 RAM 数据库，零 API，不打印正文或身份。`check` 将它追加在 curation 演示之后。真实使用跨 `await` 或送入 provider 前须再次 `resolve`，已经交出的副本不能物理召回。
 
 ## 已实现的切片
 
