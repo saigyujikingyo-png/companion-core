@@ -1,5 +1,7 @@
 # AR0：有界当前召回与同版 RAM 投影
 
+后续 [SP0A / AR0b0](SCENE-AUTHORITY.md)实现独立 Scene 来源桥和 RAM consumer reset/full-replacement 协议，复用同一 bounded source collector。它不改变本页 RetrievalService、全局 outbox 或持久格式；[durable fanout ADR](ADR-AR0B-DURABLE.md)仍为 DESIGN_ONLY，AR0b持久迁移未实施。
+
 状态：**SOURCE_CONTRACT_PASS / LOCAL_WHOLE_PASS**，2026-10-26。本合同先以 IN_PROGRESS 写入，作者139/139、独立最终6/6与本机一次whole413/413均通过；原12项L1差量仅保留TOOL_OUTPUT_ONLY历史证据、未重跑，分层不相加。源码发布与CI以对应提交记录及Actions为准，本地检查不预报CI通过。
 [AEMC 研究路线](AEMC-V05-REVIEW.md)的 AR1 质量实验仍为 **EXPERIMENT_NOT_RUN**；[L1.a 学习声明 lint](LEARNING-DESIGN.md)继续使用独立学习许可。
 

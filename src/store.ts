@@ -10,10 +10,12 @@ import { CURATION_LIMITS, frozenCopy } from './curation-types.ts';
 import type { CurationSnapshot, CurationNode, CurationEdge } from './curation-types.ts';
 import { RETRIEVAL_LIMITS } from './retrieval-types.ts';
 import type { RetrievalSnapshot } from './retrieval-types.ts';
+import { SCENE_SOURCE_LIMITS } from './scene-authority-types.ts';
+import type { SceneSourceSnapshot } from './scene-authority-types.ts';
 
 type Row = Record<string, string | number | null>;
 type SourceNode = { meta:CurationNode; body:Evidence|Proposal; parents:SourceRef[] };
-type SourceBudget = { bytes:number; prefix:'CURATION'|'RETRIEVAL'; limits:{ nodes:number; edges:number; bytes:number } };
+type SourceBudget = { bytes:number; prefix:'CURATION'|'RETRIEVAL'|'SCENE_SOURCE'; limits:{ nodes:number; edges:number; bytes:number } };
 export type Clock = { wall(): number; monotonic(): number };
 const clock: Clock = { wall: Date.now, monotonic: () => performance.now() };
 
@@ -513,6 +515,45 @@ export class MemoryStore {
       return frozenCopy({ version:1 as const, authority, asOf, selected,
         counts:{ selected:selected.length, nodes:nodes.size, edges:edges.length, bytes:budget.bytes } });
     }, true);
+  }
+  /** Metadata-only scene authorization over an explicit pool of published memories.
+   * All ancestors are current; original evidence and memory text never leave this method. */
+  sceneSourceSnapshot(epoch:Epoch,publishedRefs:SourceRef[]):SceneSourceSnapshot {
+    return this.#tx(()=>{
+      const scope=this.#epoch(epoch),asOf=this.#clock.wall();
+      if(!Number.isSafeInteger(asOf)||asOf<0)v.fail('INVALID_INPUT');
+      if(!Array.isArray(publishedRefs)||publishedRefs.length>SCENE_SOURCE_LIMITS.selected)v.fail('SCENE_SOURCE_LIMIT');
+      const requested=publishedRefs.length?v.refs(publishedRefs):[];
+      const authority={id:scope.id,generation:scope.generation,consentRevision:scope.consentRevision,runtimeEpoch:scope.runtimeEpoch};
+      const budget:SourceBudget={bytes:0,prefix:'SCENE_SOURCE',limits:SCENE_SOURCE_LIMITS};
+      const charge=(value:unknown)=>this.#sourceCharge(budget,Buffer.byteLength(JSON.stringify(value),'utf8'));
+      charge({version:1,authority,asOf,metadataIdentity:'0'.repeat(64),selected:[],roots:[],
+        counts:{selected:32,nodes:128,edges:512,bytes:SCENE_SOURCE_LIMITS.bytes}});
+      const {nodes}=this.#collectSources(scope,requested,asOf,budget);
+      const visiting=new Set<string>(),rootCache=new Map<string,SourceRef[]>();
+      const selected=requested.map(ref=>{
+        if(nodes.get(ref.id)!.meta.type!=='memory')v.fail('SOURCE_NOT_PUBLISHED');
+        const item={ref,rootEventRefs:this.#sourceRoots(ref.id,nodes,visiting,rootCache,'SCENE_SOURCE')};
+        charge(item);this.#sourceCharge(budget,1);return item;
+      });
+      const roots=[...nodes.values()].filter(node=>node.meta.type==='event').map(node=>{
+        const evidence=node.body as Evidence;
+        const item={ref:{id:node.meta.id,revision:node.meta.revision},mode:evidence.mode,speakerRole:evidence.speakerRole,
+          occurredAt:evidence.occurredAt,recordedAt:node.meta.recordedAt};
+        charge(item);this.#sourceCharge(budget,1);return item;
+      });
+      // Identity covers all ancestor metadata and edges, not plaintext or its digest.
+      const identity=createHash('sha256');let edgeCount=0;
+      for(const node of nodes.values()) {
+        const body=node.body;
+        identity.update(JSON.stringify({meta:node.meta,parents:node.parents,
+          origin:node.meta.type==='event'?{mode:(body as Evidence).mode,speakerRole:(body as Evidence).speakerRole,
+            occurredAt:(body as Evidence).occurredAt}:{basis:(body as Proposal).basis,kind:(body as Proposal).kind}}));
+        edgeCount+=node.parents.length;
+      }
+      return frozenCopy({version:1 as const,authority,asOf,metadataIdentity:identity.digest('hex'),selected,roots,
+        counts:{selected:selected.length,nodes:nodes.size,edges:edgeCount,bytes:budget.bytes}});
+    },true);
   }
   search(epoch: Epoch, query: string, limit = 20, asOf = this.#clock.wall()): MemoryRecord[] {
     v.text(query, 256); v.timestamp(asOf);

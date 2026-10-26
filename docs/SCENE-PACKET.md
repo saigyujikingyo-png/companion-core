@@ -1,5 +1,7 @@
 # SP0 / SF0：有界 ScenePacket 与可读 JSON 交换
 
+后续 [SP0A / AR0b0](SCENE-AUTHORITY.md)另加受信 Store 来源桥和有界 RAM 多消费者。纯 `SceneContract` 仍不认证来源；本页 v1 规则和旧交换字节保持不变。显式 `new SceneContract(catalogJson, 2)` 接收 logical v2：catalog/packet/manifest 版本均为2，epoch 两项允许非负整数以对应 Store 的初始0；其余结构与预算不变，container/codec/canonicalization仍v1。默认构造器只接v1，不自动把v1改成v2；导入必须与实例逻辑版本一致。SQLite schema/M2格式仍为原版本。
+
 状态：**CONTRACT_IMPLEMENTED / INDEPENDENT_REVIEW_PASS**（2026-10-26）。本批实现纯 RAM 合同、不可变合成 catalog 和无压缩 JSON 完整性校验；未接 Store、真实来源权限、媒体、模型或持久格式。作者最终定向33/33、strict TS与合成demo通过，独立Astra max最终返验已通过；whole/CI以本批回执及对应提交Actions为准，当前不预报通过。不同层证据不相加。
 
 ## 冻结计划

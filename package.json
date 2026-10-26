@@ -14,8 +14,9 @@
     "demo:curation": "node src/curation-demo.ts",
     "demo:retrieval": "node src/retrieval-demo.ts",
     "demo:scene": "node src/scene-demo.ts",
+    "demo:scene-authority": "node src/scene-authority-demo.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene"
+    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene && npm run demo:scene-authority"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

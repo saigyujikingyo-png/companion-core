@@ -1,5 +1,7 @@
 # 实施与持续开发路线
 
+**本批 SP0A / AR0b0：** [真实Store来源绑定与有界RAM消费者](SCENE-AUTHORITY.md)已实现显式Scene logical v2、metadata-only来源快照、reset/全量替换/独立ACK、暂停与源撤销失效，以及M2源恢复后的显式新绑定。仅合成数据，claim质量NOT_EVALUATED，持久schema与outbox未改；[编号迁移/immutable journal/per-consumer checkpoint设计](ADR-AR0B-DURABLE.md)仍DESIGN_ONLY。最终验收按本批专项、独立审查、whole和对应提交CI分层记录；这不完成AR0b durablefanout或AR1质量实验。
+
 **本批 AR0：** [有界当前召回与同版 RAM 投影](AR0-RETRIEVAL.md)已通过作者139/139、独立最终6/6、本机一次whole413/413与strict TS/三个零模型调用demo；原12项L1差量仅保留TOOL_OUTPUT_ONLY历史证据、未重跑，分层不相加。CI以发布后对应提交Actions为准，当前不预报通过。只读当前memory与学习许可分离，局部全量重建不消费全局outbox ACK；生产未部署、质量NOT_EVALUATED。下一步按 **AR0b 持久 dispatcher/per-consumer 迁移与崩溃/重复/删除次序/重建基线 → AR1 真实 embedding/BM25/PPR/mean-vs-sampled 冻结实验** 推进；持久fanout未实现。
 
 [AEMC v0.6 对象中心表征路线](AEMC-V06-REPRESENTATION.md)的 [SP0/SF0](SCENE-PACKET.md) 已实现独立 RAM 声明validator、精确概念/profile引用与可读 JSON 完整性交换；作者专项33/33与独立最终返验通过，whole/CI以本批回执及对应提交Actions为准，当前不预报通过。它不认证现实来源/权限、不接持久schema或感知；SP1/SF1质量与总成本、SP2映射迁移、SF2资产/撤销/崩溃及AR0b持久迁移仍是后续独立门，不替代AR1检索协议。

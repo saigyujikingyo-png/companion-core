@@ -4,6 +4,8 @@
 
 **当前是 0.1 开发原型：本轮验收仅合成数据，未迁移旧用户数据库。** 真实 provider 与宿主回合按独立证据验收，普通测试不会调用真实模型。它是现有六插件维护工作的独立实验核心；尚未替换、合并或发布到任一上游插件。
 
+**当前 [SP0A / AR0b0](docs/SCENE-AUTHORITY.md)：** 新增受信 Store 来源绑定和最多8个 RAM 消费者的 reset/完整替换协议；每次数据读取/交付复核全部绑定来源、当前权限、TTL与时钟，暂停清除旧正文/投递句柄，撤销终止旧数据能力。显式 Scene logical v2承载真实0 epoch，v1原规则/黄金字节和数据库schema1保持不变。M2只恢复来源，Scene须新绑定、新reset及显式重新提供JSON。作者专项226/226、strict TS及零模型demo通过，独立审查/whole/提交CI另行验收。来源有效不等于claim事实正确；持久fanout仍[仅设计](docs/ADR-AR0B-DURABLE.md)，未接真实宿主、数据或部署。
+
 **许可与公开边界：** 项目第一方代码、文档和合成测试采用 [Apache-2.0](LICENSE)；[第三方与数据边界](docs/THIRD-PARTY.md)单列。所有package仍保留 `private: true`，只防止误发npm，不限制本仓源码按Apache-2.0使用。源码与安全摘要不包含原始实验工件、凭据或本机部署环境；fresh clone可跑synthetic checks，不能仅clone后就复现原resident部署。
 
 **此前陪伴窗口源码（2026-10-26）：** `05cbeeac9411af87081282ca43223d767eca09f3` 分离[observed presence与显式陪伴窗口](docs/PRESENCE-WINDOW.md)。窗口是通信permission，不是人在场证据；默认禁用，不修改state阈值、奖励或原生30秒观察租约。strict TS、300/300 tests、七步回放及独立Astra63项通过。[实际SDK窗口接线](docs/evidence/NATIVE-ACCEPTANCE.md#window-control)为 **WINDOW_CONTROL_WIRING_PASS**：真实synthetic Node child、1次合成provider/原生ACK、真实API0；grant60后原输入观测+31秒时available=false而window仍有效，重复grant不延期，off/pause/resume不恢复permission，child/outer均clean。它不是自然主动触发或UI体验验收，本批未部署生产。
@@ -47,7 +49,7 @@ npm run check
 
 `npm run demo:retrieval` 演示 AR0 的直接/共享来源命中与撤销后拒绝，输出 `AR0_CONTRACT_PASS`、counts/codes 和质量 `NOT_EVALUATED`；仅新建 RAM 数据库，零 API，不打印正文或身份。`check` 将它追加在 curation 演示之后。真实使用跨 `await` 或送入 provider 前须再次 `resolve`，已经交出的副本不能物理召回。
 
-`npm run demo:scene` 演示独立 SP0/SF0 合成声明往返；输出 `SCENE_CONTRACT_PASS` 与 `PERCEPTION_NOT_RUN`、`SEMANTIC_QUALITY_NOT_EVALUATED`、`PRODUCTION_NOT_CONNECTED`。`check` 将它追加在 retrieval demo 之后；不打开数据库、读取媒体或调用模型。
+`npm run demo:scene` 演示独立 SP0/SF0 合成声明往返；输出 `SCENE_CONTRACT_PASS` 与 `PERCEPTION_NOT_RUN`、`SEMANTIC_QUALITY_NOT_EVALUATED`、`PRODUCTION_NOT_CONNECTED`。`check` 将它追加在 retrieval demo 之后；不打开数据库、读取媒体或调用模型。随后 `demo:scene-authority` 新建合成 RAM Store，验证双消费者和撤销清除，输出 `SCENE_AUTHORITY_PASS`；无模型调用、持久consumer或生产连接。
 
 ## 已实现的切片
 

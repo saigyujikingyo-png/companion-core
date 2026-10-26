@@ -16,7 +16,7 @@ export type MappingProfile = { ref:SceneRef; modelRef:SceneRef; checkpointRef:Sc
   normalization:string; encoderRef:SceneRef; saeDictionaryRef:SceneRef|null; prototypeDictionaryRef:SceneRef;
   decoderRef:SceneRef; quantizerRef:SceneRef; latentSpace:string; dimension:number; alignmentRef:SceneRef|null;
   trainingLineage:SceneRef[]; calibrationLineage:SceneRef[] };
-export type SceneCatalog = { version:1; concepts:ConceptDefinition[]; mappingProfiles:MappingProfile[];
+export type SceneCatalog = { version:1|2; concepts:ConceptDefinition[]; mappingProfiles:MappingProfile[];
   prototypes:Array<{ref:SceneRef; conceptRef:ConceptRef; profileRef:SceneRef; dictionaryRef:SceneRef;
     decoderRef:SceneRef; quantizerRef:SceneRef}>;
   declaredSources:Array<{ref:SceneRef; scopeRef:string; epoch:SceneEpoch; kind:'observation'|'report'}> };
@@ -27,7 +27,7 @@ export type SceneValue = {kind:'unknown'; reason:'not_observed'|'withheld'|'not_
 export type SceneClaim = SceneRef & { kind:'classification'|'identity'|'attribute'|'relation'; subject:string;
   predicate:ConceptRef|null; value:SceneValue; origin:'observation'|'report'|'inference';
   verification:'not_verified'; sourceRefs:SceneRef[]; occurredAt:number|null };
-export type ScenePacket = { version:1; ref:SceneRef; scopeRef:string; epoch:SceneEpoch;
+export type ScenePacket = { version:1|2; ref:SceneRef; scopeRef:string; epoch:SceneEpoch;
   occurredAt:number|null; recordedAt:number; applicability:{from:number|null; to:number|null}; sourceRefs:SceneRef[];
   tracks:Array<TrackRef & {sourceRef:SceneRef}>;
   objects:Array<{id:string; typeClaim:SceneRef; trackRef:TrackRef|null; identityClaim:SceneRef|null; attributeClaims:SceneRef[]}>;
@@ -84,8 +84,9 @@ function ref(value:unknown):SceneRef { const v=fields(value,['id','revision']);i
 function conceptRef(value:unknown):ConceptRef {
   const v=fields(value,['namespace','id','revision']);id(v.namespace);id(v.id);integer(v.revision,1);return v as ConceptRef;
 }
-function epoch(value:unknown):SceneEpoch {
-  const v=fields(value,['generation','consentRevision']);integer(v.generation,1);integer(v.consentRevision,1);return v as SceneEpoch;
+function epoch(value:unknown,logicalVersion:1|2):SceneEpoch {
+  const min=logicalVersion===1?1:0;
+  const v=fields(value,['generation','consentRevision']);integer(v.generation,min);integer(v.consentRevision,min);return v as SceneEpoch;
 }
 function track(value:unknown,withSource=false):TrackRef {
   const v=fields(value,['device','streamEpoch','localTrackId','rev',...(withSource?['sourceRef']:[])]);
@@ -104,8 +105,8 @@ function references(value:unknown,min=0):SceneRef[] {
 function required<T>(map:Map<string,T>,k:string):T { const result=map.get(k);if(result===undefined)fail('SCENE_REF_MISMATCH');return result; }
 function timestamp(value:unknown):void {if(value!==null)integer(value);}
 
-function catalog(value:unknown):SceneCatalog {
-  const c=fields(value,['version','concepts','mappingProfiles','prototypes','declaredSources']);version(c.version,1);
+function catalog(value:unknown,logicalVersion:1|2):SceneCatalog {
+  const c=fields(value,['version','concepts','mappingProfiles','prototypes','declaredSources']);version(c.version,logicalVersion);
   const concepts=list(c.concepts,SCENE_LIMITS.concepts).map(item=>{
     const v=fields(item,['ref','kind','definition','labels','status']);conceptRef(v.ref);
     oneOf(v.kind,['object_type','attribute','relation','value']);str(v.definition,2_048);oneOf(v.status,['active','retired']);
@@ -115,7 +116,7 @@ function catalog(value:unknown):SceneCatalog {
   });
   const conceptMap=unique(concepts,c=>conceptKey(c.ref));
   const sources=list(c.declaredSources,SCENE_LIMITS.sources).map(item=>{
-    const v=fields(item,['ref','scopeRef','epoch','kind']);ref(v.ref);id(v.scopeRef);epoch(v.epoch);oneOf(v.kind,['observation','report']);
+    const v=fields(item,['ref','scopeRef','epoch','kind']);ref(v.ref);id(v.scopeRef);epoch(v.epoch,logicalVersion);oneOf(v.kind,['observation','report']);
     return v as SceneCatalog['declaredSources'][number];
   });const sourceMap=unique(sources,s=>key(s.ref));
   const profiles=list(c.mappingProfiles,SCENE_LIMITS.profiles).map(item=>{
@@ -144,8 +145,8 @@ function catalog(value:unknown):SceneCatalog {
 
 function packet(value:unknown,c:SceneCatalog):ScenePacket {
   const p=fields(value,['version','ref','scopeRef','epoch','occurredAt','recordedAt','applicability','sourceRefs',
-    'tracks','objects','claims','relations','anchors','geometry','residuals']);version(p.version,1);ref(p.ref);id(p.scopeRef);
-  const e=epoch(p.epoch);timestamp(p.occurredAt);integer(p.recordedAt);
+    'tracks','objects','claims','relations','anchors','geometry','residuals']);version(p.version,c.version);ref(p.ref);id(p.scopeRef);
+  const e=epoch(p.epoch,c.version);timestamp(p.occurredAt);integer(p.recordedAt);
   const applies=fields(p.applicability,['from','to']);timestamp(applies.from);timestamp(applies.to);
   if(applies.from!==null && applies.to!==null && (applies.from as number)>(applies.to as number))invalid();
   const conceptMap=unique(c.concepts,v=>conceptKey(v.ref)),sourceMap=unique(c.declaredSources,v=>key(v.ref));
@@ -244,14 +245,16 @@ const digest=(raw:string):string=>createHash('sha256').update(raw,'utf8').digest
 export class SceneContract {
   #catalog:Frozen<SceneCatalog>;
   #catalogJson:string;
-  constructor(catalogJson:string){
-    this.#catalog=frozenCopy(catalog(parseSceneJson(catalogJson)));
+  constructor(catalogJson:string,logicalVersion:1|2=1){
+    if(logicalVersion!==1 && logicalVersion!==2)fail('SCENE_UNSUPPORTED_VERSION');
+    this.#catalog=frozenCopy(catalog(parseSceneJson(catalogJson),logicalVersion));
     this.#catalogJson=normalizeSceneJson(JSON.stringify(this.#catalog));
   }
+  get catalog():Frozen<SceneCatalog> { return frozenCopy(this.#catalog); }
   #envelope(p:ScenePacket):string {
     const payload={catalog:this.#catalog,packet:p};
     const normalized=normalizeSceneJson(JSON.stringify(payload));
-    const envelope={manifest:{logicalSchemaVersion:1,containerProfile:CONTAINER,codecProfile:CODEC,
+    const envelope={manifest:{logicalSchemaVersion:p.version,containerProfile:CONTAINER,codecProfile:CODEC,
       canonicalization:CANONICAL,integrity:'sha256',payloadBytes:Buffer.byteLength(normalized,'utf8'),payloadSha256:digest(normalized)},payload};
     // Full envelope (including catalog/manifest) must pass the same aggregate byte/node/depth budgets.
     return normalizeSceneJson(JSON.stringify(envelope));
@@ -268,7 +271,7 @@ export class SceneContract {
   import(exchangeJson:string):SceneRead {
     const envelope=fields(parseSceneJson(exchangeJson),['manifest','payload']);
     const manifest=fields(envelope.manifest,['logicalSchemaVersion','containerProfile','codecProfile','canonicalization','integrity','payloadBytes','payloadSha256']);
-    version(manifest.logicalSchemaVersion,1);version(manifest.containerProfile,CONTAINER);version(manifest.codecProfile,CODEC);
+    version(manifest.logicalSchemaVersion,this.#catalog.version);version(manifest.containerProfile,CONTAINER);version(manifest.codecProfile,CODEC);
     version(manifest.canonicalization,CANONICAL);version(manifest.integrity,'sha256');
     integer(manifest.payloadBytes,0,SCENE_JSON_LIMITS.bytes);
     if(typeof manifest.payloadSha256!=='string' || !/^[0-9a-f]{64}$/.test(manifest.payloadSha256))invalid();
