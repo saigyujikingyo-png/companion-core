@@ -6,9 +6,9 @@
 
 **许可与公开边界：** 项目第一方代码、文档和合成测试采用 [Apache-2.0](LICENSE)；[第三方与数据边界](docs/THIRD-PARTY.md)单列。所有package仍保留 `private: true`，只防止误发npm，不限制本仓源码按Apache-2.0使用。源码与安全摘要不包含原始实验工件、凭据或本机部署环境；fresh clone可跑synthetic checks，不能仅clone后就复现原resident部署。
 
-**本批源码（2026-10-26）：** `05cbeeac9411af87081282ca43223d767eca09f3` 分离[observed presence与显式陪伴窗口](docs/PRESENCE-WINDOW.md)。窗口是通信permission，不是人在场证据；默认禁用，不修改state阈值、奖励或原生30秒观察租约。strict TS、300/300 tests、七步回放及独立Astra63项通过。[实际SDK窗口接线](docs/evidence/NATIVE-ACCEPTANCE.md#window-control)为 **WINDOW_CONTROL_WIRING_PASS**：真实synthetic Node child、1次合成provider/原生ACK、真实API0；grant60后原输入观测+31秒时available=false而window仍有效，重复grant不延期，off/pause/resume不恢复permission，child/outer均clean。它不是自然主动触发或UI体验验收，本批未部署生产。
+**此前陪伴窗口源码（2026-10-26）：** `05cbeeac9411af87081282ca43223d767eca09f3` 分离[observed presence与显式陪伴窗口](docs/PRESENCE-WINDOW.md)。窗口是通信permission，不是人在场证据；默认禁用，不修改state阈值、奖励或原生30秒观察租约。strict TS、300/300 tests、七步回放及独立Astra63项通过。[实际SDK窗口接线](docs/evidence/NATIVE-ACCEPTANCE.md#window-control)为 **WINDOW_CONTROL_WIRING_PASS**：真实synthetic Node child、1次合成provider/原生ACK、真实API0；grant60后原输入观测+31秒时available=false而window仍有效，重复grant不延期，off/pause/resume不恢复permission，child/outer均clean。它不是自然主动触发或UI体验验收，本批未部署生产。
 
-[学习设计](docs/LEARNING-DESIGN.md)为 **DESIGN_ONLY**：快state、即时权威经历、慢离线泛化三环分开；规划curation/dataset/评测/激活与撤销门，明确当前接口和长job/大dataset缺口。没有训练、自动清洗、多模态采集或新训练worker。
+[学习设计](docs/LEARNING-DESIGN.md)的 **L1.a 已实现 RAM 内声明 lint 与候选 manifest**：只读核对当前授权/来源、同源分组、时间切分及人工声明的冲突；其余训练、评测、激活、多模态和长job/大dataset路线仍为 **DESIGN_ONLY**。标注输入仍需人工或未来模型另行生成；linter 不识别语义真值、不验证翻译质量，也不授予训练许可。
 
 **上一主动交接源码（2026-10-26）：** `4e3f246b5a7f0ce7ecbae9b8822d687096aa779b` 修复[主动投递与前台交接](docs/DSH-COUPLED.md)：ready在原生回合/ACK等待期间有界保留，原生完成且core ACK落定后，经受原租约约束的SDK `whenIdle()`再发布；新鲜人类输入停止旧调度，只有最新输入的成功ACK可按原到期时间重新调度。前台等待实际逻辑工作及raw permits清空后才领取入站/额度，暂停、撤销或到期拒绝等待，不轮询、不重试、不延长租约。作者strict TypeScript、272/272合成测试和七步回放PASS；独立Astra max 39项定向检查PASS。[实际SDK零真实API投递](docs/evidence/NATIVE-ACCEPTANCE.md#proactive-zero)已 **ZERO_NATIVE_DELIVERY_PASS**：fixture验证ready排队/单次消费及两个native ACK，未构造真实core/memory/HTTP。
 
@@ -38,6 +38,8 @@ npm run check
 ```
 
 `check` 执行严格 TypeScript 检查、SQLite 合成回归和端到端合成回放。单独 `npm run demo` 会在系统临时目录创建一个全新的数据库，打印路径并保留供检查，不读取现有文件。演示不需要 API key、GPU、摄像头或麦克风。
+
+运行 `npm run demo:curation` 可复现 L1.a 的固定合成声明检查。它仅使用全新 RAM 数据库，输出 counts/codes、`CURATION_LINT_PASS` 与质量 `NOT_EVALUATED`；不输出原文、来源身份、manifest digest，也不训练或调用 API。`check` 在原有回放之后运行此演示。候选包含私有正文，仅供受信代码在 RAM 中审阅，使用时必须再次验证；参见[实际 L1.a 接口与限制](docs/LEARNING-DESIGN.md#l1a-已实现的窄接口)。
 
 ## 已实现的切片
 

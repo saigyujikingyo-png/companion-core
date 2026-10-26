@@ -11,8 +11,9 @@
   "scripts": {
     "test": "node --test test/*.test.ts test/*.test.mjs",
     "demo": "node src/replay.ts",
+    "demo:curation": "node src/curation-demo.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run demo"
+    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
