@@ -68,14 +68,27 @@ SQLite commits. Its disk journals contain ciphertext, not private data. Each
 record binds format/identity/sequence, previous entry hash, immutable checkpoint
 name/hash, revocation high-water and the complete ingress/quota/terminal state.
 
-For a changed memory transaction: serialize the uncommitted RAM image, encrypt
-image plus safety state with AES-256-GCM and a fresh nonce, exclusively create
-`checkpoint-<sequence>-<UUID>.bin`, fsync it, commit the encrypted authority row,
-then commit RAM SQLite. Metadata transitions use the same boundary. The
-authority commit is the durable commit point. Any persistence error or
-uncertainty poisons the current authority; it cannot return success, invoke
-HTTP or return a reply on a rolled-back RAM view. Unchanged reads/status do not
+For a changed memory transaction: first commit RAM SQLite so FTS5 has synchronized
+its pending index changes, then serialize that complete image. Encrypt image plus
+safety state with AES-256-GCM and a fresh nonce, exclusively create
+`checkpoint-<sequence>-<UUID>.bin`, fsync it, and commit the encrypted authority row
+before returning. Metadata transitions use the same durable boundary. The
+authority commit remains the durable commit point; the earlier RAM commit is not
+an acknowledgement. Any uncertain RAM commit, serialization or persistence error
+poisons both the memory store and durable authority; neither may continue serving
+reads, success, HTTP or replies. Ordinary SQL body errors roll back before this
+boundary. Unchanged reads/status do not
 checkpoint. Orphan higher-numbered checkpoints are never automatically selected.
+
+The original M2 writer serialized before RAM COMMIT, which could omit FTS5's
+pending inverted-index changes. A synthetic multi-turn/restart/revoke sequence
+reproduced a fast `DURABLE_CORRUPT` on the following boot. The corrected writer
+only creates complete future checkpoints. Existing inconsistent images still
+fail integrity validation; no automatic repair, migration or fallback is added.
+Startup rejection forwards an explicit allowlist of fixed durable/schema error
+codes through the stdio backend to the private `plugin-start` audit. Arbitrary
+codes, exception messages and paths are never forwarded. This diagnostic does
+not change startup/cleanup deadlines or retry a rejected boot.
 
 Startup verifies the bounded complete authority chain and only its exact latest
 checkpoint: hash, AEAD, identity, safety state, schema/layout hash, integrity and

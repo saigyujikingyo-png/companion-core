@@ -19,10 +19,11 @@ export class MemoryStore {
   #key: string;
   #persist: ((image: Uint8Array, revocationHighWater: number) => void) | undefined;
   #assertHealthy: (() => void) | undefined;
+  #onPoison: (() => void) | undefined;
   #poisoned = false;
 
   constructor(path: string, options: { clock?: Clock; image?: Uint8Array;
-    persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void } = {}) {
+    persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void; onPoison?: () => void } = {}) {
     if ((options.image || options.persist) && path !== ':memory:') v.fail('DURABLE_MEMORY_ONLY');
     this.#clock = options.clock ?? clock;
     this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true,
@@ -57,6 +58,7 @@ export class MemoryStore {
       }
       this.#persist = options.persist;
       this.#assertHealthy = options.assertHealthy;
+      this.#onPoison = options.onPoison;
     } catch (error) { this.#db.close(); throw error; }
   }
 
@@ -71,20 +73,23 @@ export class MemoryStore {
   #tx<T>(body: () => T, readOnly = false): T {
     this.#check();
     this.#db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
-    let persisting = false;
+    let committing = false, committed = false;
     try {
       const before = this.#one('SELECT total_changes() AS n')!.n;
       const result = body();
-      if (this.#persist && !readOnly && before !== this.#one('SELECT total_changes() AS n')!.n) {
-        persisting = true;
-        this.#persist(this.#db.serialize(), this.revocationHighWater());
-      }
-      this.#db.exec('COMMIT'); return result;
+      const changed = !readOnly && before !== this.#one('SELECT total_changes() AS n')!.n;
+      // FTS5 flushes pending index changes during COMMIT. Serializing before it
+      // can capture content rows without their matching inverted index pages.
+      // This RAM commit is not an externally acknowledged durable commit: the
+      // entire synchronous checkpoint must still succeed before we return.
+      committing = true; this.#db.exec('COMMIT'); committed = true;
+      if (this.#persist && changed) this.#persist(this.#db.serialize(), this.revocationHighWater());
+      return result;
     } catch (error) {
-      // Persistence may already have committed. A caller must never continue on
-      // a rolled-back RAM view after an uncertain durable commit.
-      if (persisting) this.#poisoned = true;
-      try { this.#db.exec('ROLLBACK'); } catch { /* Fail closed even if COMMIT failed. */ }
+      // Neither a possibly committed RAM mutation nor uncertain persistence may
+      // be used after failure. Body errors can still roll back normally.
+      if (this.#persist && committing) { this.#poisoned = true; this.#onPoison?.(); }
+      if (!committed) try { this.#db.exec('ROLLBACK'); } catch { /* Fail closed even if COMMIT failed. */ }
       throw error;
     }
   }

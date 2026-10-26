@@ -32,6 +32,53 @@ function publish(store: MemoryStore, scope: Epoch, sources: SourceRef[], proposa
   return { ...store.publish(scope, job.id, lease.token), revision:1 };
 }
 
+test('every persisted memory image includes committed FTS inserts and deletions', () => {
+  let persisted: Uint8Array | undefined, highWater = -1;
+  const store = new MemoryStore(':memory:', { persist(image, revocations) {
+    const copy = new DatabaseSync(':memory:');
+    try {
+      copy.deserialize(image);
+      assert.equal(copy.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok');
+      assert.deepEqual(copy.prepare('PRAGMA foreign_key_check').all(), []);
+      const rows = copy.prepare('SELECT count(*) AS n FROM memory_fts').get()!.n;
+      const matches = copy.prepare("SELECT count(*) AS n FROM memory_fts WHERE memory_fts MATCH 'violet'").get()!.n;
+      assert.equal(matches, rows);
+      persisted = image; highWater = revocations;
+    } finally { copy.close(); }
+  } });
+  try {
+    const scope = store.ensureScope(who), sources: SourceRef[] = [];
+    for (let i = 0; i < 4; i++) {
+      const event = store.acceptEvent(scope, input(`image-${i}`, `SYNTHETIC violet ${i}`)); sources.push(event);
+      publish(store, scope, [event], { ...claim, statement:`SYNTHETIC violet ${i}` });
+    }
+    store.revoke(scope, sources[0]!);
+    assert.equal(highWater, 1);
+    const restored = new MemoryStore(':memory:', { image:persisted! });
+    try { assert.equal(restored.search(scope, 'violet').length, 3); assert.equal(restored.revocationHighWater(), 1); }
+    finally { restored.close(); }
+  } finally { store.close(); }
+});
+
+test('SQL body failure rolls back memory and FTS without checkpointing or poisoning a healthy writer',()=>{
+  let checkpoints=0;const store=new MemoryStore(':memory:',{persist(){checkpoints++;}});
+  const prepare=DatabaseSync.prototype.prepare;
+  try {
+    const scope=store.ensureScope(who),source=store.acceptEvent(scope,input('body-failure','SYNTHETIC violet'));
+    const job=store.beginJob(scope,[source]),lease=store.claimLease(scope,job.id);
+    store.propose(scope,job.id,lease.token,{...claim,statement:'SYNTHETIC violet'});const before=checkpoints;
+    DatabaseSync.prototype.prepare=function(sql){
+      if(sql.startsWith('INSERT INTO outbox'))throw new Error('SYNTHETIC_BODY_SQL_FAULT');
+      return prepare.call(this,sql);
+    };
+    assert.throws(()=>store.publish(scope,job.id,lease.token),/SYNTHETIC_BODY_SQL_FAULT/);
+    DatabaseSync.prototype.prepare=prepare;
+    assert.equal(checkpoints,before);assert.equal(store.search(scope,'violet').length,0);
+    assert.deepEqual(store.projectionBatch(scope),[]);assert.equal(store.diagnostics().integrity,true);
+    store.publish(scope,job.id,lease.token);assert.equal(store.search(scope,'violet').length,1);assert.equal(checkpoints,before+1);
+  } finally {DatabaseSync.prototype.prepare=prepare;store.close();}
+});
+
 test('selected evidence persists; source key is idempotent and conflicting input fails', t => {
   const { store, scope, path } = fixture(t);
   const event = store.acceptEvent(scope, input());

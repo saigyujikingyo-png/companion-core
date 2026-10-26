@@ -362,6 +362,22 @@ test('persistent launcher handshake and native mount both reject wrong or missin
   }
 });
 
+test('boot rejection preserves only fixed local codes through backend and plugin startup audit',async()=>{
+  for(const supplied of ['DURABLE_CORRUPT','DURABLE_CLOCK_ROLLBACK','SCHEMA_MISMATCH','SYNTHETIC_PRIVATE_ERROR_NOT_RETAINED',undefined]){
+    const config=await hostConfig();let closed=false;
+    const launch=()=>{const child:any=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();
+      child.stdin.write=()=>{};child.kill=()=>{setTimeout(()=>{closed=true;child.emit('close',1,null);},10);return true;};
+      queueMicrotask(()=>child.stdout.emit('data',Buffer.from(JSON.stringify({version:1,id:'host-boot',ok:false,
+        error:{code:supplied,message:'SYNTHETIC_PRIVATE_DETAIL',path:'SYNTHETIC_PRIVATE_PATH'}})+'\n')));return child;};
+    const expected=supplied&&['DURABLE_CORRUPT','DURABLE_CLOCK_ROLLBACK','SCHEMA_MISMATCH'].includes(supplied)?supplied:'DSH_BACKEND_BOOT_FAILED';
+    const output=new PassThrough(),frames=outputFrames(output);
+    await assert.rejects(mountDshCoupled(mockHost(config.sessionId).ctx,config,sdk,{input:new PassThrough(),output,
+      startBackend:()=>DshStdioBackend.start(config.launcher,{spawn:launch as typeof spawn})}),/COMPANION_PLUGIN_START_FAILED/);
+    assert.equal(closed,true);assert.equal(frames.find(f=>f.kind==='plugin-start')?.code,expected);
+    assert.equal(JSON.stringify(frames).includes('SYNTHETIC_PRIVATE'),false);
+  }
+});
+
 for(const mode of ['boot-close','boot-fatal','write-throws'])test(`client ${mode} startup rejects only after actual owned close`,async()=>{
   const config=await hostConfig();let closed=false;
   const launch=()=>{const child:any=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();

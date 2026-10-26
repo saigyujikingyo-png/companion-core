@@ -18,6 +18,14 @@ export interface DshCoupledBackend {
 type Pending={resolve:(value:unknown)=>void;reject:(error:unknown)=>void;timer:ReturnType<typeof setTimeout>;
   signal:AbortSignal|undefined;abort:()=>void;cancelled:boolean};
 const allowedEnv=new Set(['SYSTEMROOT','WINDIR','PATH','PATHEXT','COMSPEC','TEMP','TMP','LOCALAPPDATA']);
+const bootFailureCodes=new Set(['DURABLE_CONFIG','DURABLE_UNSUPPORTED','DURABLE_KEY_INVALID','DURABLE_INCOMPLETE',
+  'DURABLE_CORRUPT','DURABLE_LOCKED','DURABLE_IDENTITY_MISMATCH','DURABLE_BUDGET_MISMATCH','DURABLE_LIMIT',
+  'DURABLE_WRITE_FAILED','DURABLE_UNAVAILABLE','DURABLE_CLOCK_ROLLBACK','DURABLE_MEMORY_ONLY',
+  'UNSUPPORTED_SCHEMA','UNKNOWN_DATABASE','SCHEMA_MISMATCH','DSH_BACKEND_BOOT_FAILED']);
+/** Only fixed local failure codes may cross into the startup audit. Never an error message or path. */
+export function safeBackendBootFailureCode(code:unknown):string|undefined {
+  return typeof code==='string'&&bootFailureCodes.has(code)?code:undefined;
+}
 
 /** Owns one private launcher and consumes only its bounded v1 JSON protocol.
  * The approved launcher, not this plugin/client, owns any DPAPI key access. */
@@ -123,6 +131,9 @@ export class DshStdioBackend implements DshCoupledBackend {
         if(!frame||typeof frame!=='object'||frame.version!==1)fail('DSH_BACKEND_PROTOCOL');
         if(frame.host!==undefined){if(frame.host!=='launcher'||frame.error!==undefined||!['STARTED_WAITING_BOOT','STOP_REQUESTED'].includes(frame.phase))fail('DSH_BACKEND_PROTOCOL');continue;}
         if(frame.id==='host-boot'&&!this.#sessionId){
+          if(frame.ok===false){
+            this.#terminate(safeBackendBootFailureCode(frame.error?.code)??'DSH_BACKEND_BOOT_FAILED');return;
+          }
           const status=frame.result;
           if(frame.ok!==true||!status||typeof status.sessionId!=='string'||status.paused!==true||status.available!==false
             ||status.maxCalls!==this.#expectedBudget

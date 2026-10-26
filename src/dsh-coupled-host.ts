@@ -3,10 +3,10 @@ import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { DshStdioBackend } from './dsh-coupled-backend.ts';
+import { DshStdioBackend, safeBackendBootFailureCode } from './dsh-coupled-backend.ts';
 import type { DshBackendConfig, DshCoupledBackend } from './dsh-coupled-backend.ts';
 import { DshCoupledBridge } from './dsh-coupled.ts';
-import { fail } from './validation.ts';
+import { CoreError, fail } from './validation.ts';
 
 export type DshPluginConfig={auditId:string;sessionId:string;model?:'coupled';cwd:string;enableProactive?:boolean;parentControl?:boolean;
   initialBackend?:'baseline'|'no-state'|'flywire';auditFile?:boolean;nativeSessionMode?:'create'|'resume';
@@ -245,6 +245,7 @@ export async function mountDshCoupled(ctx:any,inputConfig:unknown,sdk:Sdk,depend
       else if(!disposed)emit({kind:'acceptance-trigger',status:'already-claimed'});
     }
     return {cleanup,bridge,backend};
-  }catch(error){const code=plain(error)&&['DSH_BOOT_ALREADY_CLAIMED','DSH_BOOT_CLAIM_FAILED'].includes(error.code)?error.code:'DSH_PLUGIN_START_FAILED';
+  }catch(error){const code=(error instanceof CoreError?safeBackendBootFailureCode(error.code):undefined)
+      ??(plain(error)&&['DSH_BOOT_ALREADY_CLAIMED','DSH_BOOT_CLAIM_FAILED'].includes(error.code)?error.code:'DSH_PLUGIN_START_FAILED');
     emit({kind:'plugin-start',status:'failed',code});await cleanup();throw new Error('COMPANION_PLUGIN_START_FAILED');}
 }

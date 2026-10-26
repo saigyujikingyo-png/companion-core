@@ -117,7 +117,7 @@ export class DurableMemory {
       }, 0);
       this.#wallNow();
       store = new MemoryStore(':memory:', { clock: { wall: () => this.#wallNow(), monotonic: options.clock?.monotonic ?? (() => performance.now()) }, ...(image ? { image } : {}),
-        persist: (bytes, highWater) => this.#commit(bytes, highWater), assertHealthy:()=>this.#guard() });
+        persist: (bytes, highWater) => this.#commit(bytes, highWater), assertHealthy:()=>this.#guard(), onPoison:()=>{this.#poisoned=true;} });
       this.store = store;
       if (latest && this.store.revocationHighWater() !== latest.revocationHighWater) fail('DURABLE_CORRUPT');
       this.#commit(this.store.snapshot(), this.store.revocationHighWater());

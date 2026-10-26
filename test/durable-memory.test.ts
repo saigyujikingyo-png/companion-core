@@ -102,12 +102,39 @@ for(const point of ['checkpoint-write','checkpoint-fsync','authority-commit','af
   });
 }
 
-test('write failure in a MemoryStore mutation poisons RAM authority even after rollback',()=>{
+test('write failure after RAM commit poisons authority; only committed durable state reopens',()=>{
   const c=config();let armed=false;const v=new DurableMemory(c,8,{fault:p=>{if(armed&&p==='after-authority-commit')throw new Error('synthetic');}});
   armed=true;assert.throws(()=>v.store.ensureScope(scopeIdentity),/DURABLE_WRITE_FAILED/);
   assert.throws(()=>v.store.ensureScope(scopeIdentity),/DURABLE_UNAVAILABLE/);v.close();
   const restored=new DurableMemory(c,8);assert.ok(restored.store.ensureScope(scopeIdentity));restored.close();
 });
+
+for(const point of ['before-ram-commit','after-ram-commit','serialize'] as const){
+  test(`memory mutation ${point} failure poisons store and durable metadata before acknowledgement`,()=>{
+    const c=config(),v=new DurableMemory(c,8),exec=DatabaseSync.prototype.exec,serialize=DatabaseSync.prototype.serialize;
+    try {
+      if(point==='serialize')DatabaseSync.prototype.serialize=function(){throw new Error('SYNTHETIC_SERIALIZE_FAULT');};
+      else DatabaseSync.prototype.exec=function(sql){
+        if(sql==='COMMIT'){
+          if(point==='after-ram-commit')exec.call(this,sql);
+          throw new Error('SYNTHETIC_COMMIT_FAULT');
+        }
+        return exec.call(this,sql);
+      };
+      assert.throws(()=>v.store.ensureScope(scopeIdentity),/SYNTHETIC_(COMMIT|SERIALIZE)_FAULT/);
+      assert.throws(()=>v.status,/DURABLE_UNAVAILABLE/);assert.throws(()=>v.reserved,/DURABLE_UNAVAILABLE/);
+      assert.throws(()=>v.claim('later','later'),/DURABLE_UNAVAILABLE/);assert.throws(()=>v.reserve('later'),/DURABLE_UNAVAILABLE/);
+      assert.throws(()=>v.store.snapshot(),/DURABLE_UNAVAILABLE/);assert.throws(()=>v.store.diagnostics(),/DURABLE_UNAVAILABLE/);
+    } finally {DatabaseSync.prototype.exec=exec;DatabaseSync.prototype.serialize=serialize;v.close();}
+    const restored=new DurableMemory(c,8);
+    try {
+      const copy=new DatabaseSync(':memory:');
+      try{copy.deserialize(restored.store.snapshot());assert.equal(copy.prepare('SELECT count(*) AS n FROM scopes').get()!.n,0);}
+      finally{copy.close();}
+      assert.equal(restored.reserved,0);assert.ok(restored.store.ensureScope(scopeIdentity));
+    } finally {restored.close();}
+  });
+}
 
 test('wall clock rollback rejects reopen and never refunds a durable request reservation',()=>{
   const c=config();let wall=2000;const clock={wall:()=>wall,monotonic:()=>0};let v=new DurableMemory(c,8,{clock});
