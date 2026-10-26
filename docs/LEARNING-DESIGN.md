@@ -4,6 +4,8 @@
 
 [J0 GrowthJournal](GROWTH-JOURNAL.md)补充了受信本地 curation 包装器的有界 RAM 操作日记与安全声明导出：真实 lint/revalidate 与固定模拟训练/产物/评估/激活分别记录，失败或回滚不抹掉已有事实。它没有 trainer、外部runner认证或受信历史恢复，实际训练/模型调用仍为0；JSON与LLM叙述不能自报完成。
 
+“成长日记”的目标是记录真实微调/持续学习训练履历，并以源码/OneDrive 外私有硬盘冷存储为权威、RAM 仅缓存；版本化逻辑格式与 container/codec 解耦，支持后续专属无损压缩/解压研究。独立 [TrainingRun 设计及 TJ0/TJ1 切片](TRAINING-RUN-JOURNAL.md)仍为 **DESIGN_ONLY / NOT_IMPLEMENTED**。现有 J0 不具备真实训练履历或可信跨重启恢复，不能把 curation/模拟回执升级为真实训练。
+
 ## L1.a 已实现的窄接口
 
 `MemoryStore.curationSnapshot(epoch, publishedRefs)` 在一个只读事务中先核当前 scope/consent/learningAllowed，再捕获一个非负安全整数 `asOf`。只收当前可见、有效的已发布 memory；原始 event、pending、跨 scope、未来生效、过期、撤销或版本冲突整次拒绝。旧 node 的历史 consent revision 不代替当前 scope 权限，也不会误阻止新授权读取仍合法的旧来源。

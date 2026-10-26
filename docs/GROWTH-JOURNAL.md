@@ -1,5 +1,13 @@
 # J0: sealed RAM growth journal
 
+## Product goal and current scope
+
+The product goal of “growth journal” is a record of actual fine-tuning and continuous-learning runs, not a chat diary or curation log. The proposed [TrainingRun journal](TRAINING-RUN-JOURNAL.md) is **DESIGN_ONLY / NOT_IMPLEMENTED**: authoritative private disk cold storage outside source/OneDrive, a versioned logical format for future lossless codec research, and RAM only as a recent cache. Cold archives and rebuildable indexes are separate; persistent does not mean unconditional permanent retention.
+
+J0 currently records bounded RAM plans/attempts, real curation lint/revalidate observations and permanently synthetic replay. It has no trainer or trusted cross-restart history recovery; actual training/model calls remain zero. The real training-journal goal is not delivered; no missing history may be backfilled. The future record surface does not expand J0 authority or promote simulations into real training. The existing J0 contract and historical author evidence below remain unchanged.
+
+## Existing J0 contract and author evidence
+
 Status: **AUTHOR_FOCUSED_PASS**, 2026-10-26. The contract was frozen before implementation; independent review, whole check and release/CI are separate acceptance gates.
 
 - One actual observer path invokes `CurationService.lint` and `revalidate` itself. Only observations made by that wrapper may carry `CORE_OPERATION_OBSERVED`. No JSON or model narrative can append an actual receipt. Zero admitted rows or successful structural checks are not semantic evaluation or training.

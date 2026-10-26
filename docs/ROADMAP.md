@@ -25,6 +25,8 @@
 
 ## 下一批可开工任务
 
+**成长日记优先级：** 用户目标是以私有硬盘冷存储记录真实微调/持续学习训练履历，固定版本化格式供专属压缩/解压研究，RAM 仅缓存。下一最小切片 [TJ0](TRAINING-RUN-JOURNAL.md)拟做记录 schema/reducer、私有盘分块无损读写、跨重启回读与索引重建的离线合成验收；仍为 **DESIGN_ONLY / NOT_IMPLEMENTED**，不是另一个 RAM 原型或真实训练交付。TJ1 才核对受控本地小 trainer 回执、参数 delta/export/新进程 reload/独立 eval。Nemotron/cloud 按具体资源、许可、额度另行验收，不要求所有小训练使用 Nemotron 120B。当前 J0 不回填训练历史；此优先级不跳过既有安全/宿主/数据门。
+
 [AEMC v0.5 研究评审与接入路线](AEMC-V05-REVIEW.md)保留四域对接、数学修订与候选实验的 DESIGN_ONLY / EXPERIMENT_NOT_RUN 状态；后续 AR0 窄实现以上述独立合同及实际验收为准，不代表 AR1 已执行。
 
 M2a 当前新增[加密跨重启切片](M2-DURABLE.md)：只实现同机恢复、独立撤销安全边界、额度与入站/输出终态；最新账本完整是前提，`authority.sqlite`有效前缀回滚仍为`KNOWN_UNPROTECTED_LEDGER_ROLLBACK`。整库图像16MiB、检查点历史256MiB、4096次commit是当前容量上限；旧库导入、备份恢复产品、性能规模、compaction及长期运维未完成，不把此切片视为整个 M2 完成。
