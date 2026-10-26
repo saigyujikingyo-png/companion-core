@@ -23,11 +23,13 @@
 | M5 多端与学习 | 手机/穿戴/桌面代理；离线outbox；按需训练codec/readout/LoRA；可信产物激活与回滚 | 设备失联/重连/撤销代际、继承检查点污染、跨进程晚到输出、训练不抢前台 |
 | M6 具身 | ActionProvider、模拟器、ROS2/轮式平台 | 本地限速/避障/断联制动/急停；物理平台另行验收 |
 
-[三项目标决策与资产矩阵](TARGET-DECISIONS.md)作为后续切片准则：果蝇候选按净收益可弃用；Student v1 的自然中文、共情情境、关系一致、主动交流合宜和长期状态连续优先，科学/工具/事实来源/执行真实性保持独立硬回归；通用公开底座与私有实例层分离。均为 **DESIGN_ONLY**，不改既有 PASS 或 TJ0/TJ1 未实施状态。
+[三项目标决策与资产矩阵](TARGET-DECISIONS.md)作为后续切片准则：果蝇候选按净收益可弃用；Student v1 的自然中文、共情情境、关系一致、主动交流合宜和长期状态连续优先，科学/工具/事实来源/执行真实性保持独立硬回归；通用公开底座与私有实例层分离。均为 **DESIGN_ONLY**，不改既有 PASS；TJ0 当前离线实现与 TJ1 未实施状态分别记录。
+
+[按需条件扩散/去噪重建](RECONSTRUCTION-SERVICE-DESIGN.md)仅为 **DESIGN_ONLY** 外部可替换服务候选，不蒸馏进主 LLM；与图扩散检索、常驻情绪层分开，不扩 TJ0。
 
 ## 下一批可开工任务
 
-**成长日记优先级：** 用户目标是以私有硬盘冷存储记录真实微调/持续学习训练履历，固定版本化格式供专属压缩/解压研究，RAM 仅缓存。下一最小切片 [TJ0](TRAINING-RUN-JOURNAL.md)拟做记录 schema/reducer、私有盘分块无损读写、跨重启回读与索引重建的离线合成验收；仍为 **DESIGN_ONLY / NOT_IMPLEMENTED**，不是另一个 RAM 原型或真实训练交付。TJ1 才核对受控本地小 trainer 回执、参数 delta/export/新进程 reload/独立 eval。Nemotron/cloud 按具体资源、许可、额度另行验收，不要求所有小训练使用 Nemotron 120B。当前 J0 不回填训练历史；此优先级不跳过既有安全/宿主/数据门。
+**成长日记优先级：** 用户目标是以私有硬盘冷存储记录真实微调/持续学习训练履历，固定版本化格式供专属压缩/解压研究，RAM 仅缓存。[TJ0](TJ0-DISK-FORMAT.md)已实现有界合成声明 schema/reducer、identity/Zstd 分块读写、跨进程回读与索引重建，始终 NOT_AUTHENTICATED；作者 39 项/TS/demo 与独立检查分层留证，最终 whole/跨平台以本批回执为准，不预报通过。它不认证真实训练。TJ1 才核对受控本地小 trainer 回执、参数 delta/export/新进程 reload/独立 eval。Nemotron/cloud 按具体资源、许可、额度另行验收，不要求所有小训练使用 Nemotron 120B。当前 J0 不回填训练历史；此优先级不跳过既有安全/宿主/数据门。
 
 [AEMC v0.5 研究评审与接入路线](AEMC-V05-REVIEW.md)保留四域对接、数学修订与候选实验的 DESIGN_ONLY / EXPERIMENT_NOT_RUN 状态；后续 AR0 窄实现以上述独立合同及实际验收为准，不代表 AR1 已执行。
 

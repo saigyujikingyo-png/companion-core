@@ -1,6 +1,6 @@
 # 目标决策：陪伴质量、可替换回路与资产边界
 
-状态：**DESIGN_ONLY**，2026-10-26。本文记录用户目标与后续验收方向，不宣称实现、比较实验、训练或部署完成；不改历史 PASS、阴性结果或冻结研究。新 [TJ0/TJ1](TRAINING-RUN-JOURNAL.md)仍 **NOT_IMPLEMENTED**。本轮 API、训练、权重下载、采购与运行时修改为 0。
+状态：**DESIGN_ONLY**，2026-10-26。本文记录用户目标与后续验收方向，不宣称实现、比较实验、训练或部署完成；不改历史 PASS、阴性结果或冻结研究。当前 [TJ0](TJ0-DISK-FORMAT.md)仅离线合成声明磁盘协议已实现；[TJ1](TRAINING-RUN-JOURNAL.md)真实训练仍 **NOT_IMPLEMENTED**。本决策不授权 API、训练、下载或采购。
 
 ## D1：果蝇是可替换候选
 

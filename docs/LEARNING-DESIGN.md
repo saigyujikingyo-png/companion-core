@@ -4,7 +4,7 @@
 
 [J0 GrowthJournal](GROWTH-JOURNAL.md)补充了受信本地 curation 包装器的有界 RAM 操作日记与安全声明导出：真实 lint/revalidate 与固定模拟训练/产物/评估/激活分别记录，失败或回滚不抹掉已有事实。它没有 trainer、外部runner认证或受信历史恢复，实际训练/模型调用仍为0；JSON与LLM叙述不能自报完成。
 
-“成长日记”的目标是记录真实微调/持续学习训练履历，并以源码/OneDrive 外私有硬盘冷存储为权威、RAM 仅缓存；版本化逻辑格式与 container/codec 解耦，支持后续专属无损压缩/解压研究。独立 [TrainingRun 设计及 TJ0/TJ1 切片](TRAINING-RUN-JOURNAL.md)仍为 **DESIGN_ONLY / NOT_IMPLEMENTED**。现有 J0 不具备真实训练履历或可信跨重启恢复，不能把 curation/模拟回执升级为真实训练。
+“成长日记”的目标是记录真实微调/持续学习训练履历，并以源码/OneDrive 外私有硬盘冷存储为权威、RAM 仅缓存；版本化逻辑格式与 container/codec 解耦，支持后续专属无损压缩/解压研究。独立 [TJ0 磁盘协议](TJ0-DISK-FORMAT.md)已实现有界合成声明、跨进程回读/索引重建，始终 NOT_AUTHENTICATED；[TrainingRun 后续 TJ1](TRAINING-RUN-JOURNAL.md)真实训练仍 **NOT_IMPLEMENTED**。现有 J0 不具备真实训练履历或可信跨重启恢复，不能把 curation/模拟回执升级为真实训练。
 
 后续 Student v1 与学习资产遵循[目标决策](TARGET-DECISIONS.md)：优先自然中文、共情情境、角色关系一致、主动交流合宜和长期状态连续，以独立盲评/保留集及消融验收；科学推理、工具、事实来源和执行真实性各守硬回归，不由平均分掩盖。通用公开底座与私有实例记忆/个性层分离；此为 **DESIGN_ONLY**，不宣称人类级或新训练完成。
 
