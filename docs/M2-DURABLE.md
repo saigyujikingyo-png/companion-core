@@ -125,6 +125,9 @@ pending inverted-index changes. A synthetic multi-turn/restart/revoke sequence
 reproduced a fast `DURABLE_CORRUPT` on the following boot. The corrected writer
 only creates complete future checkpoints. Existing inconsistent images still
 fail integrity validation; no automatic repair, migration or fallback is added.
+The original failed native vault remains sealed and was not decrypted; its
+original fixed error code was not retained. This independent red/green
+reproduction is not a direct diagnosis of that native vault.
 Startup rejection forwards an explicit allowlist of fixed durable/schema error
 codes through the stdio backend to the private `plugin-start` audit. Arbitrary
 codes, exception messages and paths are never forwarded. This diagnostic does

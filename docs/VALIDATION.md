@@ -5,7 +5,7 @@
 | 层级 | 当前接受范围 |
 |---|---|
 | 冻结源码与合成校验 | `npm run check` PASS：strict TypeScript、241/241 tests（0 fail/skip）、七步合成回放；Node24.16.0 / SQLite3.53.0。真实模型调用0、生产数据false。独立 Astra max 八项定向返验通过。241项包含明确标为 `KNOWN_UNPROTECTED_LEDGER_ROLLBACK` 的已知负例，不是回滚防护 PASS。 |
-| FTS5 修复 | 合成多回合/恢复/撤销复现了原先 RAM COMMIT 前序列化遗漏 FTS5 xSync 的损坏；现为 RAM COMMIT→完整图像序列化→AEAD检查点fsync→独立安全账本FULL提交→对外成功。不确定失败封锁 store/vault；旧坏图像仍拒绝恢复。 |
+| FTS5 修复 | 独立合成完整多回合/恢复/撤销序列红绿复现了 RAM COMMIT 前序列化遗漏 FTS5 xSync 的缺陷；现为 RAM COMMIT→完整图像序列化→AEAD检查点fsync→独立安全账本FULL提交→对外成功。不确定失败封锁 store/vault；已知损坏检查点不会自动修复或接受。原native失败库封存未解密，原始固定错误码未留，不把独立复现当作原库直接诊断。 |
 | 原 `newcap8` 真实有限链路 | A/B/C/D四次真实DeepSeek请求均native ACK；state prior和旧A召回分数1→1.5366496366、明确反馈由下一输入消费、暂停拒绝、首次恢复召回及SDK重复RPC抑制有局部证据。撤销后第二次恢复FAIL、E未发；原链保留PARTIAL，不补写完整PASS。 |
 | 修复后零请求原生检查 | [REPAIRED-ZERO-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-ZERO-PASS.json)：独立新vault、0 API凭据/0模型调用，仍使用独立memory key；内外进程exit0、owned residual0、无强杀。不是旧vault恢复或真实模型链路PASS。 |
 | 修复后真实cap3 | [REPAIRED-REAL-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-REAL-PASS.json)为 `PASS_REPAIRED_NATIVE_THREE_CALL_PROOF`：独立新vault的A/B/C三次真实请求均native ACK且appraisal applied；两次恢复默认暂停、保留calls1/2，三个binding不同。B召回A anchor分数1→1.1997564545；撤销后C的recalled/conditioning/background refs均排除A事件和anchor。三次inner/outer均clean exit0/noForce/owned0/drained；一次退出保留`lastErrorCode:UNCLASSIFIED`诊断，不宣称全程无错。原4+新3=7/aggregate8，不退款、不重试；`originalChainContinuity:false`。 |
