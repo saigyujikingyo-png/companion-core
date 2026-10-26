@@ -1,5 +1,7 @@
 # Companion Core
 
+[WF0 教学 metadata 合同](docs/WF0-TEACHING-CONTRACT.md)已实现有界版本化声明验证、同源家族/私有继承与切分检查及公开 metadata 投影；始终 `DECLARATION_VALID_ONLY / NOT_AUTHORIZED / NOT_AUTHENTICATED / NOT_EVALUATED`，不生成教学内容、不认证许可或真实推理，不接 provider、trainer 或 Store。[Together gpt-oss 教师补充](docs/GPT-OSS-TEACHER-RESEARCH.md)是 API 执行前的 **DESIGN_ONLY** 研究快照，未调用或验证质量。
+
 可审计的本地联想记忆底座。云端 API 与未来本地模型共用来源、身份、检索、撤销和学习产物边界；桌宠、社交插件、移动端只是不同入口。
 
 **当前是 0.1 开发原型：本轮验收仅合成数据，未迁移旧用户数据库。** 真实 provider 与宿主回合按独立证据验收，普通测试不会调用真实模型。它是现有六插件维护工作的独立实验核心；尚未替换、合并或发布到任一上游插件。

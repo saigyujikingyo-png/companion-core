@@ -1,5 +1,7 @@
 # 实施与持续开发路线
 
+**本批 WF0：** [教学 metadata 合同](WF0-TEACHING-CONTRACT.md)实现独立有界声明 validator、完整已提供家族/已知指纹分组、私有继承、sealed split 隔离与公开 metadata 导出。仅 `DECLARATION_VALID_ONLY`，执行 `NOT_AUTHORIZED`、权限真实性 `NOT_AUTHENTICATED`、语义/质量 `NOT_EVALUATED`；不生成材料、不接 API/训练/Store，实际教学及完整来源认证仍待独立准入。[Together gpt-oss 教师研究](GPT-OSS-TEACHER-RESEARCH.md)为调用前 **DESIGN_ONLY** 快照，不改变既有 WF0 或消耗旧请求额度。
+
 **本批 J0：** [GrowthJournal](GROWTH-JOURNAL.md)实现有界 RAM 计划/尝试/实际 curation 检查回执与固定模拟训练四维，当前权限复核、旧写入runtime fence、新当前历史视图及 JSON/安全 Markdown 声明导出。实际训练/模型调用0；不新增executor、DB migration或受信恢复。训练runner、持久可信回执与跨同意代际重新授权保持后续独立协议；本批作者/独立/whole/CI分层验收，不把lint完成或零admitted写成语义质量PASS。
 
 **本批 SP0A / AR0b0：** [真实Store来源绑定与有界RAM消费者](SCENE-AUTHORITY.md)已实现显式Scene logical v2、metadata-only来源快照、reset/全量替换/独立ACK、暂停与源撤销失效，以及M2源恢复后的显式新绑定。仅合成数据，claim质量NOT_EVALUATED，持久schema与outbox未改；[编号迁移/immutable journal/per-consumer checkpoint设计](ADR-AR0B-DURABLE.md)仍DESIGN_ONLY。最终验收按本批专项、独立审查、whole和对应提交CI分层记录；这不完成AR0b durablefanout或AR1质量实验。
