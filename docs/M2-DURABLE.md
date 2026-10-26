@@ -1,11 +1,51 @@
 # M2a encrypted local restart boundary
 
+**Current evidence, 2026-10-26:** source freeze
+`25cb0f8c6073dc91167c2507d9444a5500b560a7` passed strict TypeScript,
+241/241 synthetic tests and the seven-step replay, plus eight independent
+Astra max focused checks. The 241 include the explicitly known-negative
+`KNOWN_UNPROTECTED_LEDGER_ROLLBACK` fixture, not a protective PASS.
+The repaired source passed a separate native run with no API credentials loaded
+and zero model calls; its vault still uses an independent memory key. It had
+clean inner/outer exit and no remaining owned process; see
+[REPAIRED-ZERO-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-ZERO-PASS.json).
+The original real cohort retains four ACKs and a failed second restore after
+revocation, with E unsent. A repaired independent three-request vault passed
+[REPAIRED-REAL-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-REAL-PASS.json):
+three real native ACKs/appraisals, two paused restores preserving consumed quota,
+B recalling A and C excluding revoked A event/memory refs from recall,
+conditioning and background state. Three inner/outer exits were clean with no
+force, remaining owned process or undrained output. A retained
+`lastErrorCode:UNCLASSIFIED` on one exit is not presented as an error-free run.
+Old four plus new three consume seven of aggregate8; no refund or retry occurred.
+It does not complete the original vault's A→E chain. The bounded personal-trial
+desktop deployment is
+[PASS_M2_DESKTOP_RESIDENT_READY_UI_CONTROL_PENDING](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT-PASS.json):
+bootstrap create+flush then clean unload, followed by native resume-only READY
+with the same vault/identity, baseline, paused/unavailable and 0/32 calls.
+Old/bootstrap children exited and the DSH main process was not restarted.
+No production prompt was sent. New menu-click/composer binding remains pending;
+old UI receipts do not qualify this SID. Direct `inspect.restored` was not
+collected and a complete desktop restart was not tested. Open the new dedicated
+session and explicitly `/companion-resume`; resume itself grants no presence
+lease. The M2+flywire native combination is untested in this batch. This release
+still depends on fixed external launcher/config scripts; see
+[deployment and usage](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT.md),
+[current validation](VALIDATION.md) and the
+[coordinator record](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/README.md).
+
 This bounded opt-in slice preserves selected sources, derived memories/FTS,
 revocations, ingress deduplication and consumed quota on the same machine. It is
 not ten years of operational evidence, a backup product, old-database migration,
 multi-device key recovery, training or evidence of subjective emotion. The old
-deployed RAM snapshot and its claims remain unchanged. Native DSH, DPAPI and real
-API execution require separate acceptance from the synthetic source tests.
+deployed RAM snapshot remains a historical deployment, not proof of a current
+M2 resident. Native DSH, DPAPI and real API receipts are separate acceptance
+layers from synthetic source tests. Synthetic selected text reaching a real
+model and native ACK establishes a bounded mechanism, not conversational
+quality, a human-read receipt or an emotional effect. This native acceptance
+uses `enableProactive:false`; it does not establish proactive delivery.
+The core vault's encryption does not establish encryption of the host DSH
+transcript or other host-managed storage.
 
 ## Contracts
 
@@ -152,6 +192,11 @@ audit metadata only and cannot reward a new binding.
 `/companion-revoke <sourceId> <revision>` works while paused, commits revocation
 and invalidates this binding. Both commands require the exact owned agent and
 recordInput:false; ordinary text is never management authority.
+Current revoke/purge invalidates the binding and leaves it paused. Acceptance
+proves that revocation survives a fresh mount/restart of that same repaired
+vault; it does not prove automatic conversation continuation in the invalidated
+binding. Public controls have no automatic create/reset fallback; improving that
+control surface remains future work.
 
 ## Limits and evidence
 

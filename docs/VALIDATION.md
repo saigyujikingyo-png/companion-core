@@ -1,4 +1,19 @@
-# 0.1 初始切片验证
+# 当前验证状态
+
+**2026-10-26，源码冻结 `25cb0f8c6073dc91167c2507d9444a5500b560a7`。** 下表是当前结论；其后各节保留历史快照，其中“最新”“未实现”“NOT_RUN”、测试数量和 RAM 限制只适用于各节当时的版本，不覆盖本表。[M2a 合同与限制](M2-DURABLE.md)和[协调证据](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/README.md)分别记录源码机制与实际运行。
+
+| 层级 | 当前接受范围 |
+|---|---|
+| 冻结源码与合成校验 | `npm run check` PASS：strict TypeScript、241/241 tests（0 fail/skip）、七步合成回放；Node24.16.0 / SQLite3.53.0。真实模型调用0、生产数据false。独立 Astra max 八项定向返验通过。241项包含明确标为 `KNOWN_UNPROTECTED_LEDGER_ROLLBACK` 的已知负例，不是回滚防护 PASS。 |
+| FTS5 修复 | 合成多回合/恢复/撤销复现了原先 RAM COMMIT 前序列化遗漏 FTS5 xSync 的损坏；现为 RAM COMMIT→完整图像序列化→AEAD检查点fsync→独立安全账本FULL提交→对外成功。不确定失败封锁 store/vault；旧坏图像仍拒绝恢复。 |
+| 原 `newcap8` 真实有限链路 | A/B/C/D四次真实DeepSeek请求均native ACK；state prior和旧A召回分数1→1.5366496366、明确反馈由下一输入消费、暂停拒绝、首次恢复召回及SDK重复RPC抑制有局部证据。撤销后第二次恢复FAIL、E未发；原链保留PARTIAL，不补写完整PASS。 |
+| 修复后零请求原生检查 | [REPAIRED-ZERO-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-ZERO-PASS.json)：独立新vault、0 API凭据/0模型调用，仍使用独立memory key；内外进程exit0、owned residual0、无强杀。不是旧vault恢复或真实模型链路PASS。 |
+| 修复后真实cap3 | [REPAIRED-REAL-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/REPAIRED-REAL-PASS.json)为 `PASS_REPAIRED_NATIVE_THREE_CALL_PROOF`：独立新vault的A/B/C三次真实请求均native ACK且appraisal applied；两次恢复默认暂停、保留calls1/2，三个binding不同。B召回A anchor分数1→1.1997564545；撤销后C的recalled/conditioning/background refs均排除A事件和anchor。三次inner/outer均clean exit0/noForce/owned0/drained；一次退出保留`lastErrorCode:UNCLASSIFIED`诊断，不宣称全程无错。原4+新3=7/aggregate8，不退款、不重试；`originalChainContinuity:false`。 |
+| 有限个人试用常驻 | [DEPLOYMENT-PASS.json](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT-PASS.json)：`PASS_M2_DESKTOP_RESIDENT_READY_UI_CONTROL_PENDING`。bootstrap真实create+flush后clean unload，最终同vault/identity以resume-only原生READY，0/32、baseline、paused/unavailable，无生产prompt；旧及bootstrap子进程全退出、DSH主进程未重启。direct inspect.restored字段未采集、完整desktop重启未测；新菜单点击/聊天输入框绑定待确认，旧OPEN/CONTROL_PASS不替代本次UI验收。M2+flywire原生组合本轮未测；[用法与外部脚本依赖](../../dsh-plugin-maintenance/research/2026-10-25-memory-recovery/DEPLOYMENT.md)单列。 |
+
+`requestAudit` 的 body hash、refs/ranks/scores 是本地实际请求准备证据，不是独立远端回执或交流质量评测；native ACK也不证明用户已读、自然互动质量或情感效果。本批使用合成文字通过真实模型/宿主，`enableProactive:false`，不验收主动投递。恢复会重置背景/神经状态和待消费反馈，不是永久情感或意识。16MiB整库图像、256MiB检查点历史及4096次commit等边界、无备份迁移和有效前缀账本回滚风险见M2a合同；十年可靠性和长期规模仍未验收。
+
+# 历史：0.1 初始切片验证
 
 **最新背景状态切片（2026-10-25）：** 完整 `npm run check` 退出0，strict typecheck、94/94测试（无跳过）和七步合成回放通过。包含原76项和新增18项；schema1、Node24.16.0/SQLite3.53.0，回放库为TEMP `companion-core-replay-aylJOL`。原生API/Codex没有新增调用，下文各阶段历史证据继续保留。新来源API只读，不改变既有存储入口行为。
 
