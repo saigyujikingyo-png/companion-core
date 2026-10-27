@@ -12,13 +12,18 @@ export function freezeCapacity<T>(value:T):FrozenData<T>{
 }
 export const CAPACITY_DIRECTORY_ENTRY_LIMIT=16384;
 export type AuthorityCapacity=FrozenData<{
-  version:1;schemaVersion:2|3;
+  version:1;schemaVersion:2|3|4;
   database:{fileBytes:number;pageSize:number;pageCount:number;pageBytes:number;freelistPages:number};
   sidecars:{journalBytes:number;walBytes:number;shmBytes:number;totalBytes:number};
   totalFileBytes:number;
   limits:{writeLimitBytes:number;readLimitBytes:number};
   vaults:{count:number;active:number;pending:number};
   receipts:{count:number;jsonUtf8Bytes:number};
+  receiptStorage?:{
+    hot:{count:number;jsonUtf8Bytes:number};pointers:{count:number;storedUtf8Bytes:number};
+    segments:{count:number;encodedBytes:number;decodedBytes:number;jsonUtf8Bytes:number};
+    limits:{receipts:number;decodedBytes:number;encodedBytes:number;segments:number};
+  };
   legacyRegistry:{applicable:false;count:null}|{applicable:true;count:number};
   blockers:Array<'GLOBAL_PENDING'|'CURRENT_EXTENT_OVER_WRITE_LIMIT'>;
 }>;

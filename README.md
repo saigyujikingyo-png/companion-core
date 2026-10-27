@@ -2,7 +2,7 @@
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
 
-[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并（`06fc8b2`），合并前后四平台 CI 均通过。[IF7 容量检查 API](docs/CAPACITY-INSPECTION.md)原冻结候选通过独立893/893与类型检查后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker **984/984 与类型检查**通过。当前为独立PR候选，精确head的跨平台CI与合并状态以该PR实际记录为准；具体分层见 [IF7 证据](docs/AEMC-INFRA-EVIDENCE-IF7.md)。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
+[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并；[IF7 容量检查](docs/CAPACITY-INSPECTION.md)已在保留 WF2 的整合组合完成本机 **984/984 与类型检查**、独立审查及精确 head **14/14** 跨平台 CI 后，经 [PR #2](https://github.com/saigyujikingyo-png/companion-core/pull/2) 合并于 `4e0892c`，合并后 **7/7** CI 通过。[IF8 回执 rollover](docs/RECEIPT-ROLLOVER.md)已实现同库有界无损压缩与页复用，保留幂等键、UNKNOWN、额度及撤销；独立工作树的验证与发布状态见 [IF8 证据](docs/AEMC-INFRA-EVIDENCE-IF8.md)。[I17 贝叶斯重构与元记忆](docs/BAYESIAN-RECONSTRUCTION-DESIGN.md)已纳入设计路线，尚未实现或实验。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
 
 [IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；[IF5/IF6 本机组合证据](docs/AEMC-INFRA-EVIDENCE-IF6.md)保留874/874及成本测量，后续提交与合并结果以 IF7 证据为准。本批未启动训练。
 

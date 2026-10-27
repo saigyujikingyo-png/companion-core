@@ -7,7 +7,9 @@ import { FORMAT, record, sha, validateHeadPin } from './durable-codec.ts';
 import { fail, text } from './validation.ts';
 import type {LegacyAdmissionReceipt,LegacyImportProof} from './legacy-import-types.ts';
 import {freezeCapacity} from './capacity-types.ts';
-import type {AuthorityCapacity} from './capacity-types.ts';
+import type {AuthorityCapacity,FrozenData} from './capacity-types.ts';
+import {RECEIPT_SEGMENT_LIMITS,RECEIPT_POINTER_PREFIX,RECEIPT_POINTER_LIMIT,normalizeRollover,parseReceiptPointer,receiptPointer,segmentFrame,validateReceiptEntry,encodeReceiptSegment,decodeReceiptSegment} from './receipt-segments.ts';
+import type {RolloverRequest,RolloverReceipt,ReceiptEntry} from './receipt-segments.ts';
 
 export type PendingCommit = { version: 2; kind: 'create' | 'write' | 'restore' | 'rekey' | 'schema-migration' | 'fanout-maintenance' | 'compaction' | 'storage-upgrade' | 'legacy-m2-import'; operationId: string;
   requestDigest: string; oldHead: VaultHead | null; newHead: VaultHead; stagePath: string; stageDigest: string;
@@ -31,6 +33,7 @@ const SCHEMA = `CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), autho
 CREATE TABLE vaults (vault_id TEXT PRIMARY KEY, state TEXT NOT NULL) STRICT;
 CREATE TABLE receipts (vault_id TEXT NOT NULL, operation_id TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(vault_id,operation_id)) STRICT;`;
 const LEGACY_SCHEMA='CREATE TABLE legacy_imports (lineage_id TEXT PRIMARY KEY, migration_id TEXT NOT NULL UNIQUE, vault_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL) STRICT';
+const RECEIPT_SCHEMA='CREATE TABLE receipt_segments (segment_id TEXT PRIMARY KEY, request TEXT NOT NULL, digest TEXT NOT NULL, decoded_bytes INTEGER NOT NULL, encoded_bytes INTEGER NOT NULL, entry_count INTEGER NOT NULL, json_bytes INTEGER NOT NULL, payload BLOB NOT NULL) STRICT';
 export const AUTHORITY_READ_LIMIT=64 * 1024 * 1024;
 export const AUTHORITY_WRITE_LIMIT=Math.floor(AUTHORITY_READ_LIMIT/3);
 export type AuthorityConfig={directory:string;authorityId:string;custodyDomain:string;writeLimitBytes?:number};
@@ -90,8 +93,8 @@ export class LocalSqliteAuthority {
       const layout = this.#db.prepare("SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all().map(row => row.sql).sort();
       this.#version=this.#db.prepare('PRAGMA user_version').get()!.user_version as number;
       this.#schemaEpoch=this.#db.prepare('PRAGMA schema_version').get()!.schema_version as number;
-      const expected=SCHEMA.split(';').map(sql=>sql.trim()).filter(Boolean);if(this.#version===3)expected.push(LEGACY_SCHEMA);
-      if (![2,3].includes(this.#version) || metadata?.authority_id !== authorityId
+      const expected=SCHEMA.split(';').map(sql=>sql.trim()).filter(Boolean);if(this.#version>=3)expected.push(LEGACY_SCHEMA);if(this.#version===4)expected.push(RECEIPT_SCHEMA);
+      if (![2,3,4].includes(this.#version) || metadata?.authority_id !== authorityId
         || metadata?.custody_domain !== custodyDomain || !same(layout, expected.sort())
         || this.#db.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok') fail('ANCHOR_IDENTITY');
       this.#db.enableDefensive(true);
@@ -116,6 +119,7 @@ export class LocalSqliteAuthority {
       const db=authority.#db;db.exec('BEGIN EXCLUSIVE');authority.#locked=true;
       try{
         authority.#checkFiles();authority.#checkSchema();authority.#captureSize();authority.#validateLayout(authority.#version);
+        if(authority.#version===4)fail('ANCHOR_SCHEMA_ALREADY_NEWER');
         if(authority.#version===3){authority.#commit();return{from:3,to:3,alreadyCurrent:true};}
         authority.#newMutation();
         const before=['metadata','vaults','receipts'].map(table=>db.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all());
@@ -126,10 +130,27 @@ export class LocalSqliteAuthority {
       }catch(error){try{db.exec('ROLLBACK');}catch{}authority.#locked=false;throw error;}
     }finally{authority.close();}
   }
+  /** Explicit maintenance; never implicitly enable schema3 legacy semantics. */
+  static upgradeReceiptSchema(config:AuthorityConfig,maintenance:'operator-attested-stopped',fault?:(point:'after-table'|'after-version')=>void):{from:3|4;to:4;alreadyCurrent:boolean}{
+    if(maintenance!=='operator-attested-stopped')fail('ANCHOR_MAINTENANCE_REQUIRED');
+    const authority=LocalSqliteAuthority.open(config);
+    try{
+      const db=authority.#db;db.exec('BEGIN EXCLUSIVE');authority.#locked=true;
+      try{
+        authority.#checkFiles();authority.#checkSchema();authority.#captureSize();authority.#validateLayout(authority.#version);
+        if(authority.#version===4){authority.#commit();return{from:4,to:4,alreadyCurrent:true};}
+        if(authority.#version!==3)fail('ANCHOR_RECEIPT_UPGRADE_REQUIRED');
+        authority.#newMutation();
+        // DDL only: original table schemas and every row stay untouched.
+        db.exec(RECEIPT_SCHEMA);fault?.('after-table');db.exec('PRAGMA user_version=4');fault?.('after-version');
+        authority.#validateLayout(4);authority.#commit();return{from:3,to:4,alreadyCurrent:false};
+      }catch(error){try{db.exec('ROLLBACK');}catch{}authority.#locked=false;throw error;}
+    }finally{authority.close();}
+  }
   #validateLayout(version:number):void{
-    const expected=SCHEMA.split(';').map(sql=>sql.trim()).filter(Boolean);if(version===3)expected.push(LEGACY_SCHEMA);
+    const expected=SCHEMA.split(';').map(sql=>sql.trim()).filter(Boolean);if(version>=3)expected.push(LEGACY_SCHEMA);if(version===4)expected.push(RECEIPT_SCHEMA);
     const metadata=this.#db.prepare('SELECT * FROM metadata WHERE id=1').get();
-    if(![2,3].includes(version)||this.#db.prepare('PRAGMA user_version').get()!.user_version!==version||metadata?.authority_id!==this.authorityId||metadata?.custody_domain!==this.custodyDomain
+    if(![2,3,4].includes(version)||this.#db.prepare('PRAGMA user_version').get()!.user_version!==version||metadata?.authority_id!==this.authorityId||metadata?.custody_domain!==this.custodyDomain
       ||!same(this.#db.prepare("SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all().map(r=>r.sql).sort(),expected.sort())
       ||this.#db.prepare('PRAGMA integrity_check').get()!.integrity_check!=='ok')fail('ANCHOR_SCHEMA_MIGRATION');
   }
@@ -194,13 +215,29 @@ export class LocalSqliteAuthority {
     const fileBytes=size(''),journalBytes=size('-journal'),walBytes=size('-wal'),shmBytes=size('-shm'),totalBytes=journalBytes+walBytes+shmBytes;
     const counts=this.#db.prepare("SELECT count(*) AS count,coalesce(sum(json_extract(state,'$.status')='ACTIVE'),0) AS active,coalesce(sum(json_extract(state,'$.status')='PREPARED'),0) AS pending FROM vaults").get()!;
     const receipt=this.#db.prepare('SELECT count(*) AS count,coalesce(sum(length(CAST(receipt AS BLOB))),0) AS bytes FROM receipts').get()!;
+    let originalBytes=receipt.bytes as number;
+    let receiptStorage:AuthorityCapacity['receiptStorage'];
+    if(this.#version===4){
+      let pointerCount=0,pointerBytes=0,archivedBytes=0;
+      const pointers=this.#db.prepare('SELECT substr(receipt,1,?) AS receipt,length(CAST(receipt AS BLOB)) AS bytes FROM receipts WHERE substr(receipt,1,?)=?')
+        .iterate(RECEIPT_POINTER_LIMIT+1,RECEIPT_POINTER_PREFIX.length,RECEIPT_POINTER_PREFIX);
+      for(const row of pointers){
+        if((row.bytes as number)>RECEIPT_POINTER_LIMIT||Buffer.byteLength(row.receipt as string)!==row.bytes)fail('ANCHOR_RECEIPT_SEGMENT');
+        const pointer=parseReceiptPointer(row.receipt as string);if(!pointer)fail('ANCHOR_RECEIPT_SEGMENT');
+        pointerCount++;pointerBytes+=row.bytes as number;archivedBytes+=pointer.jsonBytes;
+      }
+      const segments=this.#db.prepare('SELECT count(*) AS count,coalesce(sum(length(payload)),0) AS encoded,coalesce(sum(decoded_bytes),0) AS decoded,coalesce(sum(json_bytes),0) AS json FROM receipt_segments').get()!;
+      originalBytes=originalBytes-pointerBytes+archivedBytes;
+      receiptStorage={hot:{count:(receipt.count as number)-pointerCount,jsonUtf8Bytes:(receipt.bytes as number)-pointerBytes},pointers:{count:pointerCount,storedUtf8Bytes:pointerBytes},
+        segments:{count:segments.count as number,encodedBytes:segments.encoded as number,decodedBytes:segments.decoded as number,jsonUtf8Bytes:segments.json as number},limits:{...RECEIPT_SEGMENT_LIMITS}};
+    }
     const blockers:('GLOBAL_PENDING'|'CURRENT_EXTENT_OVER_WRITE_LIMIT')[]=[];
     if(counts.pending as number)blockers.push('GLOBAL_PENDING');
     if(Math.max(fileBytes,pageCount*pageSize)>this.#writeLimit)blockers.push('CURRENT_EXTENT_OVER_WRITE_LIMIT');
-    return freezeCapacity({version:1,schemaVersion:this.#version as 2|3,database:{fileBytes,pageSize,pageCount,pageBytes:pageCount*pageSize,freelistPages},
+    return freezeCapacity({version:1,schemaVersion:this.#version as 2|3|4,database:{fileBytes,pageSize,pageCount,pageBytes:pageCount*pageSize,freelistPages},
       sidecars:{journalBytes,walBytes,shmBytes,totalBytes},totalFileBytes:fileBytes+totalBytes,limits:{writeLimitBytes:this.#writeLimit,readLimitBytes:AUTHORITY_READ_LIMIT},
-      vaults:{count:counts.count as number,active:counts.active as number,pending:counts.pending as number},receipts:{count:receipt.count as number,jsonUtf8Bytes:receipt.bytes as number},
-      legacyRegistry:this.#version===3?{applicable:true,count:this.#db.prepare('SELECT count(*) AS n FROM legacy_imports').get()!.n as number}:{applicable:false,count:null},blockers});
+      vaults:{count:counts.count as number,active:counts.active as number,pending:counts.pending as number},receipts:{count:receipt.count as number,jsonUtf8Bytes:originalBytes},
+      ...(receiptStorage?{receiptStorage}:{}),legacyRegistry:this.#version>=3?{applicable:true,count:this.#db.prepare('SELECT count(*) AS n FROM legacy_imports').get()!.n as number}:{applicable:false,count:null},blockers});
   }
   #row(vaultId: string): AnchorRow | null {
     this.#checkLock(); const row = this.#db.prepare('SELECT state FROM vaults WHERE vault_id=?').get(vaultId);
@@ -213,9 +250,101 @@ export class LocalSqliteAuthority {
     return parsed;
   }
   #receipt(vaultId: string, operationId: string): AnchorReceipt | null {
+    if(this.#version===4){
+      this.#checkLock();const bounds=this.#db.prepare('SELECT substr(receipt,1,?) AS prefix,length(CAST(receipt AS BLOB)) AS bytes FROM receipts WHERE vault_id=? AND operation_id=?')
+        .get(RECEIPT_POINTER_PREFIX.length,vaultId,operationId);
+      if(bounds?.prefix===RECEIPT_POINTER_PREFIX&&(bounds.bytes as number)>RECEIPT_POINTER_LIMIT)fail('ANCHOR_RECEIPT_SEGMENT');
+    }
     this.#checkLock(); const row = this.#db.prepare('SELECT receipt FROM receipts WHERE vault_id=? AND operation_id=?').get(vaultId, operationId);
-    return row ? JSON.parse(row.receipt as string) as AnchorReceipt : null;
+    if(!row)return null;
+    const text=row.receipt as string,pointer=this.#version===4?parseReceiptPointer(text):null;
+    if(!pointer)return JSON.parse(text) as AnchorReceipt;
+    const segment=this.#segment(pointer.segmentId),entry=segment.entries[pointer.index];
+    if(!entry||entry.vaultId!==vaultId||entry.operationId!==operationId||Buffer.byteLength(entry.json)!==pointer.jsonBytes)fail('ANCHOR_RECEIPT_SEGMENT');
+    return JSON.parse(entry.json) as AnchorReceipt;
   }
+  #segment(segmentId:string):{entries:ReceiptEntry[];receipt:RolloverReceipt}{
+    this.#checkLock();
+    // Inspect length before requesting BLOB (or arbitrary stored request TEXT) from SQLite.
+    const sizes=this.#db.prepare('SELECT length(payload) AS bytes,length(CAST(request AS BLOB)) AS requestBytes FROM receipt_segments WHERE segment_id=?').get(segmentId);
+    if(!sizes||typeof sizes.bytes!=='number'||sizes.bytes<1||sizes.bytes>RECEIPT_SEGMENT_LIMITS.encodedBytes
+      ||typeof sizes.requestBytes!=='number'||sizes.requestBytes<1||sizes.requestBytes>512)fail('ANCHOR_RECEIPT_SEGMENT');
+    const row=this.#db.prepare('SELECT * FROM receipt_segments WHERE segment_id=?').get(segmentId)!;
+    let request:ReturnType<typeof normalizeRollover>;
+    try{request=normalizeRollover(JSON.parse(row.request as string));}catch{fail('ANCHOR_RECEIPT_SEGMENT');}
+    if(JSON.stringify(request)!==row.request||request.operationId!==segmentId||row.encoded_bytes!==sizes.bytes||(row.decoded_bytes as number)>request.maxJsonBytes
+      ||(row.entry_count as number)>request.maxReceipts||!(row.payload instanceof Uint8Array))fail('ANCHOR_RECEIPT_SEGMENT');
+    const payload=row.payload as Uint8Array;
+    try{
+      const entries=decodeReceiptSegment(payload,segmentId,row.decoded_bytes as number,row.digest as string,row.entry_count as number,row.json_bytes as number);
+      const receipt:RolloverReceipt={version:1,operationId:segmentId,requestDigest:sha(JSON.stringify(request)),receiptCount:entries.length,jsonUtf8Bytes:row.json_bytes as number,
+        decodedBytes:row.decoded_bytes as number,encodedBytes:row.encoded_bytes as number,digest:row.digest as string,limits:{maxReceipts:request.maxReceipts,maxJsonBytes:request.maxJsonBytes}};
+      return{entries,receipt};
+    }finally{payload.fill(0);}
+  }
+  #verifySegmentPointers(segmentId:string,entries:ReceiptEntry[]):void{
+    for(const [index,entry] of entries.entries()){
+      const row=this.#db.prepare('SELECT substr(receipt,1,?) AS receipt,length(CAST(receipt AS BLOB)) AS bytes FROM receipts WHERE vault_id=? AND operation_id=?').get(RECEIPT_POINTER_LIMIT+1,entry.vaultId,entry.operationId);
+      const expected=receiptPointer(segmentId,index,Buffer.byteLength(entry.json));
+      if(row?.receipt!==expected||row.bytes!==Buffer.byteLength(expected))fail('ANCHOR_RECEIPT_SEGMENT');
+    }
+  }
+  rolloverReceipts(input:RolloverRequest):FrozenData<RolloverReceipt>{
+    const request=normalizeRollover(input),requestJSON=JSON.stringify(request);
+    return this.transaction(()=>this.#writeAction(()=>{
+      if(this.#version!==4)fail('ANCHOR_RECEIPT_UPGRADE_REQUIRED');
+      // A confirmed operation is a read even when pending or segment/full limits block new writes.
+      if(this.#db.prepare('SELECT 1 FROM receipt_segments WHERE segment_id=?').get(request.operationId)){
+        const prior=this.#segment(request.operationId);
+        if(prior.receipt.requestDigest!==sha(requestJSON))fail('ANCHOR_ROLLOVER_CONFLICT');
+        this.#verifySegmentPointers(request.operationId,prior.entries);return freezeCapacity(prior.receipt);
+      }
+      // A missing segment with surviving pointers is corruption, not an unused operation ID.
+      const pointerStart=RECEIPT_POINTER_PREFIX+JSON.stringify([request.operationId]).slice(0,-1)+',';
+      if(this.#db.prepare('SELECT 1 FROM receipts WHERE substr(receipt,1,?)=? LIMIT 1').get(pointerStart.length,pointerStart))fail('ANCHOR_RECEIPT_SEGMENT');
+      this.#newMutation();this.#checkCapacity();
+      if((this.#db.prepare('SELECT count(*) AS n FROM receipt_segments').get()!.n as number)>=RECEIPT_SEGMENT_LIMITS.segments)fail('ANCHOR_ROLLOVER_SEGMENT_LIMIT');
+      const entries:ReceiptEntry[]=[];
+      // Keys and SQL byte lengths first: never allocate an oversized raw receipt from SQLite.
+      const selected=this.#db.prepare('SELECT vault_id,operation_id,length(CAST(receipt AS BLOB)) AS bytes FROM receipts WHERE substr(receipt,1,?)<>? ORDER BY rowid LIMIT ?')
+        .all(RECEIPT_POINTER_PREFIX.length,RECEIPT_POINTER_PREFIX,request.maxReceipts);
+      for(const row of selected){
+        if(typeof row.bytes!=='number'||row.bytes<1||row.bytes>request.maxJsonBytes)fail('ANCHOR_ROLLOVER_BOUND');
+        const value=this.#db.prepare('SELECT CAST(receipt AS BLOB) AS bytes FROM receipts WHERE vault_id=? AND operation_id=?').get(row.vault_id!,row.operation_id!)!;
+        const raw=value.bytes as Uint8Array;let json:string;
+        try{if(raw.byteLength!==row.bytes)fail('ANCHOR_RECEIPT_SEGMENT');json=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(raw);}
+        catch{fail('ANCHOR_RECEIPT_SEGMENT');}finally{raw.fill(0);}
+        const entry:ReceiptEntry={vaultId:row.vault_id as string,operationId:row.operation_id as string,json};validateReceiptEntry(entry);
+        const prospective=[...entries,entry];
+        if(Buffer.byteLength(segmentFrame(request.operationId,prospective))>request.maxJsonBytes){if(!entries.length)fail('ANCHOR_ROLLOVER_BOUND');break;}
+        entries.push(entry);
+      }
+      if(!entries.length)fail('ANCHOR_ROLLOVER_EMPTY');
+      const packed=encodeReceiptSegment(request.operationId,entries,request.maxJsonBytes),startPages=this.#pages(),startFree=this.#freelist();
+      const pointers=entries.map((entry,index)=>receiptPointer(request.operationId,index,Buffer.byteLength(entry.json)));
+      const originalCount=this.#db.prepare('SELECT count(*) AS n FROM receipts').get()!.n;
+      try{
+        // Repack one fully materialized batch. No callbacks, lookups, unlock or commit
+        // occur while keys are temporarily absent inside this private transaction.
+        for(const entry of entries){
+          const deleted=this.#db.prepare('DELETE FROM receipts WHERE vault_id=? AND operation_id=? AND receipt=?').run(entry.vaultId,entry.operationId,entry.json);
+          if(deleted.changes!==1)fail('ANCHOR_RECEIPT_SEGMENT');
+        }
+        for(const [index,entry] of entries.entries()){
+          const inserted=this.#db.prepare('INSERT INTO receipts VALUES (?,?,?)').run(entry.vaultId,entry.operationId,pointers[index]!);
+          if(inserted.changes!==1)fail('ANCHOR_RECEIPT_SEGMENT');
+        }
+        this.#db.prepare('INSERT INTO receipt_segments VALUES (?,?,?,?,?,?,?,?)')
+          .run(request.operationId,requestJSON,packed.digest,packed.decodedBytes,packed.payload.length,entries.length,packed.jsonBytes,packed.payload);
+        if(this.#pages()>startPages||this.#pages()-this.#freelist()>=startPages-startFree)fail('ANCHOR_ROLLOVER_NO_BENEFIT');
+        this.#checkCapacity();
+        const verified=this.#segment(request.operationId);this.#verifySegmentPointers(request.operationId,verified.entries);
+        if(this.#db.prepare('SELECT count(*) AS n FROM receipts').get()!.n!==originalCount||!same(verified.entries,entries))fail('ANCHOR_RECEIPT_SEGMENT');
+        return freezeCapacity(verified.receipt);
+      }finally{packed.payload.fill(0);}
+    }));
+  }
+  #freelist():number{return this.#db.prepare('PRAGMA freelist_count').get()!.freelist_count as number;}
   #assertActive(head: VaultHead): void {
     const row = this.#row(head.vaultId);
     if (!row) fail('ANCHOR_UNREGISTERED'); if (row.status !== 'ACTIVE') fail('ANCHOR_PENDING');
@@ -223,7 +352,7 @@ export class LocalSqliteAuthority {
     this.#checkLegacy(head);
   }
   #legacy(lineageId:string):LegacyRegistration|null{
-    this.#checkLock();if(this.#version!==3)fail('LEGACY_AUTHORITY_UPGRADE_REQUIRED');
+    this.#checkLock();if(this.#version<3)fail('LEGACY_AUTHORITY_UPGRADE_REQUIRED');
     const row=this.#db.prepare('SELECT * FROM legacy_imports WHERE lineage_id=?').get(lineageId);if(!row)return null;
     const value=JSON.parse(row.state as string) as LegacyRegistration;
     if(!record(value)||value.version!==1||value.lineageId!==row.lineage_id||value.migrationId!==row.migration_id||value.vaultId!==row.vault_id
@@ -262,7 +391,7 @@ export class LocalSqliteAuthority {
     return value;
   }
   #checkLegacy(head:VaultHead):LegacyRegistration|null{
-    if(!head.legacyImport){if(this.#version===3&&this.#db.prepare('SELECT 1 FROM legacy_imports WHERE vault_id=?').get(head.vaultId))fail('LEGACY_REGISTRY');return null;}
+    if(!head.legacyImport){if(this.#version>=3&&this.#db.prepare('SELECT 1 FROM legacy_imports WHERE vault_id=?').get(head.vaultId))fail('LEGACY_REGISTRY');return null;}
     const registered=this.#legacy(head.legacyImport.lineageId);
     if(!registered||registered.status!=='ACTIVE'||registered.vaultId!==head.vaultId||registered.migrationId!==head.legacyImport.migrationId
       ||registered.proof.sourceFreeze.declaredHead.identity!==head.identity)fail('LEGACY_REGISTRY');return registered;
@@ -300,7 +429,7 @@ export class LocalSqliteAuthority {
     id(pending.operationId); validateHead(pending.newHead);
     const next = pending.newHead, old = pending.oldHead;
     if(pending.kind==='legacy-m2-import'){
-      if(this.#version!==3)fail('LEGACY_AUTHORITY_UPGRADE_REQUIRED');validateImportProof(pending.legacyImport!);
+      if(this.#version<3)fail('LEGACY_AUTHORITY_UPGRADE_REQUIRED');validateImportProof(pending.legacyImport!);
       const proof=pending.legacyImport!;if(pending.operationId!==proof.migrationId||next.format!==INCREMENTAL_FORMAT||next.keyEpoch!==1
         ||!same(next.legacyImport,{lineageId:proof.lineageId,migrationId:proof.migrationId})||next.identity!==proof.sourceFreeze.declaredHead.identity)fail('LEGACY_PROOF');
     }else if(pending.legacyImport!==undefined)fail('LEGACY_PROOF');
