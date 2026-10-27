@@ -4,12 +4,15 @@ import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import type { Epoch, EventInput, Evidence, Job, Lease, MemoryRecord, Proposal, Receipt,
   RunTicket, Scope, ScopeIdentity, SourceRef, ProjectionChange } from './contracts.ts';
-import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
+import { actualLayoutHash, assertMemoryLayout, inspectMemoryImage, schemaHash, schemaSQL } from './memory-image.ts';
+import type { MemorySchema } from './memory-image.ts';
+import { DurableFanout, validateFanoutImage } from './durable-fanout.ts';
+import type { ConsumerHandle, ConsumerProjection, ConsumerStatus, FanoutFault, FanoutProfile, JournalBatch, MetadataRef } from './fanout-types.ts';
 import * as v from './validation.ts';
-import { CURATION_LIMITS, frozenCopy } from './curation-types.ts';
+import { CURATION_LIMITS, canonical, frozenCopy } from './curation-types.ts';
 import type { CurationSnapshot, CurationNode, CurationEdge } from './curation-types.ts';
-import { RETRIEVAL_LIMITS } from './retrieval-types.ts';
-import type { RetrievalSnapshot } from './retrieval-types.ts';
+import { RETRIEVAL_LIMITS, copyRetrievalConsumerHandle } from './retrieval-types.ts';
+import type { ConsumerRetrievalSnapshot, RetrievalSnapshot } from './retrieval-types.ts';
 import { SCENE_SOURCE_LIMITS } from './scene-authority-types.ts';
 import type { SceneSourceSnapshot } from './scene-authority-types.ts';
 
@@ -17,6 +20,7 @@ type Row = Record<string, string | number | null>;
 type SourceNode = { meta:CurationNode; body:Evidence|Proposal; parents:SourceRef[] };
 type SourceBudget = { bytes:number; prefix:'CURATION'|'RETRIEVAL'|'SCENE_SOURCE'; limits:{ nodes:number; edges:number; bytes:number } };
 export type Clock = { wall(): number; monotonic(): number };
+export type AccessGuard = <T>(operation: () => T) => T;
 const clock: Clock = { wall: Date.now, monotonic: () => performance.now() };
 
 /** One authoritative local service. Worker processes receive opaque jobs, never this DB. */
@@ -28,12 +32,20 @@ export class MemoryStore {
   #persist: ((image: Uint8Array, revocationHighWater: number) => void) | undefined;
   #assertHealthy: (() => void) | undefined;
   #onPoison: (() => void) | undefined;
+  #assertCloseAllowed: (() => void) | undefined;
+  #aroundAccess: AccessGuard | undefined;
+  #accessDepth = 0;
   #poisoned = false;
+  #schema: MemorySchema;
+  #fanout: DurableFanout | undefined;
 
   constructor(path: string, options: { clock?: Clock; image?: Uint8Array;
-    persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void; onPoison?: () => void } = {}) {
+    persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void; onPoison?: () => void;
+    assertCloseAllowed?: () => void; aroundAccess?: AccessGuard; schemaVersion?: MemorySchema; fanoutFault?: (point: FanoutFault) => void } = {}) {
     if ((options.image || options.persist) && path !== ':memory:') v.fail('DURABLE_MEMORY_ONLY');
     this.#clock = options.clock ?? clock;
+    this.#schema = options.schemaVersion ?? 1;
+    if (![1,2].includes(this.#schema)) v.fail('UNSUPPORTED_SCHEMA');
     this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false, allowExtension: false });
     try {
@@ -41,57 +53,79 @@ export class MemoryStore {
         v.fail('DURABLE_UNSUPPORTED');
       if (options.image) this.#db.deserialize(options.image);
       const version = this.#one('PRAGMA user_version')!.user_version as number;
-      if (version !== 0 && version !== SCHEMA_VERSION) v.fail('UNSUPPORTED_SCHEMA');
+      if (options.image && version !== this.#schema) v.fail('UNSUPPORTED_SCHEMA');
+      if (version !== 0 && version !== this.#schema) v.fail('UNSUPPORTED_SCHEMA');
       if (version === 0 && this.#one("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")) v.fail('UNKNOWN_DATABASE');
       if (version !== 0) {
-        if (!this.#one("SELECT name FROM sqlite_schema WHERE name='meta' AND type='table'")) v.fail('UNKNOWN_DATABASE');
-        if (this.#one("SELECT value FROM meta WHERE key='schema_hash'")?.value !== this.#schemaHash()) v.fail('SCHEMA_MISMATCH');
-        if (this.#one("SELECT value FROM meta WHERE key='layout_hash'")?.value !== this.#layoutHash()) v.fail('SCHEMA_MISMATCH');
+        assertMemoryLayout(this.#db, this.#schema);
       }
       this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON; PRAGMA temp_store=MEMORY;');
       if (version === 0) this.#tx(() => {
-        this.#db.exec(SCHEMA_SQL);
+        this.#db.exec(schemaSQL(this.#schema));
         this.#run('INSERT INTO meta VALUES (?,?)', 'schema_hash', this.#schemaHash());
         this.#run('INSERT INTO meta VALUES (?,?)', 'ledger_key', randomBytes(32).toString('hex'));
         this.#run('INSERT INTO meta VALUES (?,?)', 'layout_hash', this.#layoutHash());
-        this.#db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+        this.#db.exec(`PRAGMA user_version=${this.#schema}`);
       });
       if (this.#one("SELECT value FROM meta WHERE key='schema_hash'")?.value !== this.#schemaHash()) v.fail('SCHEMA_MISMATCH');
       this.#key = this.#one("SELECT value FROM meta WHERE key='ledger_key'")!.value as string;
       this.#db.enableDefensive(true);
-      if (options.image) {
+      if (this.#schema === 2) {
+        validateFanoutImage(this.#db);
+        this.#fanout = new DurableFanout(this.#db, () => this.#clock.wall(), options.fanoutFault);
+      }
+      if (options.image || (this.#schema === 2 && version !== 0)) {
         if (!this.diagnostics().integrity || !this.diagnostics().foreignKeys) v.fail('DURABLE_CORRUPT');
+        this.#db.exec("INSERT INTO memory_fts(memory_fts, rank) VALUES('integrity-check',1);");
         // A process restart never revives worker leases, active artifacts or run tickets.
-        this.#db.exec("UPDATE jobs SET lease_owner=NULL,lease_token=NULL,lease_deadline=NULL; UPDATE scopes SET runtime_epoch=runtime_epoch+1; UPDATE artifacts SET status='registered' WHERE status='active';");
+        const boot = () => this.#db.exec("UPDATE jobs SET lease_owner=NULL,lease_token=NULL,lease_deadline=NULL; UPDATE scopes SET runtime_epoch=runtime_epoch+1; UPDATE artifacts SET status='registered' WHERE status='active';");
+        if (this.#fanout) this.#access(() => this.#transaction(boot, false, 'boot')); else boot();
       }
       this.#persist = options.persist;
       this.#assertHealthy = options.assertHealthy;
       this.#onPoison = options.onPoison;
+      this.#assertCloseAllowed = options.assertCloseAllowed;
+      this.#aroundAccess = options.aroundAccess;
     } catch (error) { this.#db.close(); throw error; }
   }
 
-  #schemaHash(): string { return createHash('sha256').update(SCHEMA_SQL).digest('hex'); }
-  #layoutHash(): string {
-    return createHash('sha256').update(JSON.stringify(this.#all("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name"))).digest('hex');
+  /** Schema-1 compatibility contract; no boot resets or persistent side effects. */
+  static validateImage(image: Uint8Array): { schema: 1; revocationHighWater: number } {
+    return { ...inspectMemoryImage(image, 1), schema: 1 };
   }
+
+  #schemaHash(): string { return schemaHash(this.#schema); }
+  #layoutHash(): string { return actualLayoutHash(this.#db); }
   #check(): void { if (this.#poisoned) v.fail('DURABLE_UNAVAILABLE'); this.#assertHealthy?.(); }
   #one(sql: string, ...args: SQLInputValue[]): Row | undefined { this.#check(); return this.#db.prepare(sql).get(...args) as Row | undefined; }
   #all(sql: string, ...args: SQLInputValue[]): Row[] { return this.#db.prepare(sql).all(...args) as Row[]; }
   #run(sql: string, ...args: SQLInputValue[]): void { this.#db.prepare(sql).run(...args); }
+  #access<T>(body: () => T): T {
+    if (this.#accessDepth) v.fail('DURABLE_ACCESS_BUSY');
+    const run = () => { this.#accessDepth++; try { this.#check(); return body(); } finally { this.#accessDepth--; } };
+    const result = !this.#aroundAccess ? run() : this.#aroundAccess(run);
+    if (result !== null && (typeof result === 'object' || typeof result === 'function') && typeof (result as any).then === 'function') v.fail('DURABLE_ASYNC_ACCESS');
+    return result;
+  }
   #tx<T>(body: () => T, readOnly = false): T {
+    return this.#access(() => this.#transaction(body, readOnly));
+  }
+  #transaction<T>(body: () => T, readOnly: boolean, phase: 'source' | 'boot' = 'source', frozenAsOf?: number): T {
     this.#check();
     this.#db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
     let committing = false, committed = false;
     try {
       const before = this.#one('SELECT total_changes() AS n')!.n;
+      this.#fanout?.begin(phase, frozenAsOf);
       const result = body();
+      if (!readOnly) this.#fanout?.finish(before !== this.#one('SELECT total_changes() AS n')!.n);
       const changed = !readOnly && before !== this.#one('SELECT total_changes() AS n')!.n;
       // FTS5 flushes pending index changes during COMMIT. Serializing before it
       // can capture content rows without their matching inverted index pages.
       // This RAM commit is not an externally acknowledged durable commit: the
       // entire synchronous checkpoint must still succeed before we return.
       committing = true; this.#db.exec('COMMIT'); committed = true;
-      if (this.#persist && changed) this.#persist(this.#db.serialize(), this.revocationHighWater());
+      if (this.#persist && changed) this.#persist(this.#db.serialize(), this.#revocationHighWater());
       return result;
     } catch (error) {
       // Neither a possibly committed RAM mutation nor uncertain persistence may
@@ -99,10 +133,11 @@ export class MemoryStore {
       if (this.#persist && committing) { this.#poisoned = true; this.#onPoison?.(); }
       if (!committed) try { this.#db.exec('ROLLBACK'); } catch { /* Fail closed even if COMMIT failed. */ }
       throw error;
-    }
+    } finally { this.#fanout?.end(); }
   }
-  snapshot(): Uint8Array { this.#check(); return this.#db.serialize(); }
-  revocationHighWater(): number { return this.#one('SELECT coalesce(max(id),0) AS n FROM revocations')!.n as number; }
+  snapshot(): Uint8Array { return this.#access(() => this.#db.serialize()); }
+  #revocationHighWater(): number { return this.#one('SELECT coalesce(max(id),0) AS n FROM revocations')!.n as number; }
+  revocationHighWater(): number { return this.#access(() => this.#revocationHighWater()); }
   #digest(value: unknown): string { return createHmac('sha256', this.#key).update(JSON.stringify(value)).digest('hex'); }
   #scope(id: string): Scope {
     v.text(id, 128);
@@ -168,7 +203,7 @@ export class MemoryStore {
       return this.#scope(this.#one('SELECT id FROM scopes WHERE identity=?', identity)!.id as string);
     });
   }
-  scope(id: string): Scope { return this.#scope(id); }
+  scope(id: string): Scope { return this.#access(() => this.#scope(id)); }
 
   acceptEvent(epoch: Epoch, input: EventInput): Receipt & SourceRef {
     v.object(input);
@@ -355,9 +390,9 @@ export class MemoryStore {
       scopeId:scope.id, generation:row.generation as number, consentRevision:row.consent_revision as number,
       sourceRefs:this.#dependencies(ref.id), recordedAt:row.created_at as number };
   }
-  read(epoch: Epoch, ref: SourceRef, asOf = this.#clock.wall()): MemoryRecord | null {
-    v.timestamp(asOf); v.refs([ref]);
-    return this.#tx(() => this.#record(this.#epoch(epoch), ref, asOf), true);
+  read(epoch: Epoch, ref: SourceRef, asOf?: number): MemoryRecord | null {
+    v.refs([ref]);
+    return this.#tx(() => { const time = asOf ?? this.#clock.wall(); v.timestamp(time); return this.#record(this.#epoch(epoch), ref, time); }, true);
   }
   /** Read-only provenance for currently visible published memories. No source text.
    * Multiple publications/derived memories from the same interaction share its event ref.
@@ -493,28 +528,53 @@ export class MemoryStore {
   retrievalSnapshot(epoch:Epoch, publishedRefs:SourceRef[]):RetrievalSnapshot {
     return this.#tx(() => {
       const scope = this.#epoch(epoch), asOf = this.#clock.wall();
+      return this.#retrievalSnapshotAt(scope,publishedRefs,asOf);
+    }, true);
+  }
+  #retrievalSnapshotAt(scope:Scope,publishedRefs:SourceRef[],asOf:number,extraBytes=0,metadata?:MetadataRef[]):RetrievalSnapshot {
       if (!Number.isSafeInteger(asOf) || asOf < 0) v.fail('INVALID_INPUT');
       if (!Array.isArray(publishedRefs) || publishedRefs.length > RETRIEVAL_LIMITS.selected) v.fail('RETRIEVAL_LIMIT');
       const requested = publishedRefs.length ? v.refs(publishedRefs) : [];
       const authority = { id:scope.id, generation:scope.generation, consentRevision:scope.consentRevision, runtimeEpoch:scope.runtimeEpoch };
       const budget:SourceBudget = { bytes:0, prefix:'RETRIEVAL', limits:RETRIEVAL_LIMITS };
+      this.#sourceCharge(budget,extraBytes);
       const size = (value:unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
       this.#sourceCharge(budget, size({ version:1, authority, asOf, selected:[],
         counts:{ selected:32, nodes:128, edges:512, bytes:RETRIEVAL_LIMITS.bytes } }));
       const { nodes, edges } = this.#collectSources(scope, requested, asOf, budget);
       const visiting = new Set<string>(), roots = new Map<string,SourceRef[]>();
-      const selected = requested.map(ref => {
+      const selected = requested.map((ref,index) => {
         const node = nodes.get(ref.id)!;
         if (node.meta.type !== 'memory') v.fail('SOURCE_NOT_PUBLISHED');
         const memory:MemoryRecord = { ...(node.body as Proposal), ...ref, scopeId:scope.id,
           generation:node.meta.generation, consentRevision:node.meta.consentRevision,
           sourceRefs:node.parents, recordedAt:node.meta.recordedAt };
         const item = { memory, rootEventRefs:this.#sourceRoots(ref.id, nodes, visiting, roots, 'RETRIEVAL') };
+        if(metadata && canonical(metadata[index])!==canonical({...node.meta,parents:node.parents,rootEventRefs:item.rootEventRefs}))
+          v.fail('RETRIEVAL_PROJECTION_MISMATCH');
         this.#sourceCharge(budget, size(item) + 1); return item;
       });
       return frozenCopy({ version:1 as const, authority, asOf, selected,
         counts:{ selected:selected.length, nodes:nodes.size, edges:edges.length, bytes:budget.bytes } });
-    }, true);
+  }
+  /** One external guard, a durable TTL barrier, then one frozen-time read of the
+   * complete current consumer selection and its bodies/full source closure. */
+  consumerRetrievalSnapshot(handle:ConsumerHandle):ConsumerRetrievalSnapshot {
+    const copied=copyRetrievalConsumerHandle(handle);
+    return this.#access(()=>{
+      const asOf=this.#transaction(()=>{const fanout=this.#fanoutRequired();fanout.sweep();return fanout.time();},false);
+      return this.#transaction(()=>{
+        const fanout=this.#fanoutRequired(),projection=fanout.read(copied),status=fanout.status(copied.id);
+        const scope=this.#scope(projection.scopeId),authority={id:scope.id,generation:scope.generation,
+          consentRevision:scope.consentRevision,runtimeEpoch:scope.runtimeEpoch};
+        const consumer={version:1 as const,id:status.id,profile:'retrieval-refs-v1' as const,generation:status.generation,
+          scopeId:scope.id,bootId:copied.bootId,authority,applied:projection.applied,head:status.head,
+          baseline:status.baseline,floor:status.floor,projectionAsOf:projection.asOf,readAsOf:asOf};
+        const extraBytes=Buffer.byteLength(JSON.stringify({consumer}),'utf8')+Buffer.byteLength(JSON.stringify(projection.refs),'utf8');
+        const snapshot=this.#retrievalSnapshotAt(scope,projection.refs.map(ref=>({id:ref.id,revision:ref.revision})),asOf,extraBytes,projection.refs);
+        return frozenCopy({...snapshot,consumer});
+      },true,'source',asOf);
+    });
   }
   /** Metadata-only scene authorization over an explicit pool of published memories.
    * All ancestors are current; original evidence and memory text never leave this method. */
@@ -555,20 +615,21 @@ export class MemoryStore {
         counts:{selected:selected.length,nodes:nodes.size,edges:edgeCount,bytes:budget.bytes}});
     },true);
   }
-  search(epoch: Epoch, query: string, limit = 20, asOf = this.#clock.wall()): MemoryRecord[] {
-    v.text(query, 256); v.timestamp(asOf);
+  search(epoch: Epoch, query: string, limit = 20, asOf?: number): MemoryRecord[] {
+    v.text(query, 256);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) v.fail('INVALID_INPUT');
     return this.#tx(() => {
+      const time = asOf ?? this.#clock.wall(); v.timestamp(time);
       const scope = this.#epoch(epoch);
       // unicode61 FTS plus literal substring handles Chinese without pretending
       // tokenization is semantic retrieval. Filter validity BEFORE the result limit.
       const rows = this.#db.prepare(`SELECT n.id,n.revision FROM nodes n WHERE n.scope_id=? AND n.type='memory'
         AND n.status='active' AND (n.valid_from IS NULL OR n.valid_from<=?) AND (n.valid_to IS NULL OR n.valid_to>?)
         AND (instr(n.search_text,?)>0 OR n.id IN (SELECT node_id FROM memory_fts WHERE memory_fts MATCH ?))
-        ORDER BY n.created_at,n.id`).iterate(scope.id, asOf, asOf, query, '"' + query.replaceAll('"','""') + '"');
+        ORDER BY n.created_at,n.id`).iterate(scope.id, time, time, query, '"' + query.replaceAll('"','""') + '"');
       const result: MemoryRecord[] = [];
       for (const row of rows) {
-        const record = this.#record(scope, { id:row.id as string, revision:row.revision as number }, asOf);
+        const record = this.#record(scope, { id:row.id as string, revision:row.revision as number }, time);
         if (record) result.push(record);
         if (result.length >= limit) break;
       }
@@ -582,6 +643,7 @@ export class MemoryStore {
       : { outboxId:row.id as number, operation:'remove', ref };
   }
   projectionBatch(epoch: Epoch): ProjectionChange[] {
+    if (this.#schema === 2) v.fail('FANOUT_LEGACY_ACK_DISABLED');
     return this.#tx(() => {
       const scope = this.#epoch(epoch);
       // The projection consumer calls this on a cadence even without new events.
@@ -599,6 +661,7 @@ export class MemoryStore {
     });
   }
   acknowledgeProjection(epoch: Epoch, change: ProjectionChange): void {
+    if (this.#schema === 2) v.fail('FANOUT_LEGACY_ACK_DISABLED');
     this.#tx(() => {
       const scope = this.#epoch(epoch);
       const row = this.#one('SELECT * FROM outbox WHERE id=? AND scope_id=?', change.outboxId, scope.id);
@@ -729,8 +792,31 @@ export class MemoryStore {
     });
   }
   diagnostics(): { node: string; sqlite: string; schema: number; integrity: boolean; foreignKeys: boolean } {
-    return { node:process.version, sqlite:this.#one('SELECT sqlite_version() AS v')!.v as string, schema:SCHEMA_VERSION,
-      integrity:this.#one('PRAGMA integrity_check')!.integrity_check === 'ok', foreignKeys:this.#all('PRAGMA foreign_key_check').length === 0 };
+    return this.#access(() => ({ node:process.version, sqlite:this.#one('SELECT sqlite_version() AS v')!.v as string, schema:this.#schema,
+      integrity:this.#one('PRAGMA integrity_check')!.integrity_check === 'ok', foreignKeys:this.#all('PRAGMA foreign_key_check').length === 0 }));
   }
-  close(): void { this.#db.close(); }
+  #fanoutRequired(): DurableFanout { if (!this.#fanout) v.fail('FANOUT_SCHEMA_REQUIRED'); return this.#fanout; }
+  registerConsumer(id: string, epoch: Epoch, profile: FanoutProfile, required = false): ConsumerHandle {
+    return this.#tx(() => this.#fanoutRequired().register(id, epoch, profile, required));
+  }
+  bindConsumer(id: string, epoch: Epoch): ConsumerHandle { return this.#tx(() => this.#fanoutRequired().bind(id, epoch)); }
+  applyConsumers(handles: ConsumerHandle[]): ConsumerStatus[] { return this.#tx(() => this.#fanoutRequired().apply(handles)); }
+  readConsumer(handle: ConsumerHandle): ConsumerProjection {
+    // A crossed TTL barrier must stay durable even when the subsequent stale
+    // projection read is refused. Both transactions remain in one access guard.
+    return this.#access(() => {
+      const asOf = this.#transaction(() => { const fanout = this.#fanoutRequired(); fanout.sweep(); return fanout.time(); }, false);
+      return this.#transaction(() => this.#fanoutRequired().read(handle), true, 'source', asOf);
+    });
+  }
+  pauseConsumer(handle: ConsumerHandle): void { this.#tx(() => this.#fanoutRequired().pause(handle)); }
+  resetConsumer(id: string, epoch: Epoch): ConsumerHandle { return this.#tx(() => this.#fanoutRequired().reset(id, epoch)); }
+  resumeConsumer(id: string, epoch: Epoch): ConsumerHandle { return this.resetConsumer(id, epoch); }
+  consumerStatus(id: string): ConsumerStatus { return this.#tx(() => this.#fanoutRequired().status(id), true); }
+  invalidationJournal(): JournalBatch[] { return this.#tx(() => this.#fanoutRequired().journal(), true); }
+  sweepConsumers(): { changed: boolean; head: number } { return this.#tx(() => this.#fanoutRequired().sweep()); }
+  pruneJournal(retainBatches: number): { floor: number; removed: number; resetConsumers: string[] } {
+    return this.#tx(() => this.#fanoutRequired().prune(retainBatches));
+  }
+  close(): void { if (this.#accessDepth) v.fail('DURABLE_ACCESS_BUSY'); this.#assertCloseAllowed?.(); this.#db.close(); }
 }

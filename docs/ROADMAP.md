@@ -1,5 +1,11 @@
 # 实施与持续开发路线
 
+**当前 IF5/IF6：** [架构进度与合并范围](AEMC-DEVELOPMENT-STATUS.md)记录18项目标的实际层次；已新增 [durable consumer→检索桥](DURABLE-RETRIEVAL.md)及[外锚容量失败处理](AUTHORITY-CAPACITY.md)。[当前组合874/874、typecheck、独立终审及成本测量](AEMC-INFRA-EVIDENCE-IF6.md)已通过，IF4以下证据保留历史快照；AR1质量、生产custody与训练准入仍未完成。
+
+[历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
+
+**AEMC基础设施 IF3/IF4：** [完整前置矩阵](AEMC-INFRASTRUCTURE.md)、[研究ADR](AEMC-INFRA-RESEARCH.md)和[版本化合同](AEMC-INFRA-CONTRACTS.md)保留全部训练前范围。在外锚/密钥与schema2持久消费者基础上，已实现 [v3增量存储、链备份和新目标压实](INCREMENTAL-STORAGE.md)，以及 [旧M2冻结包导入、全局来源登记与实际准入门](LEGACY-M2-IMPORT.md)。[IF0](AEMC-INFRA-EVIDENCE-IF0.md)、[IF1](AEMC-INFRA-EVIDENCE-IF1.md)、[IF2](AEMC-INFRA-EVIDENCE-IF2.md)证据保留其原快照。生产custody、十年规模、历史GC、真实检索/多模态质量及其余前置仍开放；不授予训练准入，下方旧切片保留历史范围。
+
 **本批 WF1：** [独立私有教师校准 worker](WF1-CAMPAIGN.md)实现有限 campaign、host/CAS fencing、密封 custody、同源排除与形式验证、train/dev 模型评审及私有 manifest；实际 API/用量按单独冻结运行回执验收，不以合成完整链替代。Student 推理/训练 `NOT_RUN`，密封评测反馈不参与调参，64-family 扩批及公开发布未准入。
 
 **本批 WF0：** [教学 metadata 合同](WF0-TEACHING-CONTRACT.md)实现独立有界声明 validator、完整已提供家族/已知指纹分组、私有继承、sealed split 隔离与公开 metadata 导出。仅 `DECLARATION_VALID_ONLY`，执行 `NOT_AUTHORIZED`、权限真实性 `NOT_AUTHENTICATED`、语义/质量 `NOT_EVALUATED`；不生成材料、不接 API/训练/Store，实际教学及完整来源认证仍待独立准入。[Together gpt-oss 教师研究](GPT-OSS-TEACHER-RESEARCH.md)为调用前 **DESIGN_ONLY** 快照，不改变既有 WF0 或消耗旧请求额度。

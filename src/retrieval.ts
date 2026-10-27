@@ -1,25 +1,34 @@
 import { MemoryStore } from './store.ts';
 import { types } from 'node:util';
 import type { Epoch, SourceRef } from './contracts.ts';
+import type { ConsumerHandle } from './fanout-types.ts';
 import { canonical, frozenCopy } from './curation-types.ts';
 import type { Frozen } from './curation-types.ts';
-import { RETRIEVAL_LIMITS, RETRIEVAL_PROJECTION_LIMITS } from './retrieval-types.ts';
+import { RETRIEVAL_LIMITS, RETRIEVAL_PROJECTION_LIMITS, copyRetrievalConsumerHandle } from './retrieval-types.ts';
 import type { RetrievalAuthority, RetrievalBinding, RetrievalCandidate, RetrievalHitKind,
-  RetrievalResult, RetrievalSnapshot } from './retrieval-types.ts';
+  ConsumerRetrievalSnapshot, RetrievalResult, RetrievalSnapshot } from './retrieval-types.ts';
 import { fail, object, text, refs } from './validation.ts';
 
 type Lexical = { normalized:string; terms:string[] };
 type Association = { root:Frozen<SourceRef>; members:number[] };
 type ProjectionCounts = { memories:number; roots:number; nodes:number; edges:number; bytes:number };
-type Pair = { revision:number; snapshot:RetrievalSnapshot; lexical:Lexical[]; association:Association[]; counts:ProjectionCounts };
-type Bound = { epoch:Frozen<Epoch>; refs:Frozen<SourceRef[]>; authority:Frozen<RetrievalAuthority>;
+type Snapshot = RetrievalSnapshot|ConsumerRetrievalSnapshot;
+type Pair = { revision:number; snapshot:Snapshot; lexical:Lexical[]; association:Association[]; counts:ProjectionCounts };
+type Selection = { epoch:Frozen<Epoch>; refs:Frozen<SourceRef[]>; consumer?:never } | { consumer:Frozen<ConsumerHandle>; epoch?:never; refs?:never };
+type Bound = Selection & { authority:Frozen<RetrievalAuthority>;
   lastAsOf:number; revision:number; pair:Pair|null; candidate:RetrievalCandidate|null };
 type Hit = { ordinal:number; kind:RetrievalHitKind };
 type Candidate = { bound:Bound; revision:number; hits:Hit[] };
 const size = (value:unknown) => Buffer.byteLength(JSON.stringify(value),'utf8');
 const normalize = (value:string) => value.normalize('NFKC').toLowerCase();
 const terms = (value:string) => [...new Set(value.match(/[\p{L}\p{N}]+/gu) ?? [])];
-const sourceIdentity = (snapshot:RetrievalSnapshot) => canonical({authority:snapshot.authority,selected:snapshot.selected});
+const sourceIdentity = (snapshot:Snapshot) => {
+  if('consumer' in snapshot) {
+    const {readAsOf:_,...consumer}=snapshot.consumer;
+    return canonical({authority:snapshot.authority,selected:snapshot.selected,consumer});
+  }
+  return canonical({authority:snapshot.authority,selected:snapshot.selected});
+};
 
 /** Closed data objects only: no accessors, inherited fields, symbols or caller callbacks. */
 function closed(value:unknown, required:string[], optional:string[]=[]):Record<string,unknown> {
@@ -67,6 +76,12 @@ export class RetrievalService {
     this.#bindings.set(handle,{...copied,authority:snapshot.authority,lastAsOf:snapshot.asOf,revision:0,pair:null,candidate:null});
     return handle;
   }
+  bindConsumer(input:ConsumerHandle):RetrievalBinding {
+    const consumer=frozenCopy(copyRetrievalConsumerHandle(input)),snapshot=this.#store.consumerRetrievalSnapshot(consumer);
+    const handle:RetrievalBinding=Object.freeze({version:1});
+    this.#bindings.set(handle,{consumer,authority:snapshot.authority,lastAsOf:snapshot.asOf,revision:0,pair:null,candidate:null});
+    return handle;
+  }
   #bound(binding:RetrievalBinding):Bound {
     const bound=this.#bindings.get(binding);if(!bound)fail('UNAUTHENTICATED');return bound;
   }
@@ -74,9 +89,10 @@ export class RetrievalService {
     if(bound.candidate)this.#candidates.delete(bound.candidate);bound.candidate=null;
   }
   #clearPair(bound:Bound):void { this.#clearCandidate(bound);bound.pair=null; }
-  #snapshot(binding:RetrievalBinding,bound:Bound):RetrievalSnapshot {
+  #snapshot(binding:RetrievalBinding,bound:Bound):Snapshot {
     try {
-      const snapshot=this.#store.retrievalSnapshot({...bound.epoch},bound.refs.map(ref=>({...ref})));
+      const snapshot=bound.consumer ? this.#store.consumerRetrievalSnapshot(bound.consumer) :
+        this.#store.retrievalSnapshot({...bound.epoch},bound.refs.map(ref=>({...ref})));
       if(snapshot.asOf<bound.lastAsOf) { this.#bindings.delete(binding);fail('RETRIEVAL_CLOCK_ROLLBACK'); }
       if(canonical(snapshot.authority)!==canonical(bound.authority))fail('RETRIEVAL_AUTHORITY_CHANGED');
       bound.lastAsOf=snapshot.asOf;return snapshot;
@@ -86,7 +102,7 @@ export class RetrievalService {
       this.#clearPair(bound);this.#bindings.delete(binding);throw error;
     }
   }
-  #currentPair(binding:RetrievalBinding,bound:Bound):{pair:Pair;snapshot:RetrievalSnapshot} {
+  #currentPair(binding:RetrievalBinding,bound:Bound):{pair:Pair;snapshot:Snapshot} {
     // Even an empty pair performs the full source/authority/TTL read before ranking or delivery.
     const snapshot=this.#snapshot(binding,bound),pair=bound.pair;
     if(!pair)fail('RETRIEVAL_NOT_READY');
@@ -155,6 +171,7 @@ export class RetrievalService {
     const saved=this.#candidates.get(candidate);
     if(!saved||saved.bound!==bound||bound.candidate!==candidate||saved.revision!==pair.revision)fail('UNAUTHENTICATED');
     return frozenCopy({version:1,projectionRevision:pair.revision,asOf:snapshot.asOf,
+      ...('consumer' in snapshot?{consumer:snapshot.consumer}:{}),
       hits:saved.hits.map(hit=>({...snapshot.selected[hit.ordinal]!,kind:hit.kind}))});
   }
   unbind(binding:RetrievalBinding):void { const bound=this.#bound(binding);this.#clearPair(bound);this.#bindings.delete(binding); }
