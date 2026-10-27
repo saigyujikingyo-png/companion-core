@@ -1,5 +1,7 @@
 # Companion Core
 
+[WF1 私有教师校准](docs/WF1-CAMPAIGN.md)已实现独立有界 worker、持久调用消费、加密 custody、形式目标重算与 train/dev 评审的分账协议；当前源码仅经合成验证，真实执行另行准入。模型评审不等于形式证明或许可认证，Student 推理/训练仍 `NOT_RUN`，数据公开仍 `NOT_AUTHORIZED`。
+
 [WF0 教学 metadata 合同](docs/WF0-TEACHING-CONTRACT.md)已实现有界版本化声明验证、同源家族/私有继承与切分检查及公开 metadata 投影；始终 `DECLARATION_VALID_ONLY / NOT_AUTHORIZED / NOT_AUTHENTICATED / NOT_EVALUATED`，不生成教学内容、不认证许可或真实推理，不接 provider、trainer 或 Store。[Together gpt-oss 教师补充](docs/GPT-OSS-TEACHER-RESEARCH.md)是 API 执行前的 **DESIGN_ONLY** 研究快照，未调用或验证质量。
 
 可审计的本地联想记忆底座。云端 API 与未来本地模型共用来源、身份、检索、撤销和学习产物边界；桌宠、社交插件、移动端只是不同入口。
