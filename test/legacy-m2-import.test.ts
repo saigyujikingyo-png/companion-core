@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {TestContext} from 'node:test';
 import {randomBytes} from 'node:crypto';
-import {cpSync,existsSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
+import {cpSync,existsSync,mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
@@ -23,7 +23,7 @@ const event={source:'synthetic',eventKey:'one',evidence:{speakerId:'subject',spe
 const clock={wall:()=>100,monotonic:()=>0};
 function files(path:string){return readdirSync(path).sort().map(name=>({name,hash:sha(readFileSync(join(path,name)))}));}
 function fixture(t:TestContext,upgrade=true,identity='合成用户:legacy'){
-  const root=mkdtempSync(join(tmpdir(),'aemc-legacy-import-')),source=join(root,'source');mkdirSync(source);const legacyKey=randomBytes(32);
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'aemc-legacy-import-'))),source=join(root,'source');mkdirSync(source);const legacyKey=randomBytes(32);
   const legacyConfig={directory:source,identity,keyBase64:legacyKey.toString('base64')},legacy=new DurableMemory(legacyConfig,4,{clock});
   const scope=legacy.store.ensureScope(who),ref=legacy.store.acceptEvent(scope,event);legacy.store.revoke(scope,ref);
   legacy.claim('delivered','payload');legacy.reserve('delivered');legacy.terminal('delivered','ready','delivery');legacy.terminal('delivered','taken','delivery');legacy.terminal('delivered','acknowledged','delivery');legacy.consumeFeedback('delivery');

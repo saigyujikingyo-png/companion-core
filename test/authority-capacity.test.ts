@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {TestContext} from 'node:test';
-import {mkdtempSync,statSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {mkdtempSync,realpathSync,statSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {LocalSqliteAuthority} from '../src/local-sqlite-authority.ts';
@@ -25,7 +25,7 @@ function authorityData(f:ReturnType<typeof fixture>){const db=new DatabaseSync(j
 }finally{db.close();}}
 
 function fixture(t:TestContext,writeLimitBytes=65536){
-  const root=mkdtempSync(join(tmpdir(),'aemc-if6-capacity-')),authorityConfig={directory:join(root,'authority'),authorityId:'synthetic',custodyDomain:'independent',writeLimitBytes};
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'aemc-if6-capacity-'))),authorityConfig={directory:join(root,'authority'),authorityId:'synthetic',custodyDomain:'independent',writeLimitBytes};
   const authority=LocalSqliteAuthority.create(authorityConfig),config={directory:join(root,'vault'),vaultId:'vault',identity:'synthetic',storageDomain:'payload',
     storageProfile:'blocks-br4-v1' as const,authority,keys:generateKeySet()},v=AnchoredVault.create(config,4);
   t.after(()=>{v.close();authority.close();});return{root,authorityConfig,authority,config,v};
@@ -190,7 +190,7 @@ test('actual hot rollback journal stays within the hard bound and the real opene
 });
 
 test('a durable retrieval TTL barrier refuses across another pending vault and fresh catch-up excludes expired bodies',t=>{
-  let wall=100,armed=false;const root=mkdtempSync(join(tmpdir(),'aemc-if6-retrieval-'));
+  let wall=100,armed=false;const root=realpathSync(mkdtempSync(join(tmpdir(),'aemc-if6-retrieval-')));
   const authority=LocalSqliteAuthority.create({directory:join(root,'authority'),authorityId:'synthetic',custodyDomain:'independent'}),keys=generateKeySet();
   const config={directory:join(root,'recall'),vaultId:'recall',identity:'synthetic',storageDomain:'payload',storageProfile:'blocks-br4-v1' as const,schemaVersion:2 as const,keys,authority};
   const options={clock:{wall:()=>wall,monotonic:()=>0}},v=AnchoredVault.create(config,4,options);

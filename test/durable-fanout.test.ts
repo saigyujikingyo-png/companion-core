@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -34,7 +34,7 @@ function fixture(t:TestContext,fault?: (point:FanoutFault)=>void){
 }
 function snapshotDB(store:MemoryStore):DatabaseSync{const db=new DatabaseSync(':memory:',{enableForeignKeyConstraints:true});db.deserialize(store.snapshot());return db;}
 function anchored(t:TestContext,schemaVersion:1|2=2){
-  const root=mkdtempSync(join(tmpdir(),'companion-fanout-v2-')),authority=LocalSqliteAuthority.create({directory:join(root,'authority'),authorityId:'synthetic-authority',custodyDomain:'independent'});
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'companion-fanout-v2-'))),authority=LocalSqliteAuthority.create({directory:join(root,'authority'),authorityId:'synthetic-authority',custodyDomain:'independent'});
   const config={directory:join(root,'vault'),vaultId:'synthetic-vault',identity:'synthetic',storageDomain:'payload',keys:generateKeySet(),authority,schemaVersion};
   const options={clock:{wall:()=>100,monotonic:()=>0}},v=AnchoredVault.create(config,4,options);t.after(()=>{v.close();authority.close();});return{root,authority,config,options,v};
 }

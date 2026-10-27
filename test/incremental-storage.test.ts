@@ -3,9 +3,9 @@ import {test} from 'node:test';
 import type {TestContext} from 'node:test';
 import {randomBytes} from 'node:crypto';
 import {brotliCompressSync} from 'node:zlib';
-import {mkdtempSync,readFileSync,readdirSync,renameSync,statSync,writeFileSync,existsSync} from 'node:fs';
+import {mkdtempSync,realpathSync,readFileSync,readdirSync,renameSync,statSync,writeFileSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,resolve,sep} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {encodeBlocks,decodeBlocks,MAX_CHAIN,MAX_PATCH} from '../src/incremental-codec.ts';
 import type {BlockEncoding} from '../src/incremental-codec.ts';
@@ -22,7 +22,7 @@ const who={tenantId:'synthetic',subjectId:'subject',personaId:'companion',relati
 const input=(key:string)=>({source:'synthetic',eventKey:key,evidence:{speakerId:'subject',speakerRole:'subject' as const,
   mode:'self_report' as const,selectedText:`Synthetic incremental event ${key}`,occurredAt:null}});
 function fixture(t:TestContext,profile:StorageProfile|null='blocks-br4-v1',schemaVersion:1|2=2,fault?: (p:AnchoredFault)=>void){
-  const root=mkdtempSync(join(tmpdir(),'aemc-incremental-')),authority=LocalSqliteAuthority.create({directory:join(root,'authority'),authorityId:'synthetic-authority',custodyDomain:'independent'});
+  const root=realpathSync(mkdtempSync(join(tmpdir(),'aemc-incremental-'))),authority=LocalSqliteAuthority.create({directory:join(root,'authority'),authorityId:'synthetic-authority',custodyDomain:'independent'});
   const config={directory:join(root,'vault'),vaultId:'synthetic-vault',identity:'synthetic',storageDomain:'payload',keys:generateKeySet(),authority,schemaVersion,...(profile?{storageProfile:profile}:{})};
   const options={clock:{wall:()=>100,monotonic:()=>0},...(fault?{fault}:{})},v=AnchoredVault.create(config,4,options);
   t.after(()=>{v.close();authority.close();});return{root,authority,config,options,v};
@@ -173,15 +173,15 @@ test('v3 backup and pending stage limits reject oversized manifests before parsi
   assert.throws(()=>parseFrozenV3(Buffer.from([0xff])),/INCREMENTAL_CORRUPT/);
 });
 test('pure RAM writer limits reject records, stages and UTF-8 markers that readers cannot reopen',()=>{
-  const keys=generateKeySet(),identity:VaultIdentity={format:INCREMENTAL_FORMAT,authorityId:'authority',vaultId:'vault',identity:'synthetic',instanceId:'instance',ownerEpoch:1,keyEpoch:1,
-    directory:'C:\\synthetic',storageDomain:'payload',storageProfile:'blocks-br4-v1' as const};
+  const root=resolve('/'),keys=generateKeySet(),identity:VaultIdentity={format:INCREMENTAL_FORMAT,authorityId:'authority',vaultId:'vault',identity:'synthetic',instanceId:'instance',ownerEpoch:1,keyEpoch:1,
+    directory:join(root,'synthetic'),storageDomain:'payload',storageProfile:'blocks-br4-v1' as const};
   const safety={version:1 as const,identity:'synthetic',maxCalls:4,reserved:0,ingress:[],lastSourceRef:null,lastAcknowledgedDeliveryId:null,lastWall:0};
-  const oversized={...identity,directory:'C:\\'+('a'.repeat(170)+'\\').repeat(100)},old={...oversized,sequence:1,digest:'0'.repeat(64)};
+  const oversized={...identity,directory:root+('a'.repeat(170)+sep).repeat(100)},old={...oversized,sequence:1,digest:'0'.repeat(64)};
   assert.throws(()=>encodeVaultMarker(oversized),/ANCHOR_LIMIT/);
-  assert.throws(()=>encodeVaultMarker({...identity,directory:'C:\\'+'界'.repeat(3000)}),/ANCHOR_LIMIT/);
+  assert.throws(()=>encodeVaultMarker({...identity,directory:root+'界'.repeat(3000)}),/ANCHOR_LIMIT/);
   assert.throws(()=>freezeFrame(oversized,2,'long-record',Buffer.alloc(4096),safety,0,keys,old,null,null),/INCREMENTAL_LIMIT/);
   // A long operation ID is internal-only here: proves stage's independent
   // limit rather than relying on the external ID admission check.
-  assert.throws(()=>freezeFrame({...identity,directory:'C:\\'+'a'.repeat(25000)},1,'x'.repeat(5000),Buffer.alloc(4096),safety,0,keys,null,null,null),/INCREMENTAL_LIMIT/);
+  assert.throws(()=>freezeFrame({...identity,directory:root+'a'.repeat(25000)},1,'x'.repeat(5000),Buffer.alloc(4096),safety,0,keys,null,null,null),/INCREMENTAL_LIMIT/);
   assert.ok(encodeVaultMarker(identity).length<8192);
 });

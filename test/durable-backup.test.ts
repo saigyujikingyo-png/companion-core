@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync,
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, readdirSync, renameSync,
   symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,7 +21,7 @@ const sha = (value: Uint8Array | string) => createHash('sha256').update(value).d
 const who = { tenantId: 'synthetic', subjectId: 'subject', personaId: 'test', relationshipId: 'private' };
 const secret = 'SYNTHETIC_ONLY_MEMORY_PLAINTEXT_9729';
 function fixture(t: TestContext) {
-  const root = mkdtempSync(join(tmpdir(), 'companion-m2-backup-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'companion-m2-backup-')));
   const config: DurableConfig = { directory: join(root, 'source'), identity: 'SYNTHETIC_BACKUP', keyBase64: randomBytes(32).toString('base64') };
   mkdirSync(config.directory);
   const vault = new DurableMemory(config, 8);
