@@ -63,7 +63,7 @@ export class CampaignLedger {
     root=privateRoot(root);const rel=relative(root,authorityPath);if(!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+sep))stop('WF1_AUTHORITY_PATH');
     const spec=validateSpec(specInput),host=new HostAuthority(authorityPath,spec.id,now),a=host.read(now());
     if(a.head!==null||now()<spec.createdAt||now()>=spec.expiresAt)stop('WF1_ADMISSION');
-    return this.#open(root,host,key,false,now,{spec,authorityRevision:a.revision,runtimeId:a.runtimeId,createdAt:now(),transportLane:'UNBOUND',manifestRows:null,status:'ACTIVE',phase:'pilot',sealRef:null,objectiveRef:null,planRef:null,rubricRef:null,attempts:[],candidates:[],exclusions:[],manifestRef:null,code:null,phaseStartedAt:now()});
+    return this.#open(root,host,key,false,now,{spec,authorityRevision:a.revision,runtimeId:a.runtimeId,createdAt:now(),transportLane:'UNBOUND',manifestRows:null,status:'ACTIVE',phase:'pilot',sealRef:null,objectiveRef:null,planRef:null,rubricRef:null,attempts:[],candidates:[],exclusions:[],manifestRef:null,code:null,phaseStartedAt:now(),...(spec.schemaVersion==='wf1-campaign/0.8'?{sealUnits:[],planUnits:[]}:{} )});
   }
   static inspect(root:string,authorityPath:string,campaignId:string,key:Uint8Array,now=()=>Date.now()):CampaignLedger {root=privateRoot(root);return this.#open(root,new HostAuthority(authorityPath,campaignId,now),key,true,now);}
   static #open(root:string,host:HostAuthority,key:Uint8Array,readonly:boolean,now:()=>number,initial?:CampaignState):CampaignLedger {

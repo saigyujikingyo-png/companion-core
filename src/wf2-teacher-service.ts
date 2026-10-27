@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { pilotMetadataProfile,WF2_PILOT_PROFILE_DIGEST } from './wf2-together-pilot.ts';
+import { unitMetadataProfile,WF2_UNIT_PROFILE_DIGEST } from './wf2-unit-pilot.ts';
 import { canonical,copyJson,hash,integer,oneOf,shape,stop,text } from './wf1-json.ts';
 
 /** A trusted launcher has already durably admitted exactly one new campaign.
@@ -8,11 +9,12 @@ import { canonical,copyJson,hash,integer,oneOf,shape,stop,text } from './wf1-jso
 export type TeacherOperation='status'|'start'|'pause'|'cancel';
 export type TeacherServiceState='READY'|'RUNNING'|'COMPLETED'|'STOPPED'|'PAUSED'|'CANCELLED'|'OWNER_LOST'|'UNKNOWN';
 export type TeacherSafeMetadata={
-  profile?:ReturnType<typeof pilotMetadataProfile>;
+  profile?:ReturnType<typeof pilotMetadataProfile>|ReturnType<typeof unitMetadataProfile>;
   campaignStatus:'ACTIVE'|'PAUSED'|'REVOKED'|'STOPPED'|'COMPLETED'|'RECONCILE_REQUIRED';
   countCompleteness:'CURRENT_AUTHORITY'|'STALE_OR_UNKNOWN';
   calls:{deepseek:number|null;together:number|null};
   candidates:{deepseek:number|null;together:number|null;qualified:number|null;quarantined:number|null};
+  units?:{sealed:number|null;planned:number|null};
   sealed:boolean|null;planned:boolean|null;manifestFrozen:boolean;
   usage:{input:number|null;completion:number|null;unknown:number|null};
   estimatedReserveMicroUsd:number|null;
@@ -34,22 +36,24 @@ const STATES=['READY','RUNNING','COMPLETED','STOPPED','PAUSED','CANCELLED','OWNE
 function requestId(value:unknown):string {const s=text(value,64);if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(s))stop('WF2_SERVICE_REQUEST_ID');return s;}
 function nullableInteger(value:unknown,max:number):void {if(value!==null)integer(value,0,max);}
 function nullableBoolean(value:unknown):void {if(value!==null&&typeof value!=='boolean')stop('WF2_SERVICE_METADATA');}
+export function teacherMetadataProfile(digest:string){if(digest===WF2_PILOT_PROFILE_DIGEST)return pilotMetadataProfile();if(digest===WF2_UNIT_PROFILE_DIGEST)return unitMetadataProfile();return stop('WF2_METADATA_PROFILE');}
 export function validateTeacherMetadata(input:unknown,expectedProfileDigest?:string):TeacherSafeMetadata {
-  const pilot=expectedProfileDigest!==undefined;if(pilot&&expectedProfileDigest!==WF2_PILOT_PROFILE_DIGEST)stop('WF2_METADATA_PROFILE');
-  const m=shape(copyJson(input),['campaignStatus','countCompleteness','calls','candidates','sealed','planned','manifestFrozen','usage','estimatedReserveMicroUsd',...(pilot?['profile']:[])]);
-  if(pilot&&canonical(m.profile)!==canonical(pilotMetadataProfile()))stop('WF2_METADATA_PROFILE');
+  const pilot=expectedProfileDigest!==undefined,unit=expectedProfileDigest===WF2_UNIT_PROFILE_DIGEST;if(pilot)teacherMetadataProfile(expectedProfileDigest);
+  const m=shape(copyJson(input),['campaignStatus','countCompleteness','calls','candidates','sealed','planned','manifestFrozen','usage','estimatedReserveMicroUsd',...(pilot?['profile']:[]),...(unit?['units']:[])]);
+  if(pilot&&canonical(m.profile)!==canonical(teacherMetadataProfile(expectedProfileDigest!)))stop('WF2_METADATA_PROFILE');
   oneOf(m.campaignStatus,['ACTIVE','PAUSED','REVOKED','STOPPED','COMPLETED','RECONCILE_REQUIRED']);oneOf(m.countCompleteness,['CURRENT_AUTHORITY','STALE_OR_UNKNOWN']);
   const calls=shape(m.calls,['deepseek','together']),candidates=shape(m.candidates,['deepseek','together','qualified','quarantined']),usage=shape(m.usage,['input','completion','unknown']);
-  nullableInteger(calls.deepseek,pilot?0:44);nullableInteger(calls.together,pilot?11:8);nullableInteger(candidates.deepseek,pilot?0:16);nullableInteger(candidates.together,pilot?4:8);nullableInteger(candidates.qualified,pilot?4:24);nullableInteger(candidates.quarantined,pilot?4:24);
-  nullableInteger(usage.input,100000000);nullableInteger(usage.completion,100000000);nullableInteger(usage.unknown,pilot?11:52);nullableInteger(m.estimatedReserveMicroUsd,pilot?100000:500000);
+  nullableInteger(calls.deepseek,unit?4:pilot?0:44);nullableInteger(calls.together,unit?13:pilot?11:8);nullableInteger(candidates.deepseek,pilot?0:16);nullableInteger(candidates.together,pilot?4:8);nullableInteger(candidates.qualified,pilot?4:24);nullableInteger(candidates.quarantined,pilot?4:24);
+  nullableInteger(usage.input,100000000);nullableInteger(usage.completion,100000000);nullableInteger(usage.unknown,unit?17:pilot?11:52);nullableInteger(m.estimatedReserveMicroUsd,unit?150000:pilot?100000:500000);
   nullableBoolean(m.sealed);nullableBoolean(m.planned);if(typeof m.manifestFrozen!=='boolean')stop('WF2_SERVICE_METADATA');
   const totals=[...Object.values(calls),...Object.values(candidates),...Object.values(usage),m.estimatedReserveMicroUsd];
   if(m.countCompleteness==='STALE_OR_UNKNOWN'){
     if(m.campaignStatus!=='RECONCILE_REQUIRED'||totals.some(v=>v!==null)||m.sealed!==null||m.planned!==null||m.manifestFrozen)stop('WF2_SERVICE_METADATA');
   }else if(m.campaignStatus==='RECONCILE_REQUIRED'||totals.some(v=>v===null)||m.sealed===null||m.planned===null)stop('WF2_SERVICE_METADATA');
+  if(unit){const units=shape(m.units,['sealed','planned']);nullableInteger(units.sealed,4);nullableInteger(units.planned,4);if(m.countCompleteness==='STALE_OR_UNKNOWN'?units.sealed!==null||units.planned!==null:units.sealed===null||units.planned===null)stop('WF2_SERVICE_METADATA');if(m.campaignStatus==='COMPLETED'&&(usage.unknown!==0||units.sealed!==4||units.planned!==4||calls.deepseek!==4||calls.together!==13||candidates.deepseek!==0||candidates.together!==4||candidates.qualified!==4||candidates.quarantined!==0||m.sealed!==true||m.planned!==true||m.manifestFrozen!==true))stop('WF2_SERVICE_METADATA');}
   if(m.manifestFrozen&&m.campaignStatus!=='COMPLETED')stop('WF2_SERVICE_METADATA');return m as TeacherSafeMetadata;
 }
-function unknownMetadata(profileDigest?:string):TeacherSafeMetadata {return {...(profileDigest?{profile:pilotMetadataProfile()}:{}),campaignStatus:'RECONCILE_REQUIRED',countCompleteness:'STALE_OR_UNKNOWN',calls:{deepseek:null,together:null},
+function unknownMetadata(profileDigest?:string):TeacherSafeMetadata {return {...(profileDigest===WF2_UNIT_PROFILE_DIGEST?{units:{sealed:null,planned:null}}:{}),...(profileDigest?{profile:teacherMetadataProfile(profileDigest)}:{}),campaignStatus:'RECONCILE_REQUIRED',countCompleteness:'STALE_OR_UNKNOWN',calls:{deepseek:null,together:null},
   candidates:{deepseek:null,together:null,qualified:null,quarantined:null},sealed:null,planned:null,manifestFrozen:false,usage:{input:null,completion:null,unknown:null},estimatedReserveMicroUsd:null};}
 export function parseDshTeacherOperation(input:unknown):{version:1;requestId:string;operation:TeacherOperation} {
   const r=shape(copyJson(input),['version','requestId','operation']);if(r.version!==1)stop('WF2_SERVICE_VERSION');return {version:1,requestId:requestId(r.requestId),operation:oneOf(r.operation,OPERATIONS)};

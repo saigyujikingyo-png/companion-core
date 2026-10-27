@@ -9,9 +9,11 @@ import { fixedSlotBody,validateFixedSlotRequest } from './wf2-fixed-slots.ts';
 import { slotRequestBody,validateNamedDataRequest } from './wf2-named-data.ts';
 import { argumentsFailureCode,parseFailureCode } from './wf2-response-diagnostic.ts';
 import { pilotBody,validatePilotRequest,validatePilotEnvelopeExtras,WF2_PILOT_PROFILE_DIGEST } from './wf2-together-pilot.ts';
+import { unitBody,validateUnitRequest,WF2_UNIT_PROFILE_DIGEST } from './wf2-unit-pilot.ts';
 import type { ResponseDiagnostic } from './wf2-response-diagnostic.ts';
 
-export function providerBody(provider:Provider,payload:unknown,operation:Operation='candidate',policy:CampaignVersion='wf1-campaign/0.3',profileDigest?:string):string {
+export function providerBody(provider:Provider,payload:unknown,operation:Operation='candidate',policy:CampaignVersion='wf1-campaign/0.3',profileDigest?:string,unitIndex?:number|null):string {
+  if(policy==='wf1-campaign/0.8'){if(profileDigest!==WF2_UNIT_PROFILE_DIGEST||unitIndex===undefined)stop('WF2_UNIT_BINDING');return unitBody(provider,payload,operation,unitIndex);}
   if(policy==='wf1-campaign/0.7'){if(profileDigest!==undefined&&profileDigest!==WF2_PILOT_PROFILE_DIGEST)stop('WF2_PILOT_BINDING');return pilotBody(provider,payload,operation);}
   if(policy==='wf1-campaign/0.6')return profileDigest===undefined?fixedSlotBody(provider,payload,operation):slotRequestBody(provider,payload,operation,profileDigest);
   if(policy==='wf1-campaign/0.5')return strictDataBody(provider,payload,operation);
@@ -42,7 +44,7 @@ export class TeacherProvider {
   }
   get transportLane(){return this.#lane;}
   async submit(provider:Provider,body:string,port:ArtifactPort,signal:AbortSignal,authorizeSend:<T>(send:()=>T)=>T=send=>send(),contract?:{operation:Operation;binding:RequestBinding}):Promise<ProviderResult>{
-    if(contract)(contract.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'?validatePilotRequest:contract.binding.profileDigest!==undefined?validateNamedDataRequest:contract.binding.payloadCodec===undefined?validateStrictDataRequest:validateFixedSlotRequest)(provider,contract.operation,body,contract.binding);
+    if(contract)(contract.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract.binding.protocol==='UNIT_DEEPSEEK_JSON_FINAL_V1'?validateUnitRequest:contract.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'?validatePilotRequest:contract.binding.profileDigest!==undefined?validateNamedDataRequest:contract.binding.payloadCodec===undefined?validateStrictDataRequest:validateFixedSlotRequest)(provider,contract.operation,body,contract.binding);
     if(this.#busy)stop('WF1_IN_FLIGHT');if(!this.#keys[provider])stop('WF1_CREDENTIAL_UNAVAILABLE');if(Buffer.byteLength(body)>WF1.requestBytes)stop('WF1_REQUEST_BYTES');
     const start=this.#now();this.#busy=true;
     const empty:ProviderResult={outcome:'SUBMIT_UNKNOWN',httpStatus:null,failure:'TRANSPORT_UNKNOWN',transportLane:this.#lane,requestedModel:MODELS[provider],returnedModel:null,requestId:null,finishReason:null,
@@ -72,12 +74,12 @@ export class TeacherProvider {
       diagnostic.code='ENVELOPE_REJECTED';
       if(!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')??''))stop('WF1_RESPONSE');
       let parsedEnvelope;try{parsedEnvelope=parseJson(new TextDecoder('utf-8',{fatal:true}).decode(raw));}catch(error){diagnostic.code=parseFailureCode(error,'ENVELOPE');throw error;}
-      const envelope=fields(parsedEnvelope,['choices'],['id','object','created','model','usage','system_fingerprint','service_tier',...(contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'?['prompt','warnings']:[])]);
-      if(contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1')validatePilotEnvelopeExtras(envelope);
+      const envelope=fields(parsedEnvelope,['choices'],['id','object','created','model','usage','system_fingerprint','service_tier',...((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1')?['prompt','warnings']:[])]);
+      if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'))validatePilotEnvelopeExtras(envelope);
       base.usage=nativeUsage(envelope.usage);if(envelope.model!==undefined)base.returnedModel=text(envelope.model,256);if(envelope.id!==undefined)base.requestId=text(envelope.id,256);
       if(base.returnedModel!==MODELS[provider])stop('WF1_RETURNED_MODEL');
       if(!Array.isArray(envelope.choices)||envelope.choices.length!==1)stop('WF1_RESPONSE');
-      const choice=fields(envelope.choices[0],['index','message','finish_reason'],['logprobs',...(contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'?['text','seed','top_logprobs']:[])]);if(contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1')validatePilotEnvelopeExtras({},choice);if(choice.index!==0)stop('WF1_RESPONSE');
+      const choice=fields(envelope.choices[0],['index','message','finish_reason'],['logprobs',...((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1')?['text','seed','top_logprobs']:[])]);if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'))validatePilotEnvelopeExtras({},choice);if(choice.index!==0)stop('WF1_RESPONSE');
       const message=fields(choice.message,['role','content'],['reasoning','reasoning_content','refusal','tool_calls','annotations','function_call']);if(message.role!=='assistant')stop('WF1_RESPONSE');
       const reasoning=message[provider==='deepseek'?'reasoning_content':'reasoning'];
       if(reasoning!==undefined&&reasoning!==null){text(reasoning,WF1.responseBytes,0);if(reasoning!==''){base.reasoningPresent=true;base.reasoningRef=put('native-reasoning',reasoning as string);}}
@@ -92,7 +94,7 @@ export class TeacherProvider {
       base.outcome=base.finishReason==='stop'&&base.contentPresent&&!pending&&!signal.aborted?'COMPLETED':'INCOMPLETE_OUTPUT';
       base.failure=base.outcome==='COMPLETED'?null:'INCOMPLETE_FINAL';
       base.responseFailureCode=base.outcome==='COMPLETED'?'NONE':'INCOMPLETE_FINAL';
-      if(contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'&&base.outcome==='COMPLETED'){
+      if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_DEEPSEEK_JSON_FINAL_V1')&&base.outcome==='COMPLETED'){
         let value;try{value=parseJson(message.content as string);}catch(error){diagnostic.code=argumentsFailureCode(error,message.content as string,'FINAL');throw error;}
         if(value===null||typeof value!=='object'||Array.isArray(value)){diagnostic.code='FINAL_ROOT_NOT_OBJECT';stop('WF2_PILOT_FINAL_ROOT');}
       }

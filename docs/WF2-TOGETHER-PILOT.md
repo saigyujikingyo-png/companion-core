@@ -1,5 +1,7 @@
 # WF2 .7 Together first-four research pilot
 
+Current failure-output versions are specified in [WF2 failure diagnostics](WF2-FAILURE-DIAGNOSTICS.md). The transport versions below retain the earlier protocol snapshot; provider requests and profile semantics are unchanged.
+
 This is a new, separately admitted `wf1-campaign/0.7` experiment. The previous DeepSeek stable named-data .6 actual attempt stopped at its first seal: one DeepSeek call, zero Together calls, native-invalid arguments, no seal/plan/qualified data. That negative result and every earlier consumed campaign remain retained. Nothing is repaired, retried, regraded or automatically routed to this pilot. The old .3/.4/.5 and two .6 profiles retain their request semantics and limits.
 
 ## Fixed scope and provider protocol

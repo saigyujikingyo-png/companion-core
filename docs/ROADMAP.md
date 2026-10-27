@@ -1,6 +1,6 @@
 # 实施与持续开发路线
 
-**本批 WF2：** [教师控制与小批验收](WF2-VALIDATION.md)分列旧阴性、公开检查与代码证据；first-four 仅以4 unique（3 train /1 dev）`PILOT_ONLY`为上限，余12 families /8 pairs `NOT_RUN`。最终 medium 已停止、合格0，工程 `PARTIAL`。下一批先做无正文阶段/拒绝诊断，再研究小单元生成/任务拆分；独立确定性标签须单列来源与新协议，均非本批已实现。
+**本批 WF2：** [失败诊断](WF2-FAILURE-DIAGNOSTICS.md)已定位旧 medium 的 `WF1_PAIR_BINDING`；[跨模型四单元 canary](WF2-UNIT-PILOT.md)已完成真实运行及冷验。4 seal/4 plan通过，T11/DS1后因第二候选未过精确验算停止，记录1条合格、1条隔离，冻结数据集仍为0。旧实验保持原结果。下一独立切片将实现合格候选的新清单准入、逐条失败隔离、生成/审查双队列及真实吞吐计量；本 canary 不代表256GB首训数据池、Student训练或规模生产已交付。
 
 **当前 IF5/IF6：** [架构进度与合并范围](AEMC-DEVELOPMENT-STATUS.md)记录18项目标的实际层次；已新增 [durable consumer→检索桥](DURABLE-RETRIEVAL.md)及[外锚容量失败处理](AUTHORITY-CAPACITY.md)。[当前组合874/874、typecheck、独立终审及成本测量](AEMC-INFRA-EVIDENCE-IF6.md)已通过，IF4以下证据保留历史快照；AR1质量、生产custody与训练准入仍未完成。
 

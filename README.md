@@ -1,6 +1,6 @@
 # Companion Core
 
-[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
+[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)已补齐失败诊断，并实现 [跨模型四单元 canary](docs/WF2-UNIT-PILOT.md)。真实 .8 完成4个密封单元和4个计划单元，调用 Together 11次、DeepSeek 1次后因第二候选未通过精确验算停止：已记录1条合格候选、1条隔离候选，冻结数据集交付仍为0。978项本地测试及独立审查通过；旧失败记录保留，Student 推理/训练未执行，教学数据保持私有。
 
 [当前架构进度与合并范围](docs/AEMC-DEVELOPMENT-STATUS.md)：IF5 已接通持久消费者到当前检索/交付，IF6 已补外锚容量准入与完成预算。最终组合已通过 [874/874、类型检查、两位独立审查及成本测量](docs/AEMC-INFRA-EVIDENCE-IF6.md)。API 见 [durable retrieval](docs/DURABLE-RETRIEVAL.md) 和 [authority capacity](docs/AUTHORITY-CAPACITY.md)；完整目标仍 IN_PROGRESS，未授予训练准入。
 
