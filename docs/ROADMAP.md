@@ -2,9 +2,9 @@
 
 **本批 WF2：** [教师控制与小批验收](WF2-VALIDATION.md)分列旧阴性、公开检查与代码证据；first-four 仅以4 unique（3 train /1 dev）`PILOT_ONLY`为上限，余12 families /8 pairs `NOT_RUN`。最终 medium 已停止、合格0，工程 `PARTIAL`。下一批先做无正文阶段/拒绝诊断，再研究小单元生成/任务拆分；独立确定性标签须单列来源与新协议，均非本批已实现。
 
-**当前 IF7：** 原 `06fc8b2` 冻结候选完成独立893/893与typecheck后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker984/984与typecheck通过，形成独立PR候选。精确head的跨平台CI与合并状态以PR实际记录为准，不复用IF0–IF6的 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) CI。[当前证据](AEMC-INFRA-EVIDENCE-IF7.md)区分各层；[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。IF7只观察generation、Store image、Safety与authority receipts，不引入GC、rollover或可写次数预测；本轮未部署或启动训练。
+**当前 IF7 / IF8：** IF7 的 WF2 整合组合实际984/984与typecheck、独立审查及精确head14/14跨平台CI通过后，已由 [PR #2](https://github.com/saigyujikingyo-png/companion-core/pull/2) 合并于 `4e0892c`，合并后7/7 CI通过。[IF8](RECEIPT-ROLLOVER.md)在独立树实现schema4同库receipt segment rollover：完整原JSON无损保留、永久幂等PK不清理，同guard原子repack复用页面，UNKNOWN/额度/反馈/撤销保持。[新证据](AEMC-INFRA-EVIDENCE-IF8.md)单列作者、独立审查、whole及尚未取得的IF8提交CI；[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。当前无物理authority替换、GC或可写次数预测；本轮未部署或启动训练。
 
-后续依赖顺序为容量运维协议（保留幂等、UNKNOWN与已消费额度）→ 生产authority/custody与恢复准入 → AR1冻结质量/总成本实验。已有compaction只重建新generation，不释放Store ingress或authority receipts；AR1、生产接线和训练准入仍开放。以下 IF0–IF6 与更早切片保留各自历史验证范围。
+后续依赖顺序为IF8独立闭环及容量边界治理 → 生产authority/custody与恢复准入 → AR1冻结质量/总成本实验。receipt压缩不解决永久PK/legacy、Store image、Safety账本的长期增长，已有compaction只重建新generation。[I17贝叶斯重构 → 逐claim元记忆 → 可选查证](BAYESIAN-RECONSTRUCTION-DESIGN.md)作为DESIGN_ONLY路线纳入：A数学合同可并行，B有界模块在IF8闭环后，C冻结家族/时间切分实验另行执行；依赖I06接口与评测合同，不必等全部排序算法。AR1、生产接线和训练准入仍开放。以下 IF0–IF7 与更早切片保留各自历史验证范围。
 
 [历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
 
