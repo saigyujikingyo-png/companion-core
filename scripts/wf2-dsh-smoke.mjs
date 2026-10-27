@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn,spawnSync } from 'node:child_process';
 import { fileURLToPath,pathToFileURL } from 'node:url';
+import { nativeSmokeEnvironment,checkNativeVersionProbe } from './wf2-dsh-smoke-checks.mjs';
 import { canonical,hash,parseJson,shape } from '../src/wf1-json.ts';
 import { parseDshTeacherOperation,validateTeacherMetadata,validateTeacherReply } from '../src/wf2-teacher-service.ts';
 
@@ -18,9 +19,9 @@ function fresh(file,value){const fd=fs.openSync(file,'wx',0o600);try{fs.writeFil
 fresh(path.join(profile,'package.json'),{name:'dsh-profile-wf2-runtime',private:true,dependencies:{},dsh:{profile:{bundles:[]}}});
 fresh(path.join(profile,'cordis.patch.yml'),JSON.stringify([{insert:[{id:'wf2-teacher-control',name:pathToFileURL(plugin).href}]}]));
 fresh(path.join(slot,'launch.once'),'{"synthetic":true,"automaticRetry":false}');
-const env={};for(const key of ['SystemRoot','WINDIR','COMSPEC','TEMP','TMP','PATHEXT','PROCESSOR_ARCHITECTURE','NUMBER_OF_PROCESSORS'])if(process.env[key]!==undefined)env[key]=process.env[key];
-Object.assign(env,{DSH_HOME:home,DSH_TELEMETRY_DISABLED:'1',DSH_PRIMARY_RUNTIME:'',DSH_OFFICE_SIDECAR:'',USERPROFILE:slot,HOME:slot,PATH:process.platform==='win32'?path.join(process.env.SystemRoot||'C:\\Windows','System32'):'/usr/bin:/bin'});
-const version=spawnSync(executable,['--version'],{encoding:'utf8',timeout:10000,maxBuffer:4096,env,cwd:slot,windowsHide:true});if(version.status!==0||!version.stdout.includes('0.2.1'))throw Error('WF2_RUNTIME_VERSION');
+const env=nativeSmokeEnvironment(process.env,process.platform,slot,home);
+const version=spawnSync(executable,['--version'],{encoding:'utf8',timeout:10000,maxBuffer:4096,env,cwd:slot,windowsHide:true}),versionProbe=checkNativeVersionProbe(version);
+if(!versionProbe.ok){const diagnostic={...versionProbe,stage:'BEFORE_WORKER_AND_SCHEDULER',workerStarted:false,schedulerStarted:false,providerApiCalls:0};fresh(path.join(slot,'version-probe.json'),diagnostic);process.stderr.write(JSON.stringify(diagnostic)+'\n');throw Error('WF2_RUNTIME_VERSION');}
 const capability=crypto.randomBytes(32).toString('hex');
 let worker,dsh,failed=false,killed=false,workerClosed=false,dshClosed=false,workerExit=null,dshExit=null,dispatches=0,settled=false,completionAcknowledged=false;
 const children=[];
