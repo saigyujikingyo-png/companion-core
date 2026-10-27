@@ -294,7 +294,8 @@ for (const point of ['prepared','record-published','finalized'] as AnchoredFault
     const f=fixture(t);f.v.claim('native','payload');f.v.close();
     const result=child(`let armed=false;const v=AnchoredVault.open({...input.config,authority,keys},2,{fault:p=>{if(armed&&p===input.point)process.exit(47);}});v.claim('child-native','payload');armed=true;v.reserve('child-native');`,
       {authority:f.authorityConfig,keys:wireKeys(f.keys),config:{directory:f.config.directory,vaultId:f.config.vaultId,identity:f.config.identity,storageDomain:f.config.storageDomain},point});
-    assert.equal(result.status,47,result.stderr);
+    assert.equal(result.status,47,JSON.stringify({error:result.error?{message:result.error.message,code:'code' in result.error?result.error.code:null}:null,
+      signal:result.signal,status:result.status,stderr:result.stderr}));
     const row=f.authority.inspect(f.config.vaultId)!;
     if(row.status==='PREPARED')AnchoredVault.reconcile({authority:f.authority,vaultId:f.config.vaultId,operationId:row.pending!.operationId,keys:f.keys,maxCalls:2});
     const v=AnchoredVault.open(f.config,2);t.after(()=>v.close());assert.equal(v.reserved,1);
