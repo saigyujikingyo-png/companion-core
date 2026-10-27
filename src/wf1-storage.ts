@@ -18,11 +18,12 @@ function writeNew(path:string,bytes:Uint8Array|string):void {const fd=openSync(p
 function atomic(path:string,bytes:string):void {const temp=path+'.'+randomUUID()+'.pending';writeNew(temp,bytes);renameSync(temp,path);}
 export type ArtifactPort={put:(kind:string,bytes:string|Uint8Array)=>ArtifactRef;read:(ref:ArtifactRef)=>Buffer};
 /** Only the trusted worker obtains both capabilities. No public role-parameter decrypt method. */
-export function createArtifactBroker(root:string,campaignId:string,key:Uint8Array) {
+export function createArtifactBroker(root:string,campaignId:string,key:Uint8Array,storageGuard?:()=>void) {
   root=privateRoot(root);if(key.length!==32)stop('WF1_KEY');const ownKey=Buffer.from(key);
   const port=(partition:'custody'|'train'):ArtifactPort=>{
     const derived=Buffer.from(hkdfSync('sha256',ownKey,campaignId,'wf1-'+partition,32));
     return Object.freeze({put(kind:string,bytes:string|Uint8Array):ArtifactRef{
+      storageGuard?.();
       text(kind,64);const plain=typeof bytes==='string'?Buffer.from(bytes,'utf8'):Buffer.from(bytes);if(plain.length===0||plain.length>WF1.artifactBytes)stop('WF1_ARTIFACT_LIMIT');
       let total=0;for(const name of readdirSync(root)){const s=lstatSync(join(root,name));if(s.isSymbolicLink())stop('WF1_PATH');if(s.isFile())total+=s.size;}
       if(total+plain.length+28>WF1.runBytes)stop('WF1_DISK_LIMIT');
@@ -30,6 +31,7 @@ export function createArtifactBroker(root:string,campaignId:string,key:Uint8Arra
       const encrypted=Buffer.concat([nonce,cipher.update(plain),cipher.final(),cipher.getAuthTag()]);const ref={id,kind,partition,bytes:encrypted.length,digest:hash(encrypted)};
       writeNew(join(root,partition+'-'+id+'.bin'),encrypted);return ref;
     },read(input:ArtifactRef):Buffer{
+      storageGuard?.();
       const ref=artifactRef(copyJson(input));if(ref.partition!==partition)stop('WF1_ROLE_ACCESS');const path=join(root,partition+'-'+ref.id+'.bin');file(path,WF1.artifactBytes+28);
       const encrypted=readFileSync(path);if(encrypted.length!==ref.bytes||hash(encrypted)!==ref.digest)stop('WF1_ARTIFACT_CHANGED');
       try{const decipher=createDecipheriv('aes-256-gcm',derived,encrypted.subarray(0,12));decipher.setAAD(Buffer.from(canonical({campaignId,partition,id:ref.id,kind:ref.kind})));decipher.setAuthTag(encrypted.subarray(-16));return Buffer.concat([decipher.update(encrypted.subarray(12,-16)),decipher.final()]);}
@@ -68,7 +70,7 @@ export class CampaignLedger {
     if(key.length!==32)stop('WF1_KEY');let lock:DatabaseSync|undefined,db:DatabaseSync|undefined;
     const secret=Buffer.from(hkdfSync('sha256',key,'wf1-ledger','chain',32));
     try{
-      const owner=join(root,'wf1-owner.sqlite'),path=join(root,'wf1-ledger.sqlite');try{writeNew(owner,'');}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}file(owner,4096);
+      const owner=join(root,'wf1-owner.sqlite'),path=join(root,'wf1-ledger.sqlite');if(!readonly)try{writeNew(owner,'');}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}file(owner,4096);
       lock=new DatabaseSync(owner,{timeout:0});try{lock.exec('PRAGMA trusted_schema=OFF; BEGIN IMMEDIATE');}catch{return stop('WF1_OWNER_BUSY');}
       if(initial)writeNew(path,'');file(path,WF1.runBytes);for(const suffix of ['-wal','-shm'])if(existsSync(path+suffix))stop('WF1_PATH');
       if(readonly&&existsSync(path+'-journal')&&statSync(path+'-journal').size>0)stop('WF1_HOT_JOURNAL_RECONCILE');

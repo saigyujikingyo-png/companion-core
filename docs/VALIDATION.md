@@ -1,5 +1,7 @@
 # 当前验证状态
 
+**WF2 当前入口：** [教师控制与小批验证记录](WF2-VALIDATION.md)分列源码/专项、本机721/722失败与定点修复、Windows rc3原生、公开探针与真实教师阴性。过期 high 准备未运行；HIGH2 和最终 medium 均已停止、合格0，工程 `PARTIAL`。跨平台结论以对应提交的 Actions 为准，以下历史快照保持原范围。
+
 **2026-10-26，本批源码冻结 `05cbeeac9411af87081282ca43223d767eca09f3`。** 一次normal-user `npm run check` exit0：strict TypeScript、300/300 tests（0fail/skip）、七步合成回放、realModelCalls0；独立Astra63项及七runtime hash一致。[可移植证据](evidence/NATIVE-ACCEPTANCE.md#source-and-ci)记录source/result/log内容标识；这里未宣称远端三平台CI已通过。
 
 [实际窗口原生接线](evidence/NATIVE-ACCEPTANCE.md#window-control) **WINDOW_CONTROL_WIRING_PASS**：完整Git tree snapshot、官方SDK、真实synthetic Node child；1条合成anchor/1次synthetic provider/1个nativecommit/completed ACK，realAPI0/noDPAPI。beforehuman拒绝calls0；grant60实际remaining约59994ms，新的commandId重复grant拒绝且expiry/generation不变；原输入保守观测+31009ms时observed=false、显式window/主动资格仍true。off/pause/resume不恢复window且calls仍1；child和outer均clean/noForce/owned0，child residual0。它不是自然主动触发、UI体验、M2恢复或本批生产部署PASS。

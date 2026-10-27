@@ -1,4 +1,5 @@
 /** WF1 is teacher calibration. No Student inference, training or public data publication. */
+import type { ResponseFailureCode } from './wf2-response-diagnostic.ts';
 export type Json = null|boolean|number|string|Json[]|{[key:string]:Json};
 export type Provider = 'deepseek'|'together';
 export type Operation = 'seal'|'plan'|'rubric'|'candidate'|'review'|'comparison_candidate'|'comparison_review';
@@ -8,17 +9,21 @@ export type Authority = { schemaVersion:'wf1-host/1'; campaignId:string; revisio
   status:'ACTIVE'|'PAUSED'|'REVOKED'; expiresAt:number; head:string|null;
   rights:{seal:boolean;coordinate:boolean;generate:boolean;review:boolean;retain:boolean} };
 export type Price = { snapshotId:string; inputMicroUsdPerMillion:number; completionMicroUsdPerMillion:number };
-export type CampaignSpec = { schemaVersion:'wf1-campaign/0.3'; id:string; createdAt:number; expiresAt:number;
-  sourceDigest:string; profileDigest:string; objectiveDigest:string; prices:Record<Provider,Price> };
+export type CampaignVersion='wf1-campaign/0.3'|'wf1-campaign/0.4'|'wf1-campaign/0.5'|'wf1-campaign/0.6'|'wf1-campaign/0.7';
+export type CampaignSpec = { id:string; createdAt:number; expiresAt:number;
+  sourceDigest:string; profileDigest:string; objectiveDigest:string; prices:Record<Provider,Price> } &
+  ({schemaVersion:'wf1-campaign/0.3'|'wf1-campaign/0.4';storageBindingDigest?:never}|{schemaVersion:'wf1-campaign/0.5'|'wf1-campaign/0.6'|'wf1-campaign/0.7';storageBindingDigest:string});
 export type ArtifactRef = { id:string; kind:string; partition:'custody'|'train'; bytes:number; digest:string };
 export type Usage = { input:number; completion:number; reasoning:number|null };
 export type ProviderResult = { outcome:Outcome; requestedModel:string; returnedModel:string|null; requestId:string|null;
   transportLane:'SYNTHETIC_FIXTURE'|'NATIVE_FETCH';
   httpStatus:number|null; failure:'TRANSPORT_UNKNOWN'|'HTTP_STATUS'|'RESPONSE_LIMIT'|'RESPONSE_PROTOCOL'|'MODEL_IDENTITY'|'INCOMPLETE_FINAL'|null;
   finishReason:string|null; reasoningPresent:boolean; contentPresent:boolean; usage:Usage|null;
-  rawRef:ArtifactRef|null; reasoningRef:ArtifactRef|null; finalRef:ArtifactRef|null; elapsedMs:number };
+  rawRef:ArtifactRef|null; reasoningRef:ArtifactRef|null; finalRef:ArtifactRef|null; elapsedMs:number;
+  payloadOrigin?:'STRICT_TOOL_ARGUMENTS'|'NAMED_TOOL_ARGUMENTS'|'NATIVE_FINAL';argumentsRef?:ArtifactRef|null;responseFailureCode?:ResponseFailureCode };
+export type RequestBinding={protocol:'DEEPSEEK_STRICT_DATA_ARGS_V1'|'DEEPSEEK_NAMED_DATA_ARGS_V1'|'NATIVE_JSON_FINAL_V1'|'TOGETHER_SCHEMA_FINAL_V1';endpoint:string;toolName:string|null;schemaDigest:string;payloadCodec?:'WF2_FIXED_SLOTS_V1'|'WF2_CANONICAL_V1';profileDigest?:string};
 export type Attempt = { id:string; operation:Operation; provider:Provider; phase:Phase; requestCommitment:string;
-  requestRef:ArtifactRef;
+  requestRef:ArtifactRef;requestBinding?:RequestBinding;
   familyId:string|null; startedAt:number; deadline:number; inputReserved:number; completionReserved:number;
   estimatedMicroUsdReserved:number; outcome:Outcome|null; result:ProviderResult|null };
 export type FormalSpec = { verifier:'rational.evaluate.v1'|'json.pointer.v1'; input:Json };

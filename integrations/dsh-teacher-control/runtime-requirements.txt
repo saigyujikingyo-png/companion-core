@@ -1,0 +1,8 @@
+# Official native DSH carrier, distinct from installed Desktop 0.2.1-rc.3.
+# One matching wheel is selected by pip. No dependency or optional payload installs.
+deepseek-harness-runtime-bin==0.2.1rc2 \
+    --hash=sha256:d38c18f5117859feedaaa791a0eea37b8644bc187118e7e6f3afa231a5381cb7 \
+    --hash=sha256:0a0a4eb85a22cd9339972e6a5ced77a27ec791353a5b220e3e10b8cdbbdeca39 \
+    --hash=sha256:96a173abd14141d5328a78791b69729cbfe22fa3e9daf1dc2600d0daa4d6bb28 \
+    --hash=sha256:80614eee24916ce97d692baf8aed3ba146ed00fc2155d266cb0ede98d9354139 \
+    --hash=sha256:71ed869e3e9a0e3ea398521730889d2d7e154767834165f1553755818e3f2a78

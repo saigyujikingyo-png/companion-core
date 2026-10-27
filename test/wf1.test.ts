@@ -131,6 +131,8 @@ test('crash after consume is retained on cold read and cannot be replayed or res
 test('valid-prefix ledger rollback is refused against the independent host high-water',()=>{
   const f=fixture(),m=mockProvider(),c=campaign(f,m.provider),old=readFileSync(join(f.root,'wf1-ledger.sqlite'));
   c.reserveAttempt('seal',providerBody('deepseek',{}));c.close();const restored=join(f.base,'restored');mkdirSync(restored);writeFileSync(join(restored,'wf1-ledger.sqlite'),old);
+  // A valid snapshot includes the closed owner sidecar; readonly inspection must not create one.
+  copyFileSync(join(f.root,'wf1-owner.sqlite'),join(restored,'wf1-owner.sqlite'));
   assert.throws(()=>CampaignLedger.inspect(restored,f.authorityPath,f.spec.id,f.key,()=>f.now),error('WF1_HEAD_MISMATCH'));
 });
 test('half commit fences without automatically advancing the external head',()=>{

@@ -1,5 +1,7 @@
 # Companion Core
 
+[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
+
 [WF1 私有教师校准](docs/WF1-CAMPAIGN.md)已实现独立有界 worker、持久调用消费、加密 custody、形式目标重算与 train/dev 评审的分账协议；当前源码仅经合成验证，真实执行另行准入。模型评审不等于形式证明或许可认证，Student 推理/训练仍 `NOT_RUN`，数据公开仍 `NOT_AUTHORIZED`。
 
 [WF0 教学 metadata 合同](docs/WF0-TEACHING-CONTRACT.md)已实现有界版本化声明验证、同源家族/私有继承与切分检查及公开 metadata 投影；始终 `DECLARATION_VALID_ONLY / NOT_AUTHORIZED / NOT_AUTHENTICATED / NOT_EVALUATED`，不生成教学内容、不认证许可或真实推理，不接 provider、trainer 或 Store。[Together gpt-oss 教师补充](docs/GPT-OSS-TEACHER-RESEARCH.md)是 API 执行前的 **DESIGN_ONLY** 研究快照，未调用或验证质量。

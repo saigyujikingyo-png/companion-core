@@ -1,0 +1,42 @@
+name: dsh-teacher-native-smoke
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native-scheduler:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: X64
+          - os: ubuntu-latest
+            arch: X64
+          - os: macos-15
+            arch: ARM64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.16.0'
+      - name: Confirm runner architecture
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -ne '${{ matrix.arch }}') { throw 'Unexpected runner architecture' }
+      - name: Install pinned native runtime only
+        shell: pwsh
+        run: |
+          $runtimeVenv = Join-Path $env:RUNNER_TEMP 'wf2-runtime-venv'
+          python -m venv $runtimeVenv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $runtimeBin = Join-Path $runtimeVenv $(if ($IsWindows) { 'Scripts' } else { 'bin' })
+          $runtimePython = Join-Path $runtimeBin $(if ($IsWindows) { 'python.exe' } else { 'python' })
+          & $runtimePython -m pip install --no-deps --only-binary=:all: --require-hashes -r integrations/dsh-teacher-control/runtime-requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $runtimeBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Run real DSH scheduler against synthetic private service
+        run: node scripts/wf2-dsh-smoke.mjs

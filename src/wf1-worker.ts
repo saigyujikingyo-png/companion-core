@@ -8,7 +8,7 @@ import { TeachingCampaign } from './wf1-campaign.ts';
 import { TeacherProvider } from './wf1-provider.ts';
 import { validateSeal } from './wf1-contract.ts';
 
-export const BUILD_FILES=['wf1-types.ts','wf1-json.ts','wf1-contract.ts','wf1-verifier.ts','wf1-storage.ts','wf1-provider.ts','wf1-campaign.ts','wf1-worker.ts','runtime.ts','validation.ts'] as const;
+export const BUILD_FILES=['wf1-types.ts','wf1-json.ts','wf1-contract.ts','wf1-verifier.ts','wf1-storage.ts','wf1-provider.ts','wf1-campaign.ts','wf1-worker.ts','wf2-teacher-policy.ts','wf2-strict-data.ts','wf2-fixed-slots.ts','wf2-named-data.ts','wf2-together-pilot.ts','wf2-response-diagnostic.ts','wf2-training-root.ts','runtime.ts','validation.ts'] as const;
 export function workerBuildDigest():string {return hash(Buffer.concat(BUILD_FILES.flatMap(name=>[Buffer.from(name+'\0'),readFileSync(new URL(name,import.meta.url))])));}
 export function describeWorker(){return {version:'wf1-worker-description/1',buildDigest:workerBuildDigest(),profileDigest:PROFILE_DIGEST,
   command:'node src/wf1-worker.ts',stdinFields:['version','action','runtimeRoot','authorityPath','expectedHead','spec','custodyKeyBase64','objective','credentials'],
@@ -20,6 +20,7 @@ export function describeWorker(){return {version:'wf1-worker-description/1',buil
 export async function workerMain(raw:string):Promise<unknown>{
   const b=shape(parseJson(raw),['version','action','runtimeRoot','authorityPath','expectedHead','spec','custodyKeyBase64','objective','credentials']);
   if(b.version!==1)stop('WF1_VERSION');const action=oneOf(b.action,['prepare','run','inspect','pause','revoke']),spec=validateSpec(b.spec);
+  if(spec.schemaVersion!=='wf1-campaign/0.3')stop('WF1_VERSION');
   if(spec.sourceDigest!==workerBuildDigest())stop('WF1_BUILD_MISMATCH');
   const root=privateRoot(text(b.runtimeRoot,4096)),authorityPath=text(b.authorityPath,4096);privateRoot(dirname(authorityPath));
   const rel=relative(root,authorityPath);if(!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+sep))stop('WF1_AUTHORITY_PATH');

@@ -1,5 +1,7 @@
 # 实施与持续开发路线
 
+**本批 WF2：** [教师控制与小批验收](WF2-VALIDATION.md)分列旧阴性、公开检查与代码证据；first-four 仅以4 unique（3 train /1 dev）`PILOT_ONLY`为上限，余12 families /8 pairs `NOT_RUN`。最终 medium 已停止、合格0，工程 `PARTIAL`。下一批先做无正文阶段/拒绝诊断，再研究小单元生成/任务拆分；独立确定性标签须单列来源与新协议，均非本批已实现。
+
 **本批 WF1：** [独立私有教师校准 worker](WF1-CAMPAIGN.md)实现有限 campaign、host/CAS fencing、密封 custody、同源排除与形式验证、train/dev 模型评审及私有 manifest；实际 API/用量按单独冻结运行回执验收，不以合成完整链替代。Student 推理/训练 `NOT_RUN`，密封评测反馈不参与调参，64-family 扩批及公开发布未准入。
 
 **本批 WF0：** [教学 metadata 合同](WF0-TEACHING-CONTRACT.md)实现独立有界声明 validator、完整已提供家族/已知指纹分组、私有继承、sealed split 隔离与公开 metadata 导出。仅 `DECLARATION_VALID_ONLY`，执行 `NOT_AUTHORIZED`、权限真实性 `NOT_AUTHENTICATED`、语义/质量 `NOT_EVALUATED`；不生成材料、不接 API/训练/Store，实际教学及完整来源认证仍待独立准入。[Together gpt-oss 教师研究](GPT-OSS-TEACHER-RESEARCH.md)为调用前 **DESIGN_ONLY** 快照，不改变既有 WF0 或消耗旧请求额度。

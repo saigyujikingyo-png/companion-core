@@ -2,13 +2,19 @@ import { canonical,copyJson,digest,hash,id,integer,list,oneOf,shape,stop,text,un
 import { WF1 } from './wf1-types.ts';
 import type { ArtifactRef,Authority,CampaignSpec,Family,Plan,Seal } from './wf1-types.ts';
 import { validateFormal } from './wf1-verifier.ts';
+import { WF2_TEACHER_PROFILE_DIGEST } from './wf2-teacher-policy.ts';
+import { WF2_STRICT_PROFILE_DIGEST } from './wf2-strict-data.ts';
+import { WF2_SLOTS_PROFILE_DIGEST } from './wf2-fixed-slots.ts';
+import { slotProfile } from './wf2-named-data.ts';
+import { WF2_PILOT_PROFILE_DIGEST } from './wf2-together-pilot.ts';
 
 export const PROFILE_DIGEST=hash(canonical(WF1));
 export function validateSpec(input:unknown):CampaignSpec {
-  const s=shape(copyJson(input),['schemaVersion','id','createdAt','expiresAt','sourceDigest','profileDigest','objectiveDigest','prices']);
-  if(s.schemaVersion!=='wf1-campaign/0.3')stop('WF1_VERSION');id(s.id);integer(s.createdAt);integer(s.expiresAt);
+  const own=copyJson(input),version=own!==null&&typeof own==='object'&&!Array.isArray(own)?own.schemaVersion:undefined;
+  const s=shape(own,['schemaVersion','id','createdAt','expiresAt','sourceDigest','profileDigest','objectiveDigest','prices',...(version==='wf1-campaign/0.5'||version==='wf1-campaign/0.6'||version==='wf1-campaign/0.7'?['storageBindingDigest']:[])]);
+  oneOf(s.schemaVersion,['wf1-campaign/0.3','wf1-campaign/0.4','wf1-campaign/0.5','wf1-campaign/0.6','wf1-campaign/0.7']);id(s.id);integer(s.createdAt);integer(s.expiresAt);if(s.schemaVersion==='wf1-campaign/0.5'||s.schemaVersion==='wf1-campaign/0.6'||s.schemaVersion==='wf1-campaign/0.7')digest(s.storageBindingDigest);
   if(Number(s.expiresAt)<=Number(s.createdAt)||Number(s.expiresAt)-Number(s.createdAt)>WF1.campaignMs)stop('WF1_TIME');
-  digest(s.sourceDigest);digest(s.objectiveDigest);if(s.profileDigest!==PROFILE_DIGEST)stop('WF1_PROFILE');
+  digest(s.sourceDigest);digest(s.objectiveDigest);if(s.schemaVersion==='wf1-campaign/0.7'){if(s.profileDigest!==WF2_PILOT_PROFILE_DIGEST)stop('WF1_PROFILE');}else if(s.schemaVersion==='wf1-campaign/0.6')slotProfile(digest(s.profileDigest));else if(s.profileDigest!==(s.schemaVersion==='wf1-campaign/0.5'?WF2_STRICT_PROFILE_DIGEST:s.schemaVersion==='wf1-campaign/0.4'?WF2_TEACHER_PROFILE_DIGEST:PROFILE_DIGEST))stop('WF1_PROFILE');
   const prices=shape(s.prices,['deepseek','together']);for(const provider of ['deepseek','together']){const p=shape(prices[provider],['snapshotId','inputMicroUsdPerMillion','completionMicroUsdPerMillion']);id(p.snapshotId);integer(p.inputMicroUsdPerMillion,1,1_000_000_000);integer(p.completionMicroUsdPerMillion,1,1_000_000_000);}
   return s as CampaignSpec;
 }
