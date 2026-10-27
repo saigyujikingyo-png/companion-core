@@ -5,6 +5,9 @@ import { SCHEMA_V2_ADDITION, SCHEMA_V2_SQL } from './schema-v2.ts';
 import { DurableFanout, validateFanoutImage } from './durable-fanout.ts';
 import { fail } from './validation.ts';
 import { FANOUT_LIMITS } from './fanout-types.ts';
+import {MAX_IMAGE} from './durable-codec.ts';
+import {freezeCapacity} from './capacity-types.ts';
+import type {MemoryImageCapacity} from './capacity-types.ts';
 
 export type MemorySchema = 1 | 2;
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -46,6 +49,21 @@ function openImage(image:Uint8Array):DatabaseSync{
 export function inspectMemoryImage(image:Uint8Array,expected:MemorySchema):{schema:MemorySchema;revocationHighWater:number}{
   assertSchema(expected);
   const db=openImage(image);try{return inspectMemoryDatabase(db,expected);}finally{db.close();}
+}
+/** Counts retained storage in a disposable validated RAM image, without boot or serialization. */
+export function inspectMemoryImageCapacity(image:Uint8Array,expected:MemorySchema):MemoryImageCapacity{
+  assertSchema(expected);const db=openImage(image);
+  try{
+    const checked=inspectMemoryDatabase(db,expected);
+    const count=(table:string)=>db.prepare(`SELECT count(*) AS n FROM ${table}`).get()!.n as number;
+    const rows={meta:count('meta'),scopes:count('scopes'),nodes:count('nodes'),ingress:count('ingress'),dependencies:count('dependencies'),
+      jobs:count('jobs'),outbox:count('outbox'),artifacts:count('artifacts'),revocations:count('revocations'),memory_fts:count('memory_fts')};
+    const state=expected===2?db.prepare('SELECT head_seq,floor_seq FROM fanout_state WHERE singleton=1').get()!:null;
+    return freezeCapacity({...checked,bytes:image.byteLength,limitBytes:MAX_IMAGE,rows,fanout:state?{applicable:true,
+      counts:{batches:count('fanout_batches'),items:count('fanout_items'),consumers:count('fanout_consumers'),projectionRows:count('fanout_projection'),
+        projectionJsonUtf8Bytes:db.prepare('SELECT coalesce(sum(length(CAST(metadata AS BLOB))),0) AS n FROM fanout_projection').get()!.n as number,
+        headSequence:state.head_seq as number,floorSequence:state.floor_seq as number},limits:{...FANOUT_LIMITS}}:{applicable:false,counts:null,limits:null}});
+  }finally{db.close();}
 }
 export const MEMORY_MIGRATIONS=Object.freeze([{id:'memory-1-to-2',from:1 as const,to:2 as const}]);
 /** Atomic migration of a private RAM copy. No source file, image byte, lease,

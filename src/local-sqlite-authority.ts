@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { ANCHORED_FORMAT, INCREMENTAL_FORMAT, boundSqlite, canonicalDirectory, disjoint, id, identityOf, readBounded, same, validateHead, writeNew } from './anchored-codec.ts';
@@ -6,6 +6,8 @@ import type { VaultHead } from './anchored-codec.ts';
 import { FORMAT, record, sha, validateHeadPin } from './durable-codec.ts';
 import { fail, text } from './validation.ts';
 import type {LegacyAdmissionReceipt,LegacyImportProof} from './legacy-import-types.ts';
+import {freezeCapacity} from './capacity-types.ts';
+import type {AuthorityCapacity} from './capacity-types.ts';
 
 export type PendingCommit = { version: 2; kind: 'create' | 'write' | 'restore' | 'rekey' | 'schema-migration' | 'fanout-maintenance' | 'compaction' | 'storage-upgrade' | 'legacy-m2-import'; operationId: string;
   requestDigest: string; oldHead: VaultHead | null; newHead: VaultHead; stagePath: string; stageDigest: string;
@@ -23,6 +25,7 @@ export interface AuthorityTransaction {
   finalize(pending: PendingCommit): AnchorReceipt;
   legacy(lineageId:string):LegacyRegistration|null;
   assertAdmitted(head:VaultHead):void;
+  capacity():AuthorityCapacity;
 }
 const SCHEMA = `CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), authority_id TEXT NOT NULL, custody_domain TEXT NOT NULL) STRICT;
 CREATE TABLE vaults (vault_id TEXT PRIMARY KEY, state TEXT NOT NULL) STRICT;
@@ -179,6 +182,26 @@ export class LocalSqliteAuthority {
     try{return action();}catch(error){this.#mutationFailed=true;throw error;}
   }
   #checkLock(): void { if (!this.#locked || this.#closed) fail('ANCHOR_TRANSACTION'); }
+  #capacity():AuthorityCapacity{
+    this.#checkLock();if(this.#mutationFailed)fail('ANCHOR_TRANSACTION_FAILED');
+    this.#checkFiles();this.#checkPragmas();
+    const pageCount=this.#pages(),pageSize=this.#pageSize,freelistPages=this.#db.prepare('PRAGMA freelist_count').get()!.freelist_count as number;
+    const size=(suffix:string)=>{
+      const path=join(this.directory,'authority.sqlite'+suffix);
+      try{const stat=lstatSync(path);if(!stat.isFile()||stat.isSymbolicLink())fail('ANCHOR_FILE');return stat.size;}
+      catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT'&&suffix)return 0;throw error;}
+    };
+    const fileBytes=size(''),journalBytes=size('-journal'),walBytes=size('-wal'),shmBytes=size('-shm'),totalBytes=journalBytes+walBytes+shmBytes;
+    const counts=this.#db.prepare("SELECT count(*) AS count,coalesce(sum(json_extract(state,'$.status')='ACTIVE'),0) AS active,coalesce(sum(json_extract(state,'$.status')='PREPARED'),0) AS pending FROM vaults").get()!;
+    const receipt=this.#db.prepare('SELECT count(*) AS count,coalesce(sum(length(CAST(receipt AS BLOB))),0) AS bytes FROM receipts').get()!;
+    const blockers:('GLOBAL_PENDING'|'CURRENT_EXTENT_OVER_WRITE_LIMIT')[]=[];
+    if(counts.pending as number)blockers.push('GLOBAL_PENDING');
+    if(Math.max(fileBytes,pageCount*pageSize)>this.#writeLimit)blockers.push('CURRENT_EXTENT_OVER_WRITE_LIMIT');
+    return freezeCapacity({version:1,schemaVersion:this.#version as 2|3,database:{fileBytes,pageSize,pageCount,pageBytes:pageCount*pageSize,freelistPages},
+      sidecars:{journalBytes,walBytes,shmBytes,totalBytes},totalFileBytes:fileBytes+totalBytes,limits:{writeLimitBytes:this.#writeLimit,readLimitBytes:AUTHORITY_READ_LIMIT},
+      vaults:{count:counts.count as number,active:counts.active as number,pending:counts.pending as number},receipts:{count:receipt.count as number,jsonUtf8Bytes:receipt.bytes as number},
+      legacyRegistry:this.#version===3?{applicable:true,count:this.#db.prepare('SELECT count(*) AS n FROM legacy_imports').get()!.n as number}:{applicable:false,count:null},blockers});
+  }
   #row(vaultId: string): AnchorRow | null {
     this.#checkLock(); const row = this.#db.prepare('SELECT state FROM vaults WHERE vault_id=?').get(vaultId);
     if (!row) return null;
@@ -354,7 +377,7 @@ export class LocalSqliteAuthority {
       if (metadata?.authority_id !== this.authorityId || metadata?.custody_domain !== this.custodyDomain) fail('ANCHOR_IDENTITY');
       const result = operation({ row: id => use(() => this.#row(id)), assertActive: head => use(() => this.#assertActive(head)),
         receipt: (vaultId, operationId) => use(() => this.#receipt(vaultId, operationId)), prepare: p => use(() => this.#writeAction(()=>this.#prepare(p))), finalize: p => use(() => this.#writeAction(()=>this.#finalize(p))),
-        legacy:lineageId=>use(()=>this.#legacy(lineageId)),assertAdmitted:head=>use(()=>this.#assertAdmitted(head)) });
+        legacy:lineageId=>use(()=>this.#legacy(lineageId)),assertAdmitted:head=>use(()=>this.#assertAdmitted(head)),capacity:()=>use(()=>this.#capacity()) });
       if (result !== null && (typeof result === 'object' || typeof result === 'function') && typeof (result as any).then === 'function') fail('ANCHOR_ASYNC_GUARD');
       this.#commit(); return result;
     } catch (error) {
@@ -363,6 +386,7 @@ export class LocalSqliteAuthority {
     } finally { this.#capability = undefined; }
   }
   inspect(vaultId: string): AnchorRow | null { return this.transaction(tx => tx.row(vaultId)); }
+  inspectCapacity():AuthorityCapacity{return this.transaction(tx=>tx.capacity());}
   admitLegacyImport(request:{migrationId:string;head:VaultHead;operationId:string;operatorId:string;attestation:'operator-attested-stopped'}):LegacyAdmissionReceipt{
     id(request.operationId);id(request.migrationId);text(request.operatorId,128);if(request.attestation!=='operator-attested-stopped')fail('LEGACY_ATTESTATION_REQUIRED');
     return this.transaction(tx=>{
