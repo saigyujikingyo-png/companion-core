@@ -1,15 +1,16 @@
-# AEMC 训练前基础设施总矩阵 / IF5–IF6
+# AEMC 训练前基础设施总矩阵 / IF7
 
-[当前开发状态与合并候选](AEMC-DEVELOPMENT-STATUS.md)汇总18项目标。本轮新增 [durable retrieval bridge](DURABLE-RETRIEVAL.md) 与 [authority capacity admission](AUTHORITY-CAPACITY.md)，只推进I05接线及I01/I02容量失败处理；I06质量实验仍未启动。
+[当前开发状态](AEMC-DEVELOPMENT-STATUS.md)汇总18项目标。IF0–IF6已合并；[IF7容量检查](CAPACITY-INSPECTION.md)原 `06fc8b2` 冻结候选完成893/893与TS后，已整合WF2 main `87eab00`，新组合实际984/984与TS通过，当前为独立PR候选。精确head CI和合并结果以PR记录为准；本轮未部署或训练。IF7推进I01/I03观测，完整目标未关闭，I06质量实验仍未启动。
 
 日期：2026-10-27。总状态：**IN_PROGRESS / TRAINING_NOT_ADMITTED**。本文件是完整范围的实施台账。[IF0](AEMC-INFRA-EVIDENCE-IF0.md)、[IF1](AEMC-INFRA-EVIDENCE-IF1.md)、[IF2](AEMC-INFRA-EVIDENCE-IF2.md)保留原快照证据；新 [增量存储/压实](INCREMENTAL-STORAGE.md)与[旧M2导入](LEGACY-M2-IMPORT.md)落实当前本机子集。任何切片都不替代全部目标。
 
 ## 来源与证据
 
-- [IF5/IF6 当前组合证据](AEMC-INFRA-EVIDENCE-IF6.md)：874/874、typecheck、两位独立终审与固定协议成本测量通过；相对完整br4的hot逻辑新增字节分别减少47.40%/49.08%/49.64%。当前134源码文件逐项冻结一致，未获得新提交CI或生产接受。
+- [当前 IF7 与发布证据](AEMC-INFRA-EVIDENCE-IF7.md)：PR #1合并 `06fc8b2` 的跨平台CI已完成。IF7原基线893/893、136文件一致为历史证据；WF2整合组合984/984、162代码文件一致为本轮证据。独立PR的精确head CI另记，不将任一本机结果外推为生产接受。
+- [IF5/IF6 历史组合证据](AEMC-INFRA-EVIDENCE-IF6.md)：874/874、typecheck、两位独立终审与固定协议成本测量通过；相对完整br4的hot逻辑新增字节分别减少47.40%/49.08%/49.64%。原134源码文件冻结及当时尚未执行CI的状态保留；不把旧成本测量当IF7的新测量。
 - [IF3/IF4 历史组合证据](AEMC-INFRA-EVIDENCE-IF4.md)：822/822 whole、typecheck、两位独立终审和最终三 arm 成本测量通过。相对同 codec 完整快照，各工作负载减少47.38%/49.14%/49.58% hot逻辑文件增量；保留源文件，未做GC。该本机合成接受不关闭矩阵其余缺口。
 - 开工基线：`d23921f5abc5be10f15883a1a5289af842299b3f`。manual worktree 分支：`codex/aemc-infrastructure-20261027`；已核 top-level、clean 初态及 log-5。它不是 app-managed worktree。
-- 独立只读查询 GitHub 确认 [validation 40425316221](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425316221) 与 [main 40425590234](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425590234) 均为上述 SHA，Windows/macOS/Ubuntu24.x/Ubuntu24.16 四个 job 均 SUCCESS。这些结果只覆盖基线，不能给本批未提交修改背书。
+- 独立只读查询 GitHub 确认 [validation 40425316221](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425316221) 与 [main 40425590234](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425590234) 均为上述 SHA，Windows/macOS/Ubuntu24.x/Ubuntu24.16 四个 job 均 SUCCESS。这些历史结果只覆盖当时基线，不覆盖IF7或当前WF2整合组合。
 - 用户研究材料《AEMC v0.9 自主睡眠与跨代认知连续性整合研究总纲》SHA256：`0aef56521b4c809f25dd0ea9051803889ec278a842f1841d143c7e1f81425ec5`。只读材料，不复制原件或把其中设想当执行许可；其 v0.6 附录与新主张分账。
 - 本目录基线文档的已实施/研究阴性/历史原生回执均保留；没有读取真实聊天、私有记忆、密封教学或旧运行库。WF1 DS1/GPT0 STOPPED、0产物是主控交接状态，本批不重试、不重放、不修改 campaign。
 - 证据层固定为：静态合同 → 作者专项 → 独立审查 → whole → 精确新提交 CI → 原生宿主 → 产品/科学接受。各层不相加、不互替。未获得的层标 NOT_RUN/NOT_STARTED/UNKNOWN。
@@ -20,9 +21,9 @@
 | ID / 训练前目标 | 冻结基线中已有的实现或证据 | 当前缺口与实施状态 | 版本化合同 / 验收出口 |
 |---|---|---|---|
 | I00 来源、身份、当前同意与撤销权威 | Store scope/generation/consent/runtime、来源 DAG、撤销级联；SP0A 当前来源复核；WF0 仅声明 lint | 跨设备认证、真实使用权证明、全局家族 registry 未完成；已有局部实现 | AuthorityContext/0.1、SourceUseDecision/0.1；跨租户/ABA/时钟/过期/缺祖先拒绝；角色不替代权限 |
-| I01 十年存储与可恢复运维 | 强制exact外锚与PREPARED/reconcile；[v3](INCREMENTAL-STORAGE.md)块差分、单blob、有界链和新目标压实；[IF6](AUTHORITY-CAPACITY.md)增加新写软界、单pending完成预留和热日志恢复负例 | **本机有界子集已实现**；仍有16MiB image/256MiB代际/4096 commits，authority读界64MiB且新写默认22369621B；serialize仍整库，无GC/rollover、十年/跨盘/断电资格 | 原件/旧receipt保留；读兼容与新增写准入分开，旧无预算pending仍unresolved；完整成本与RPO/RTO另测 |
+| I01 十年存储与可恢复运维 | 强制exact外锚与PREPARED/reconcile；[v3](INCREMENTAL-STORAGE.md)块差分、单blob、有界链和新目标压实；[IF6](AUTHORITY-CAPACITY.md)新写软界与完成预留；[IF7](CAPACITY-INSPECTION.md)同guard no-boot分层容量检查 | **本机有界子集已实现**；仍有16MiB image/256MiB代际/4096 commits，authority读界64MiB且新写默认22369621B；serialize仍整库，无GC/rollover、十年/跨盘/断电资格 | 原件/旧receipt保留；检查不预留空间或授予写许可，partial目录只报下界；旧无预算pending仍unresolved；完整成本与RPO/RTO另测 |
 | I02 密钥托管、迁移与回滚 | 独立DEK/稳定ingress、recipient rewrap、current-state rekey、anchored源fencing；[旧M2导入](LEGACY-M2-IMPORT.md)含schema3来源唯一槽与实际准入门 | **本机协议已实现**；production/远程/硬件custody与真实跨机托管未完成；authority须独立防回滚，旧M2副本不受fence | 旧native ID/额度/反馈/撤销保持；新DEK不同，legacyKey保留作HMAC；receipt明确非latest/非legacy fencing，不称历史crypto-erasure |
-| I03 独有文件格式与压缩的总收益 | Scene JSON、TJ0 identity/Zstd与Q0阴性结果保留；v3采用固定块增量协议和标准Brotli4，并与同codec full及v2 raw对照 | **存储协议子集已采用**；不是新通用熵codec或任务表征质量成果；全部依赖/历史保留/资产和长期成本门仍开放 | CodecProfile/0.1、CostQualityTrial/0.1；完整hot字节含stage/authority，backup与压实扩展单列；不把image-history实验外推整vault |
+| I03 独有文件格式与压缩的总收益 | Scene JSON、TJ0 identity/Zstd与Q0阴性结果保留；v3固定块增量+Brotli4与同codec full/v2 raw对照；IF7区分当前链、代际文件、镜像、Safety和receipt占用 | **存储协议子集已采用**；不是新通用熵codec或任务表征质量成果；全部依赖/历史保留/资产和长期成本门仍开放 | CodecProfile/0.1、CostQualityTrial/0.1；hot字节含stage/authority，backup与压实扩展单列；receipt JSON字节不等于物理表占用，freelist不等于可回收磁盘 |
 | I04 稳定概念地址与跨模型映射 | Scene 固定catalog、精确概念/profile引用与opaque residual声明 | **DESIGN_ONLY**：概念registry冲突/版本/别名/撤销、模型特征对齐、重嵌入与不可映射项；当前不能换模型直接复用latent | ConceptRevision/0.1、FeatureBinding/0.1；模型/encoder/layer/basis/adapter/calibration全pin；冲突、漂移、弃用、失配拒绝 |
 | I05 durable多消费者 | [schema2](DURABLE-FANOUT.md)编号迁移、双metadata投影/checkpoint、TTL/retention与v3持久化；[IF5](DURABLE-RETRIEVAL.md)完整consumer选集已接bind/refresh/query/resolve | **有界持久metadata及本地检索接线已实现**；无历史逐revision日志、外部索引持久协议、向量/完整scene引擎或生产宿主接线；RAM重建成本仍在 | 单guard当前metadata/body/祖先一致读，consumer完整进度与能力失效，超AR0预算全拒绝；TTL写被capacity/pending拒绝时无stale结果；C04完整目标仍开放 |
 | I06 BM25/向量/PPR及多跳质量 | AR0有界当前memory召回/同版RAM投影；不是AR1实验 | **NOT_STARTED**：冻结query/家族/时间切分、真实embedding、BM25、PPR、mean与sampled seeds质量/总成本对照 | RetrievalEvaluation/0.1；Recall@k/nDCG/证据覆盖/虚假边/置信校准、p50/p95/RAM；删除一致性独立硬门 |

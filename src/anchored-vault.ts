@@ -1,10 +1,11 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, opendirSync, readdirSync } from 'node:fs';
+import {isProxy,isSharedArrayBuffer,isUint8Array} from 'node:util/types';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { MemoryStore } from './store.ts';
 import type { Clock } from './store.ts';
-import { inspectMemoryImage, maintainFanoutImage, migrateMemoryImage } from './memory-image.ts';
+import { inspectMemoryImage, inspectMemoryImageCapacity, maintainFanoutImage, migrateMemoryImage } from './memory-image.ts';
 import type { MemorySchema } from './memory-image.ts';
 import type { FanoutFault } from './fanout-types.ts';
 import type { SourceRef } from './contracts.ts';
@@ -12,7 +13,7 @@ import { MAX_COMMITS, MAX_DISK, MAX_IMAGE, sha, validateIdentityBudget } from '.
 import type { Safety, Terminal } from './durable-codec.ts';
 import { CoreError, fail, text } from './validation.ts';
 import { ANCHORED_FORMAT, INCREMENTAL_FORMAT, INCREMENTAL_MARKER, VAULT_MARKER, boundSqlite, canonicalDirectory, copyKeys, decodeStage, disjoint, id,
-  encodeVaultMarker, identityOf, readBounded, same, sealV2, validateIdentity, writeNew } from './anchored-codec.ts';
+  encodeVaultMarker, identityOf, readBounded, same, sealV2, validateHead, validateIdentity, writeNew } from './anchored-codec.ts';
 import type { FrozenStage, KeySet, StorageProfile, VaultHead, VaultIdentity, VaultRecord, VaultState } from './anchored-codec.ts';
 import { directoryReader, freezeFrame, parseFrozenV3, reconstruct, MANIFEST_LIMIT } from './incremental-storage.ts';
 import type { Baseline, FrozenV3, Reconstructed } from './incremental-storage.ts';
@@ -21,6 +22,9 @@ import type { AnchorReceipt, AuthorityTransaction, PendingCommit } from './local
 import {captureLegacyM2,inspectLegacyM2,normalizeLegacyFreeze,rejectLegacyNamespace} from './legacy-m2-import.ts';
 import type {InspectLegacyRequest,LegacyInspection} from './legacy-m2-import.ts';
 import type {LegacyImportProof,LegacySourceFreeze} from './legacy-import-types.ts';
+import {MAX_CHAIN,MAX_REPLAY_BYTES} from './incremental-codec.ts';
+import {CAPACITY_DIRECTORY_ENTRY_LIMIT,freezeCapacity} from './capacity-types.ts';
+import type {GenerationCapacity,VaultCapacity} from './capacity-types.ts';
 
 export type AnchoredConfig = { directory: string; vaultId: string; identity: string; storageDomain: string;
   authority: LocalSqliteAuthority; keys: KeySet; schemaVersion?: MemorySchema; storageProfile?: StorageProfile };
@@ -32,9 +36,65 @@ export type CompactRequest = Omit<RestoreRequest,'backupDirectory'> & {vaultId:s
 export type LegacyImportRequest=InspectLegacyRequest & {sourceFreeze:LegacySourceFreeze;authority:LocalSqliteAuthority;vaultId:string;targetDirectory:string;
   storageDomain:string;storageProfile:StorageProfile;newStorageDEK:Uint8Array;operationId:string;targetSchema?:2;fault?:(point:AnchoredFault)=>void};
 export type BackupReceipt = { format: VaultIdentity['format']; coverage: 'current-state'; head: VaultHead; stageDigest: string };
+export type InspectCapacityRequest={authority:LocalSqliteAuthority;vaultId:string;keys:KeySet;maxCalls:number;directoryEntryLimit?:number};
 type Decoded = ReturnType<typeof decodeStage> | Reconstructed;
 type Frozen = { bytes:Buffer;stage:FrozenStage|FrozenV3;blob?:Buffer;baseline?:Baseline };
 const markerName=(identity:VaultIdentity)=>identity.format===INCREMENTAL_FORMAT?INCREMENTAL_MARKER:VAULT_MARKER;
+
+// Inspection inputs are data, not callbacks: do not evaluate accessors or proxy traps.
+function capacityFields(value:unknown,required:string[],optional:string[]=[]):Record<string,unknown>{
+  if(value===null||typeof value!=='object'||isProxy(value))fail('INVALID_INPUT');
+  const prototype=Object.getPrototypeOf(value);
+  if(prototype!==Object.prototype&&prototype!==null)fail('INVALID_INPUT');
+  const descriptors=Object.getOwnPropertyDescriptors(value),fields=Reflect.ownKeys(descriptors);
+  if(fields.some(key=>typeof key!=='string'||(!required.includes(key)&&!optional.includes(key)))||required.some(key=>!Object.hasOwn(descriptors,key)))fail('INVALID_INPUT');
+  const copy:Record<string,unknown>=Object.create(null);
+  for(const key of fields as string[]){const descriptor=descriptors[key]!;if(!Object.hasOwn(descriptor,'value'))fail('INVALID_INPUT');copy[key]=descriptor.value;}
+  return copy;
+}
+function capacityKey(value:unknown):Buffer{
+  if(isProxy(value)||!isUint8Array(value))fail('ANCHOR_KEYSET');
+  if(![Uint8Array.prototype,Buffer.prototype].includes(Object.getPrototypeOf(value)))fail('ANCHOR_KEYSET');
+  const prototype=Object.getPrototypeOf(Uint8Array.prototype);
+  const get=(name:string)=>Reflect.apply(Object.getOwnPropertyDescriptor(prototype,name)!.get!,value,[]);
+  const length=get('byteLength') as number,buffer=get('buffer') as ArrayBuffer,offset=get('byteOffset') as number;
+  if(length!==32||isSharedArrayBuffer(buffer))fail('ANCHOR_KEYSET');
+  if(Reflect.ownKeys(value).some(key=>typeof key!=='string'||! /^(0|[1-9][0-9]*)$/.test(key)))fail('ANCHOR_KEYSET');
+  return Buffer.from(new Uint8Array(buffer,offset,length));
+}
+function capacityRequest(request:InspectCapacityRequest):Required<InspectCapacityRequest>{
+  const values=capacityFields(request,['authority','vaultId','keys','maxCalls'],['directoryEntryLimit']);
+  const {authority,vaultId,maxCalls}=values,directoryEntryLimit=values.directoryEntryLimit===undefined?CAPACITY_DIRECTORY_ENTRY_LIMIT:values.directoryEntryLimit;
+  if(isProxy(authority)||!(authority instanceof LocalSqliteAuthority))fail('INVALID_INPUT');
+  text(vaultId,128);id(vaultId);
+  if(typeof maxCalls!=='number'||!Number.isSafeInteger(maxCalls)||maxCalls<0||maxCalls>32
+    ||typeof directoryEntryLimit!=='number'||!Number.isSafeInteger(directoryEntryLimit)||directoryEntryLimit<1||directoryEntryLimit>CAPACITY_DIRECTORY_ENTRY_LIMIT)fail('INVALID_INPUT');
+  const key=capacityFields(values.keys,['version','keyEpoch','storageDEK','ingressKey']);
+  if(key.version!==2||typeof key.keyEpoch!=='number'||!Number.isSafeInteger(key.keyEpoch)||key.keyEpoch<1)fail('ANCHOR_KEYSET');
+  const storageDEK=capacityKey(key.storageDEK);let ingressKey:Buffer|undefined;
+  try{
+    ingressKey=capacityKey(key.ingressKey);if(storageDEK.equals(ingressKey))fail('ANCHOR_KEYSET');
+    return{authority,vaultId,keys:{version:2,keyEpoch:key.keyEpoch,storageDEK,ingressKey},maxCalls,directoryEntryLimit};
+  }catch(error){storageDEK.fill(0);ingressKey?.fill(0);throw error;}
+}
+function capacityDirectory(directory:string,entryLimit:number):GenerationCapacity['directory']{
+  const stream=opendirSync(directory,{bufferSize:1});let entriesObserved=0,observedBytes=0,complete=false;
+  try{
+    while(entriesObserved<entryLimit){
+      const entry=stream.readSync();if(entry===null){complete=true;break;}
+      const stat=lstatSync(join(directory,entry.name));if(!stat.isFile()||stat.isSymbolicLink())fail('ANCHOR_FILE');
+      entriesObserved++;observedBytes+=stat.size;if(!Number.isSafeInteger(observedBytes))fail('ANCHOR_LIMIT');
+    }
+  }finally{stream.closeSync();}
+  return{entryLimit,entriesObserved,complete,observedBytes,totalEntries:complete?entriesObserved:null,totalBytes:complete?observedBytes:null};
+}
+// Select known audit fields even if a stored JSON object contains extra properties.
+function capacityHead(head:VaultHead):VaultHead{
+  return{format:head.format,authorityId:head.authorityId,vaultId:head.vaultId,identity:head.identity,instanceId:head.instanceId,ownerEpoch:head.ownerEpoch,
+    keyEpoch:head.keyEpoch,directory:head.directory,storageDomain:head.storageDomain,sequence:head.sequence,digest:head.digest,
+    ...(head.schemaVersion===undefined?{}:{schemaVersion:head.schemaVersion}),...(head.storageProfile===undefined?{}:{storageProfile:head.storageProfile}),
+    ...(head.legacyImport===undefined?{}:{legacyImport:{lineageId:head.legacyImport.lineageId,migrationId:head.legacyImport.migrationId}})};
+}
 
 function storagePath(directory: string, domain: string, authority: LocalSqliteAuthority, mustExist: boolean): string {
   id(domain);
@@ -136,6 +196,41 @@ function readBackup(directory: string, keys: KeySet, maxCalls: number): Decoded 
 
 /** A separate mandatory-anchor format. Never opens/upgrades an M2.v1 directory. */
 export class AnchoredVault {
+  /** Static metadata inspection, including ACTIVE sources whose live handle is poisoned. */
+  static inspectCapacity(request:InspectCapacityRequest):VaultCapacity{
+    const {authority,vaultId,keys,maxCalls,directoryEntryLimit}=capacityRequest(request);
+    let decoded:Decoded|undefined;
+    try{return authority.transaction(tx=>{
+      const capacity=tx.capacity(),row=tx.row(vaultId);
+      if(!row)return freezeCapacity({version:1,status:'UNREGISTERED',detailsRead:false,currentHead:null,pending:null,legacyAdmission:'not-read',
+        authority:capacity,generation:null,image:null,safety:null,blockers:['VAULT_UNREGISTERED']});
+      if(row.status==='PREPARED'){
+        const pending=row.pending!;
+        if(pending.version!==2||!['create','write','restore','rekey','schema-migration','fanout-maintenance','compaction','storage-upgrade','legacy-m2-import'].includes(pending.kind))fail('ANCHOR_CORRUPT');
+        validateHead(pending.newHead);
+        if(pending.newHead.vaultId!==vaultId||pending.newHead.authorityId!==authority.authorityId||pending.newHead.sequence>MAX_COMMITS||!same(pending.oldHead,row.head))fail('ANCHOR_CORRUPT');
+        return freezeCapacity({version:1,status:'PREPARED',detailsRead:false,currentHead:null,pending:{kind:pending.kind,previousSequence:row.head?.sequence??null,proposedSequence:pending.newHead.sequence},
+          legacyAdmission:'not-read',authority:capacity,generation:null,image:null,safety:null,blockers:['VAULT_PREPARED']});
+      }
+      const head=row.head!;tx.assertActive(head);validateIdentityBudget(head.identity,maxCalls);
+      if(storagePath(head.directory,head.storageDomain,authority,true)!==head.directory)fail('ANCHOR_INSTANCE_PATH');
+      const current=readCurrent(head,keys,maxCalls);decoded=current;
+      const image=inspectMemoryImageCapacity(current.image,head.schemaVersion??1);
+      if(image.revocationHighWater!==current.state.revocationHighWater)fail('ANCHOR_CORRUPT');
+      const directory=capacityDirectory(head.directory,directoryEntryLimit);
+      const generation:GenerationCapacity={sequence:head.sequence,commitLimit:MAX_COMMITS,directory,
+        requiredChain:'baseline' in current?{frames:current.baseline.depth,files:current.files.size,encodedBytes:current.baseline.readBytes,frameLimit:MAX_CHAIN,replayByteLimit:MAX_REPLAY_BYTES}
+          :{frames:1,files:2,encodedBytes:Buffer.byteLength(current.stage.checkpoint,'base64')+Buffer.byteLength(current.stage.record,'base64'),frameLimit:null,replayByteLimit:null},
+        diskLimitBytes:MAX_DISK,otherGenerationsAndBackups:'unmeasured'};
+      const state=current.state.safety,safety={ingressCount:state.ingress.length,ingressLimit:8192,unknownCount:state.ingress.filter(entry=>entry.state==='unknown').length,reserved:state.reserved,maxCalls:state.maxCalls};
+      const legacyAdmission=head.legacyImport?tx.legacy(head.legacyImport.lineageId)!.admission:'not-applicable';
+      const blockers:('LEGACY_ADMISSION_REQUIRED'|'DIRECTORY_OVER_DISK_LIMIT'|'COMMIT_LIMIT_REACHED')[]=[];
+      if(legacyAdmission==='required')blockers.push('LEGACY_ADMISSION_REQUIRED');
+      if(directory.observedBytes>MAX_DISK)blockers.push('DIRECTORY_OVER_DISK_LIMIT');
+      if(head.sequence>=MAX_COMMITS)blockers.push('COMMIT_LIMIT_REACHED');
+      return freezeCapacity({version:1,status:'ACTIVE',detailsRead:true,currentHead:capacityHead(head),pending:null,legacyAdmission,authority:capacity,generation,image,safety,blockers});
+    });}finally{decoded?.image.fill(0);keys.storageDEK.fill(0);keys.ingressKey.fill(0);}
+  }
   #store!: MemoryStore;
   get store(): MemoryStore { return this.#store; }
   readonly restored: boolean;

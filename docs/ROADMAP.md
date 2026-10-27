@@ -2,7 +2,9 @@
 
 **本批 WF2：** [失败诊断](WF2-FAILURE-DIAGNOSTICS.md)已定位旧 medium 的 `WF1_PAIR_BINDING`；[跨模型四单元 canary](WF2-UNIT-PILOT.md)已完成真实运行及冷验。4 seal/4 plan通过，T11/DS1后因第二候选未过精确验算停止，记录1条合格、1条隔离，冻结数据集仍为0。旧实验保持原结果。下一独立切片将实现合格候选的新清单准入、逐条失败隔离、生成/审查双队列及真实吞吐计量；本 canary 不代表256GB首训数据池、Student训练或规模生产已交付。
 
-**当前 IF5/IF6：** [架构进度与合并范围](AEMC-DEVELOPMENT-STATUS.md)记录18项目标的实际层次；已新增 [durable consumer→检索桥](DURABLE-RETRIEVAL.md)及[外锚容量失败处理](AUTHORITY-CAPACITY.md)。[当前组合874/874、typecheck、独立终审及成本测量](AEMC-INFRA-EVIDENCE-IF6.md)已通过，IF4以下证据保留历史快照；AR1质量、生产custody与训练准入仍未完成。
+**当前 IF7：** 原 `06fc8b2` 冻结候选完成独立893/893与typecheck后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker984/984与typecheck通过，形成独立PR候选。精确head的跨平台CI与合并状态以PR实际记录为准，不复用IF0–IF6的 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) CI。[当前证据](AEMC-INFRA-EVIDENCE-IF7.md)区分各层；[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。IF7只观察generation、Store image、Safety与authority receipts，不引入GC、rollover或可写次数预测；本轮未部署或启动训练。
+
+后续依赖顺序为容量运维协议（保留幂等、UNKNOWN与已消费额度）→ 生产authority/custody与恢复准入 → AR1冻结质量/总成本实验。已有compaction只重建新generation，不释放Store ingress或authority receipts；AR1、生产接线和训练准入仍开放。以下 IF0–IF6 与更早切片保留各自历史验证范围。
 
 [历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
 
