@@ -2,7 +2,9 @@
 
 **本批 WF2：** [教师控制与小批验收](WF2-VALIDATION.md)分列旧阴性、公开检查与代码证据；first-four 仅以4 unique（3 train /1 dev）`PILOT_ONLY`为上限，余12 families /8 pairs `NOT_RUN`。最终 medium 已停止、合格0，工程 `PARTIAL`。下一批先做无正文阶段/拒绝诊断，再研究小单元生成/任务拆分；独立确定性标签须单列来源与新协议，均非本批已实现。
 
-**当前 IF5/IF6：** [架构进度与合并范围](AEMC-DEVELOPMENT-STATUS.md)记录18项目标的实际层次；已新增 [durable consumer→检索桥](DURABLE-RETRIEVAL.md)及[外锚容量失败处理](AUTHORITY-CAPACITY.md)。[当前组合874/874、typecheck、独立终审及成本测量](AEMC-INFRA-EVIDENCE-IF6.md)已通过，IF4以下证据保留历史快照；AR1质量、生产custody与训练准入仍未完成。
+**当前 IF7：** IF0–IF6 已在 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并（`06fc8b2`），四平台 CI 完成；[IF7 no-boot 容量检查](CAPACITY-INSPECTION.md)继续在独立工作树落地，本机独立893/893与typecheck通过，未提交或合并。[当前证据](AEMC-INFRA-EVIDENCE-IF7.md)区分发布、作者、独立验证与审查；[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。IF7明确区分generation、Store image、Safety与authority receipts的占用，不引入GC、rollover或可写次数预测。
+
+后续依赖顺序为容量运维协议（保留幂等、UNKNOWN与已消费额度）→ 生产authority/custody与恢复准入 → AR1冻结质量/总成本实验。已有compaction只重建新generation，不释放Store ingress或authority receipts；AR1、生产接线和训练准入仍开放。以下 IF0–IF6 与更早切片保留各自历史验证范围。
 
 [历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
 

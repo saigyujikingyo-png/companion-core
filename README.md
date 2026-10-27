@@ -2,9 +2,9 @@
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
 
-[当前架构进度与合并范围](docs/AEMC-DEVELOPMENT-STATUS.md)：IF5 已接通持久消费者到当前检索/交付，IF6 已补外锚容量准入与完成预算。最终组合已通过 [874/874、类型检查、两位独立审查及成本测量](docs/AEMC-INFRA-EVIDENCE-IF6.md)。API 见 [durable retrieval](docs/DURABLE-RETRIEVAL.md) 和 [authority capacity](docs/AUTHORITY-CAPACITY.md)；完整目标仍 IN_PROGRESS，未授予训练准入。
+[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并至 `main`（`06fc8b2`），合并前后四平台 CI 均通过；增量存储、旧 M2 导入、持久消费者检索接线与容量准入已落地。继续开发的 [IF7 容量检查 API](docs/CAPACITY-INSPECTION.md)无需启动 Store，已通过本机独立 **893/893 与类型检查**，仍在独立工作树，未提交或合并。具体发布、审查与验证分层见 [IF7 证据](docs/AEMC-INFRA-EVIDENCE-IF7.md)。完整目标仍 IN_PROGRESS，未授予训练准入。
 
-[IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；当前IF5/IF6以新证据为准，未合并或启动训练。
+[IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；[IF5/IF6 本机组合证据](docs/AEMC-INFRA-EVIDENCE-IF6.md)保留874/874及成本测量，后续提交与合并结果以 IF7 证据为准。本批未启动训练。
 
 [AEMC训练前基础设施总矩阵](docs/AEMC-INFRASTRUCTURE.md)保留完整范围。[AnchoredVault](docs/ANCHORED-VAULT.md)实现独立外锚、恢复旧源 fencing、recipient rewrap 与 DEK rekey；[schema2 持久消费者](docs/DURABLE-FANOUT.md)提供两个独立元数据投影/进度和 TTL/代际屏障。新 [v3增量存储](docs/INCREMENTAL-STORAGE.md)采用固定块差分+Brotli4、单份密文和有界恢复链，支持保留旧源的新目标压实；[旧M2导入](docs/LEGACY-M2-IMPORT.md)保留账本/额度，以同外锚唯一来源登记和实际准入门防重。原 [M2隔离恢复](docs/M2-BACKUP.md)没有激活绕过，旧副本不受新外锚fence。均为有界本机实现，不代表远程托管、十年可靠性或训练准入。下方旧切片保留历史范围。
 
