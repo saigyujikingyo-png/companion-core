@@ -4,7 +4,7 @@ import type {TestContext} from 'node:test';
 import {randomBytes} from 'node:crypto';
 import {cpSync,existsSync,mkdirSync,mkdtempSync,realpathSync,readFileSync,readdirSync,renameSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {dirname,join} from 'node:path';
+import {join} from 'node:path';
 import {spawn,spawnSync} from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
 import {AnchoredVault} from '../src/anchored-vault.ts';
@@ -167,27 +167,36 @@ test('legacy admission over a lower write limit refuses with registry and histor
 });
 
 test('legacy import capacity refusal rolls back both lineage registration and proposed PREPARED',t=>{
-  let proved=false;
-  for(const padding of [24576]){
-    const f=fixture(t);if(padding)database(join(f.authority.directory,'authority.sqlite'),db=>{
-      db.prepare('INSERT INTO receipts VALUES (?,?,?)').run('historical-fixture','padding',JSON.stringify({synthetic:true,padding:'x'.repeat(padding)}));});
-    const limited=LocalSqliteAuthority.open({...f.authorityConfig,writeLimitBytes:69632});t.after(()=>limited.close());
-    // The long legal target makes the completed import receipt/registry exceed
-    // the prepared row's allocation; padding places that growth at the cap.
-    const target=join(f.root,...Array.from({length:24},(_,i)=>`segment-${i}-`+'x'.repeat(40)),'imported');mkdirSync(dirname(target),{recursive:true});
-    const before=files(f.authority.directory),prepare=DatabaseSync.prototype.prepare;let registration=false,completion=false;
-    try{
-      DatabaseSync.prototype.prepare=function(sql){if(sql==='INSERT INTO legacy_imports VALUES (?,?,?,?)')registration=true;if(sql==='INSERT INTO receipts VALUES (?,?,?)')completion=true;return prepare.call(this,sql);};
-      try{AnchoredVault.importLegacyM2({...f.request,authority:limited,targetDirectory:target});}
-      catch(error){assert.match(String(error),/ANCHOR_CAPACITY/);assert.deepEqual(files(f.authority.directory),before);
-        assert.equal(limited.inspect(f.config.vaultId),null);assert.equal(limited.transaction(tx=>tx.legacy(f.inspection.lineageId)),null);
-        t.diagnostic(`import capacity refusal: padding=${padding}, registered-in-transaction=${registration}, preview-insert=${completion}`);
-        if(registration&&completion)proved=true;
+  // A legal 128-character identity grows the completed registry past one page
+  // without lengthening filesystem paths. Padding leaves PREPARED at 64 KiB.
+  const f=fixture(t,true,'界'.repeat(128)),padding=24576,writeLimitBytes=65536,path=join(f.authority.directory,'authority.sqlite');
+  database(path,db=>db.prepare('INSERT INTO receipts VALUES (?,?,?)').run('historical-fixture','padding',JSON.stringify({synthetic:true,padding:'x'.repeat(padding)})));
+  const limited=LocalSqliteAuthority.open({...f.authorityConfig,writeLimitBytes});t.after(()=>limited.close());
+  const before=files(f.authority.directory),beforeBytes=readFileSync(path),prepare=DatabaseSync.prototype.prepare;
+  let registration=0,completion=0,preparedBytes=0,previewBytes=0;
+  try{
+    DatabaseSync.prototype.prepare=function(sql){
+      const statement=prepare.call(this,sql),db=this;
+      if(sql==='INSERT INTO legacy_imports VALUES (?,?,?,?)'||sql.startsWith('INSERT INTO vaults ')||sql==='INSERT INTO receipts VALUES (?,?,?)'){
+        const run=statement.run;
+        statement.run=function(...args){
+          const result=Reflect.apply(run,this,args);
+          const bytes=(prepare.call(db,'PRAGMA page_count').get()!.page_count as number)*(prepare.call(db,'PRAGMA page_size').get()!.page_size as number);
+          if(sql==='INSERT INTO legacy_imports VALUES (?,?,?,?)')registration++;
+          else if(sql.startsWith('INSERT INTO vaults '))preparedBytes=bytes;
+          else{completion++;previewBytes=bytes;}
+          return result;
+        };
       }
-    }finally{DatabaseSync.prototype.prepare=prepare;}
-    if(proved)break;
-  }
-  assert.equal(proved,true,'exercise future capacity refusal after proposed lineage registration');
+      return statement;
+    };
+    assert.throws(()=>AnchoredVault.importLegacyM2({...f.request,authority:limited}),/ANCHOR_CAPACITY/);
+  }finally{DatabaseSync.prototype.prepare=prepare;}
+  assert.equal(registration,1);assert.equal(completion,1,'execute the future-finalization receipt INSERT');
+  assert.ok(preparedBytes>0&&preparedBytes<=writeLimitBytes);assert.ok(previewBytes>writeLimitBytes);
+  assert.deepEqual(files(f.authority.directory),before);assert.deepEqual(readFileSync(path),beforeBytes);
+  assert.equal(limited.inspect(f.config.vaultId),null);assert.equal(limited.transaction(tx=>tx.legacy(f.inspection.lineageId)),null);
+  t.diagnostic(`import capacity refusal: target-bytes=${Buffer.byteLength(f.request.targetDirectory)}, padding=${padding}, registered-in-transaction=${registration}, prepared-bytes=${preparedBytes}, preview-insert=${completion}, preview-bytes=${previewBytes}, limit=${writeLimitBytes}`);
 });
 test('unknown authority layouts are refused rather than repaired or implicitly upgraded',t=>{
   const f=fixture(t,false);f.authority.close();database(join(f.authority.directory,'authority.sqlite'),db=>db.exec('CREATE TABLE unexpected(id INTEGER)'));
