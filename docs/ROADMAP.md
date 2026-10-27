@@ -1,6 +1,8 @@
 # 实施与持续开发路线
 
-**本批 WF2：** [失败诊断](WF2-FAILURE-DIAGNOSTICS.md)已定位旧 medium 的 `WF1_PAIR_BINDING`；[跨模型四单元 canary](WF2-UNIT-PILOT.md)已完成真实运行及冷验。4 seal/4 plan通过，T11/DS1后因第二候选未过精确验算停止，记录1条合格、1条隔离，冻结数据集仍为0。旧实验保持原结果。下一独立切片将实现合格候选的新清单准入、逐条失败隔离、生成/审查双队列及真实吞吐计量；本 canary 不代表256GB首训数据池、Student训练或规模生产已交付。
+**CP0 第一片：** [独立合格候选采收](CORPUS-PIPELINE.md)已实际交付1条复用合格候选及新的加密清单，train1/dev0，新进程核验通过；固定 Student tokenizer 的94 input /18 loss /112 full tokens经另一进程重算一致。本次新增模型调用0，原失败不改写，训练未启动。下一片是独立生成/review双队列与逐项失败隔离，再做CP1现成语料导入和256GB训练池；单行数学产物仅证明采收链，不代表陪伴模型训练质量或规模产能。
+
+**本批 WF2：** [失败诊断](WF2-FAILURE-DIAGNOSTICS.md)已定位旧 medium 的 `WF1_PAIR_BINDING`；[跨模型四单元 canary](WF2-UNIT-PILOT.md)已完成真实运行及冷验。4 seal/4 plan通过，T11/DS1后因第二候选未过精确验算停止，记录1条合格、1条隔离，原协议的四行 manifest 未完成。旧实验保持原结果，CP0采收另外记账；本 canary 不代表256GB首训数据池、Student训练或规模生产已交付。
 
 **当前 IF7：** 原 `06fc8b2` 冻结候选完成独立893/893与typecheck后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker984/984与typecheck通过，形成独立PR候选。精确head的跨平台CI与合并状态以PR实际记录为准，不复用IF0–IF6的 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) CI。[当前证据](AEMC-INFRA-EVIDENCE-IF7.md)区分各层；[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。IF7只观察generation、Store image、Safety与authority receipts，不引入GC、rollover或可写次数预测；本轮未部署或启动训练。
 

@@ -1,6 +1,8 @@
 # Companion Core
 
-[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)已补齐失败诊断，并实现 [跨模型四单元 canary](docs/WF2-UNIT-PILOT.md)。真实 .8 完成4个密封单元和4个计划单元，调用 Together 11次、DeepSeek 1次后因第二候选未通过精确验算停止：已记录1条合格候选、1条隔离候选，冻结数据集交付仍为0。978项本地测试及独立审查通过；旧失败记录保留，Student 推理/训练未执行，教学数据保持私有。
+[CorpusPipeline/0.1 的 CP0 第一片](docs/CORPUS-PIPELINE.md)已实际采收1条合格候选（train1/dev0），生成新的加密清单并通过独立进程核验。固定 Student tokenizer 测得94 input /18 loss /112 full tokens，另一进程重算一致；计量回执独立保存，旧 `.8` STOPPED 和失败原件保留。本次采收新增模型调用0，Student训练未启动。
+
+[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)已补齐失败诊断，并实现 [跨模型四单元 canary](docs/WF2-UNIT-PILOT.md)。真实 .8 完成4个密封单元和4个计划单元，调用 Together 11次、DeepSeek 1次后因第二候选未通过精确验算停止：已记录1条合格候选、1条隔离候选，原协议的四行 manifest 未完成。978项本地测试及独立审查通过；后续 CP0 单行采收独立记账，Student 推理/训练未执行，教学数据保持私有。
 
 [当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并（`06fc8b2`），合并前后四平台 CI 均通过。[IF7 容量检查 API](docs/CAPACITY-INSPECTION.md)原冻结候选通过独立893/893与类型检查后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker **984/984 与类型检查**通过。当前为独立PR候选，精确head的跨平台CI与合并状态以该PR实际记录为准；具体分层见 [IF7 证据](docs/AEMC-INFRA-EVIDENCE-IF7.md)。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
 

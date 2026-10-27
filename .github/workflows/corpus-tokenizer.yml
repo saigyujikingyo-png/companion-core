@@ -1,0 +1,45 @@
+name: corpus-tokenizer-synthetic
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  pinned-tokenizer:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x64
+          - os: windows-latest
+            arch: x64
+          - os: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.16.0'
+      # 3.12.10 has official binaries on all three platforms; 3.12.14 does not.
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.arch }}
+      - run: npm ci --ignore-scripts
+      - name: Install development-only tokenizer libraries and run real CPU fixture
+        shell: pwsh
+        run: |
+          $cp0Python = (python -c "import os,sys; print(os.path.realpath(sys.executable))").Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cp0Python -I -B -c "import sys; assert sys.version_info[:3] == (3,12,10)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cp0Python -m pip install --disable-pip-version-check --only-binary=:all: 'tokenizers==0.23.3' 'Jinja2==3.1.6' 'MarkupSafe==3.0.4'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cp0Python -I -B -c "import importlib.metadata as m,platform; print({'python':platform.python_version(), **{n:m.version(n) for n in ['tokenizers','jinja2','markupsafe']}})"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:CP0_TOKENIZER_PYTHON = $cp0Python
+          node --test --test-concurrency=1 test/corpus-tokenizer.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
