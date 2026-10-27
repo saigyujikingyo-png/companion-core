@@ -57,7 +57,11 @@ User 文本是 canonical `{tool,input}`，assistant 文本是 canonical typed ta
 
 聚焦合成检查覆盖原 `.8` 真实代码路径的首行合格/次行失败、七-ref读取、篡改 review/请求/source/exclusion、UNKNOWN/撤销/epoch拒绝、重复幂等、单写争用、提交前崩溃/orphan、密文损坏、只读 mutation拒绝和新进程逐对象验证。可选 `CP0_TOKENIZER_PYTHON` 指向已 pin 的独立 Python，使用 TEMP 手工 WordLevel tokenizer 检查精确 ID/mask golden、资产hash/runtime/prefix拒绝；不下载真实资产。源码合成通过不等于真实采收已完成。
 
-独立 `corpus-tokenizer-synthetic` CI 在 Windows x64、Ubuntu24.04 x64 和 macOS15 arm64 实跑同一 CPU fixture（包括持久计量回执与新进程重算），只装三项固定版本的开发库。CI Python 固定3.12.10；本机作者实测3.12.14，测试各自记录解释器真实版本，生产 profile 的 exact runtime 校验不放宽。[官方 python-versions 清单](https://github.com/actions/python-versions/blob/160ca1e232997f36def6bb6e857f628222bef58a/versions-manifest.json)的3.12.14缺少 Win/mac build，不能假称三平台同版；[setup-python v6.3.0](https://github.com/actions/setup-python/releases/tag/v6.3.0)固定到commit。原 Core job 未配置 Python 时该额外用例会明确skip；专用3-job CI设置绝对解释器路径以实际执行。三平台结果在发布后独立验收，当前尚未运行。
+独立 `corpus-tokenizer-synthetic` CI 在 Windows x64、Ubuntu24.04 x64 和 macOS15 arm64 实跑同一 CPU fixture（包括持久计量回执与新进程重算），只装三项固定版本的开发库。CI Python 固定3.12.10；本机作者实测3.12.14，测试各自记录解释器真实版本，生产 profile 的 exact runtime 校验不放宽。[官方 python-versions 清单](https://github.com/actions/python-versions/blob/160ca1e232997f36def6bb6e857f628222bef58a/versions-manifest.json)的3.12.14缺少 Win/mac build，不能假称三平台同版；[setup-python v6.3.0](https://github.com/actions/setup-python/releases/tag/v6.3.0)固定到commit。原 Core job 未配置 Python 时该额外用例会明确skip；专用3-job CI设置绝对解释器路径以实际执行。首次 PR attempt1（head8871153）Linux/mac各2/2通过，Windows为1/2，首计量返回粗粒度 `CP0_TOKENIZER_FAILED`；原失败保留，修复后跨平台结果待新提交验证。
+
+Windows 本机已用人工 TEMP 的真实8.3短名复现相同失败栈，并由新诊断定位 `ROOT_CANONICALITY / VALIDATION_REJECTED`：Node普通 `realpathSync` 保留短名，Python `Path.resolve` 展开。合成 fixture 现仅在创建资产目录后改用 `realpathSync.native` 获取规范长名；生产 worker 继续拒绝非规范路径和链接，不改写任何已 pin profile。短名负例、规范名原 ID/mask golden、持久回执与冷进程重算在同一人工短名 TEMP 环境通过。该机制复现不等于直接观察到了原 CI 的 TEMP 值；新 Windows CI 是最终验收证据，未重跑实际采收或修改其冻结源码/原件。
+
+失败时独立 `CorpusTokenizerDiagnostic/0.1` 仅保留封闭 failure/worker stage/code、exit/signal/spawn code 和 stdout/stderr 的捕获字节数及SHA-256，不包含路径、prompt、profile、异常文本、traceback或输出前缀；超限时捕获字节不冒称全部输出。未知/额外字段/重复key等 worker 输出只计bytes/hash。`CorpusTokenizerFailure/0.2` 在实际执行边界设置stage；成功计量/manifest schema、版本绑定、输入输出限额、资产hash、prefix/loss门保持不变。
 
 长期目标：部署前256GB训练池主要导入清洗后的优质现成语料，teachers 定向补人格/情感、长期 memory、多语言、探索、工具编排和校准；CP0不是全模型训练。未来实际部署及睡眠微调目标是尚未拥有/测量的双 DGX Spark 互联，维持同一持续主体和受控权威 memory，默认在线节点加学习节点，不当作统一256GB显存；首轮较大训练仍计划 Together 租赁。
 
