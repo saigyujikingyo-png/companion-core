@@ -9,7 +9,7 @@
     "node": ">=24.16.0 <25"
   },
   "scripts": {
-    "test": "node --test test/*.test.ts test/*.test.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.ts test/*.test.mjs",
     "demo": "node src/replay.ts",
     "demo:curation": "node src/curation-demo.ts",
     "demo:retrieval": "node src/retrieval-demo.ts",

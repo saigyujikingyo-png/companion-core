@@ -1,6 +1,6 @@
 # AR0：有界当前召回与同版 RAM 投影
 
-后续 [SP0A / AR0b0](SCENE-AUTHORITY.md)实现独立 Scene 来源桥和 RAM consumer reset/full-replacement 协议，复用同一 bounded source collector。它不改变本页 RetrievalService、全局 outbox 或持久格式；[durable fanout ADR](ADR-AR0B-DURABLE.md)仍为 DESIGN_ONLY，AR0b持久迁移未实施。
+本页保留原AR0手工refs接口的历史合同。后续 [SP0A / AR0b0](SCENE-AUTHORITY.md)实现Scene来源桥，随后 [schema2 durable fanout](DURABLE-FANOUT.md)落实有界持久metadata消费者，[IF5 / AR0b1](DURABLE-RETRIEVAL.md)新增consumer绑定并接通refresh/query/resolve。旧manual接口与排序保持不变；[原durable ADR](ADR-AR0B-DURABLE.md)的完整目标尚未全部完成，不能再把整个持久层称为未实现。
 
 状态：**SOURCE_CONTRACT_PASS / LOCAL_WHOLE_PASS**，2026-10-26。本合同先以 IN_PROGRESS 写入，作者139/139、独立最终6/6与本机一次whole413/413均通过；原12项L1差量仅保留TOOL_OUTPUT_ONLY历史证据、未重跑，分层不相加。源码发布与CI以对应提交记录及Actions为准，本地检查不预报CI通过。
 [AEMC 研究路线](AEMC-V05-REVIEW.md)的 AR1 质量实验仍为 **EXPERIMENT_NOT_RUN**；[L1.a 学习声明 lint](LEARNING-DESIGN.md)继续使用独立学习许可。
@@ -62,7 +62,7 @@ snapshot 或返回副本不是继续访问许可。跨 `await`、发送 provider
 ## 明确后续
 
 AR0 是绑定 refs 的局部全量重建，完全不调用 `projectionBatch` / `acknowledgeProjection`，不碰现有全局 outbox ACK。
-无 durable cursor、schema migration、历史召回、全 scope 索引或持久多索引同步。重启丢弃全部 RAM 能力，受信宿主重新 bind/refresh。
+原manual-ref AR0切片本身不拥有durable cursor/schema migration，也不提供历史召回、全scope索引或外部多索引持久同步。后续IF5可消费schema2完整持久选集，但超过原AR0界仍全拒绝；重启丢弃RAM能力，受信宿主重新绑定consumer、追平并bind/refresh。
 本批不改 M2 格式/依赖/模型/真实数据/生产部署，也不实现 PPR。
 
 开发顺序：本批 AR0 → **AR0b** 持久 dispatcher/per-consumer 迁移，冻结崩溃重放、重复幂等、删除次序与重建基线 → **AR1** 真实 embedding/BM25/PPR/mean-vs-sampled 的冻结质量实验。

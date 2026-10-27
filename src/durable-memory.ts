@@ -1,27 +1,20 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { MemoryStore } from './store.ts';
 import type { Clock } from './store.ts';
 import type { SourceRef } from './contracts.ts';
 import { CoreError, fail, text } from './validation.ts';
 
-type Terminal = 'pending' | 'ready' | 'taken' | 'acknowledged' | 'failed' | 'unknown';
-type Ingress = { key: string; fingerprint: string; state: Terminal; deliveryId: string | null; feedbackConsumed: boolean; reserved: boolean };
-type Safety = { version: 1; identity: string; maxCalls: number; reserved: number; ingress: Ingress[];
-  lastSourceRef: SourceRef | null; lastAcknowledgedDeliveryId: string | null; lastWall: number };
-type Checkpoint = { version: 1; identity: string; sequence: number; image: string; safety: Safety; revocationHighWater: number };
-type Authority = { version: 1; identity: string; sequence: number; previous: string; checkpoint: string;
-  sha256: string; safety: Safety; revocationHighWater: number };
+import { decodeKey, FORMAT, makeHead, MAX_COMMITS, MAX_IMAGE, MAX_DISK, MAX_AUTHORITY, MAX_AUTHORITY_RECORD,
+  isRestoreDirectoryName, readAuthority, readCheckpoint, record, RESTORE_QUARANTINE, seal, sha, validateHeadPin } from './durable-codec.ts';
+import type { Authority, Checkpoint, DurableHeadPin, Safety, Terminal } from './durable-codec.ts';
+import { readBoundedFile, writeCurrentStateBackup } from './durable-backup.ts';
+import type { BackupFault, BackupVerification } from './durable-backup.ts';
+export type { DurableHeadPin } from './durable-codec.ts';
 export type DurableConfig = { directory: string; identity: string; keyBase64: string };
 export type DurableFault = 'checkpoint-write' | 'checkpoint-fsync' | 'authority-commit' | 'after-authority-commit';
-const FORMAT = 'companion-core-m2-v1';
-const MAX_COMMITS = 4096, MAX_IMAGE = 16 * 1024 * 1024, MAX_DISK = 256 * 1024 * 1024;
-const MAX_AUTHORITY = 64 * 1024 * 1024, MAX_AUTHORITY_RECORD = 4 * 1024 * 1024;
-const sha = (b: Uint8Array | string) => createHash('sha256').update(b).digest('hex');
-const record = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
-const safeInteger = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
 
 /** New M2 format only. The SQLite memory authority never touches disk. The
  * separate safety database contains authenticated ciphertext, never an image or
@@ -35,15 +28,20 @@ export class DurableMemory {
   readonly #fault: ((point: DurableFault) => void) | undefined;
   readonly #wall: () => number;
   #lock: DatabaseSync | undefined; #authority: DatabaseSync | undefined;
+  #latestCheckpoint = ''; #exporting = false;
   #safety: Safety; #sequence = 0; #previous = ''; #bytes = 0; #poisoned = false; #closed = false;
-  constructor(config: DurableConfig, maxCalls: number, options: { clock?: Clock; fault?: (point: DurableFault) => void } = {}) {
+  constructor(config: DurableConfig, maxCalls: number, options: { clock?: Clock; fault?: (point: DurableFault) => void; expectedHead?: DurableHeadPin } = {}) {
     text(config.directory, 4096); text(config.identity, 128);
     if (!isAbsolute(config.directory) || !Number.isSafeInteger(maxCalls) || maxCalls < 0 || maxCalls > 32) fail('DURABLE_CONFIG');
-    if (typeof config.keyBase64 !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(config.keyBase64)) fail('DURABLE_KEY_INVALID');
-    this.#key = Buffer.from(config.keyBase64, 'base64');
-    if (this.#key.length !== 32 || this.#key.toString('base64') !== config.keyBase64) fail('DURABLE_KEY_INVALID');
+    if (options.expectedHead !== undefined) validateHeadPin(options.expectedHead, config.identity);
     if (!statSync(config.directory).isDirectory() || lstatSync(config.directory).isSymbolicLink()) fail('DURABLE_CONFIG');
-    this.#directory = realpathSync(config.directory); this.#identity = config.identity; this.#fault = options.fault;
+    const directory = realpathSync(config.directory);
+    // The reserved canonical name also blocks the mkdir-to-marker crash window.
+    if (isRestoreDirectoryName(basename(directory))) fail('DURABLE_RESTORE_QUARANTINED');
+    // Even an empty, malformed or dangling-link quarantine marker blocks boot.
+    if (readdirSync(config.directory).includes(RESTORE_QUARANTINE)) fail('DURABLE_RESTORE_QUARANTINED');
+    this.#key = decodeKey(config.keyBase64);
+    this.#directory = directory; this.#identity = config.identity; this.#fault = options.fault;
     this.#wall = options.clock?.wall ?? Date.now;
     this.#safety = { version: 1, identity: config.identity, maxCalls, reserved: 0, ingress: [], lastSourceRef: null, lastAcknowledgedDeliveryId: null, lastWall: 0 };
     let store: MemoryStore | undefined;
@@ -67,6 +65,7 @@ export class DurableMemory {
       const marker = join(this.#directory, 'M2.v1.claimed'), authorityPath = join(this.#directory, 'authority.sqlite');
       const initializing = !existsSync(marker);
       if (initializing) {
+        if (options.expectedHead !== undefined) fail('DURABLE_HEAD_ROLLBACK');
         if (readdirSync(this.#directory).some(name => !['writer.sqlite','writer.sqlite-journal','memory-key.dpapi','memory-key.init-claimed'].includes(name))) fail('DURABLE_INCOMPLETE');
         this.#writeNew(marker, Buffer.from(FORMAT));
       } else {
@@ -76,37 +75,17 @@ export class DurableMemory {
       this.#authorityBytes(); // Bound main database and recovery sidecars BEFORE SQLite opens them.
       this.#authority = new DatabaseSync(authorityPath, { timeout: 0, allowExtension: false, enableDoubleQuotedStringLiterals: false });
       if (initializing) this.#authority.exec('CREATE TABLE entries (sequence INTEGER PRIMARY KEY, sealed BLOB NOT NULL) STRICT; PRAGMA user_version=1;');
-      const version = this.#authority.prepare('PRAGMA user_version').get()!.user_version;
-      const layout = this.#authority.prepare("SELECT sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all();
-      if (version !== 1 || layout.length!==1 || layout[0]!.sql !== 'CREATE TABLE entries (sequence INTEGER PRIMARY KEY, sealed BLOB NOT NULL) STRICT'
-        || this.#authority.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok') fail('DURABLE_CORRUPT');
+      const chain = readAuthority(this.#authority, this.#key, this.#identity, maxCalls, options.expectedHead, initializing);
+      this.#sequence = chain.sequence; this.#previous = chain.previous;
+      const latest = chain.latest;
       this.#authority.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA temp_store=MEMORY;');
       this.#authority.enableDefensive(true);
-      const bounds=this.#authority.prepare('SELECT count(*) AS n,coalesce(max(length(sealed)),0) AS largest FROM entries').get()!;
-      if ((bounds.n as number)>MAX_COMMITS||(bounds.largest as number)>MAX_AUTHORITY_RECORD||(!initializing&&bounds.n===0))fail('DURABLE_CORRUPT');
-      let latest: Authority | undefined;
-      for (const row of this.#authority.prepare('SELECT sequence,sealed FROM entries ORDER BY sequence').iterate()) {
-        const sealed = row.sealed as Uint8Array, a = this.#unseal(sealed, 'authority') as Authority;
-        if (!record(a) || a.version !== 1 || a.sequence !== this.#sequence + 1 || row.sequence !== a.sequence
-          || a.previous !== this.#previous || !/^[a-f0-9]{64}$/.test(a.sha256)
-          || !/^checkpoint-[1-9][0-9]*-[a-f0-9-]{36}\.bin$/.test(a.checkpoint) || !safeInteger(a.revocationHighWater)) fail('DURABLE_CORRUPT');
-        if (a.identity !== this.#identity) fail('DURABLE_IDENTITY_MISMATCH');
-        this.#validateSafety(a.safety, maxCalls);
-        if (latest && (a.safety.reserved < latest.safety.reserved || a.revocationHighWater < latest.revocationHighWater)) fail('DURABLE_CORRUPT');
-        this.#sequence = a.sequence; this.#previous = sha(sealed); latest = a;
-      }
       let image: Buffer | undefined;
       if (latest) {
         const path = join(this.#directory, latest.checkpoint); this.#plainFile(path);
         if (statSync(path).size > MAX_IMAGE * 2) fail('DURABLE_LIMIT');
-        const sealed = readFileSync(path); if (sha(sealed) !== latest.sha256) fail('DURABLE_CORRUPT');
-        const checkpoint = this.#unseal(sealed, 'checkpoint') as Checkpoint;
-        if (!record(checkpoint) || checkpoint.version !== 1 || checkpoint.identity !== this.#identity || checkpoint.sequence !== this.#sequence
-          || checkpoint.revocationHighWater !== latest.revocationHighWater || JSON.stringify(checkpoint.safety) !== JSON.stringify(latest.safety)
-          || typeof checkpoint.image !== 'string') fail('DURABLE_CORRUPT');
-        image = Buffer.from(checkpoint.image, 'base64');
-        if (image.length > MAX_IMAGE || image.toString('base64') !== checkpoint.image) fail('DURABLE_CORRUPT');
-        this.#safety = structuredClone(latest.safety);
+        image = readCheckpoint(readFileSync(path), latest, this.#key, this.#identity);
+        this.#safety = structuredClone(latest.safety); this.#latestCheckpoint = latest.checkpoint;
       }
       this.restored = !!image;
       for (const entry of this.#safety.ingress) if (['pending','ready','taken'].includes(entry.state)) entry.state = 'unknown';
@@ -117,7 +96,8 @@ export class DurableMemory {
       }, 0);
       this.#wallNow();
       store = new MemoryStore(':memory:', { clock: { wall: () => this.#wallNow(), monotonic: options.clock?.monotonic ?? (() => performance.now()) }, ...(image ? { image } : {}),
-        persist: (bytes, highWater) => this.#commit(bytes, highWater), assertHealthy:()=>this.#guard(), onPoison:()=>{this.#poisoned=true;} });
+        persist: (bytes, highWater) => this.#commit(bytes, highWater), assertHealthy:()=>this.#guard(), onPoison:()=>{this.#poisoned=true;},
+        assertCloseAllowed:()=>{if(this.#exporting)fail('DURABLE_SNAPSHOT_BUSY');} });
       this.store = store;
       if (latest && this.store.revocationHighWater() !== latest.revocationHighWater) fail('DURABLE_CORRUPT');
       this.#commit(this.store.snapshot(), this.store.revocationHighWater());
@@ -140,39 +120,14 @@ export class DurableMemory {
     }
     return bytes;
   }
-  #validateSafety(s: Safety, maxCalls: number): void {
-    if (!record(s) || s.version !== 1 || s.identity !== this.#identity || !safeInteger(s.reserved) || s.reserved > s.maxCalls
-      || !safeInteger(s.lastWall) || !Array.isArray(s.ingress) || s.ingress.length > 8192) fail('DURABLE_CORRUPT');
-    if (s.maxCalls !== maxCalls) fail('DURABLE_BUDGET_MISMATCH');
-    const seen = new Set<string>();
-    for (const e of s.ingress) {
-      if (!record(e) || !/^[a-f0-9]{64}$/.test(e.key) || !/^[a-f0-9]{64}$/.test(e.fingerprint)
-        || !['pending','ready','taken','acknowledged','failed','unknown'].includes(e.state) || typeof e.feedbackConsumed !== 'boolean' || typeof e.reserved !== 'boolean'
-        || (e.deliveryId !== null && (typeof e.deliveryId !== 'string' || e.deliveryId.length > 128)) || seen.has(e.key)) fail('DURABLE_CORRUPT');
-      seen.add(e.key);
-    }
-  }
-  #seal(value: unknown, purpose: string): Buffer {
-    const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', this.#key, iv);
-    cipher.setAAD(Buffer.from(`${FORMAT}:${purpose}`));
-    const plain = Buffer.from(JSON.stringify(value));
-    try { const data = Buffer.concat([cipher.update(plain), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), data]); }
-    finally { plain.fill(0); }
-  }
-  #unseal(sealed: Uint8Array, purpose: string): unknown {
-    if (sealed.length < 29 || sealed.length > MAX_IMAGE * 2) fail('DURABLE_CORRUPT');
-    try {
-      const decipher = createDecipheriv('aes-256-gcm', this.#key, sealed.subarray(0, 12));
-      decipher.setAAD(Buffer.from(`${FORMAT}:${purpose}`)); decipher.setAuthTag(sealed.subarray(12, 28));
-      const plain = Buffer.concat([decipher.update(sealed.subarray(28)), decipher.final()]);
-      try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plain)); } finally { plain.fill(0); }
-    } catch { fail('DURABLE_CORRUPT'); }
-  }
   #writeNew(path: string, bytes: Uint8Array): void {
     const fd = openSync(path, 'wx', 0o600);
     try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
   }
-  #guard(): void { if (this.#closed || this.#poisoned) fail('DURABLE_UNAVAILABLE'); }
+  #guard(): void {
+    if (this.#closed || this.#poisoned) fail('DURABLE_UNAVAILABLE');
+    if (this.#exporting) fail('DURABLE_SNAPSHOT_BUSY');
+  }
   #wallNow(): number {
     const now = this.#wall();
     if (!Number.isSafeInteger(now) || now < this.#safety.lastWall) { this.#poisoned = true; fail('DURABLE_CLOCK_ROLLBACK'); }
@@ -186,14 +141,14 @@ export class DurableMemory {
       const sequence = this.#sequence + 1, checkpoint = `checkpoint-${sequence}-${randomUUID()}.bin`;
       const state: Checkpoint = { version: 1, identity: this.#identity, sequence, image: Buffer.from(image).toString('base64'),
         safety: this.#safety, revocationHighWater };
-      const bytes = this.#seal(state, 'checkpoint');
+      const bytes = seal(state, 'checkpoint', this.#key);
       if (this.#bytes + bytes.length > MAX_DISK) fail('DURABLE_LIMIT');
       this.#fault?.('checkpoint-write');
       const fd = openSync(join(this.#directory, checkpoint), 'wx', 0o600);
       try { writeFileSync(fd, bytes); this.#fault?.('checkpoint-fsync'); fsyncSync(fd); } finally { closeSync(fd); }
       const a: Authority = { version: 1, identity: this.#identity, sequence, previous: this.#previous, checkpoint,
         sha256: sha(bytes), safety: this.#safety, revocationHighWater };
-      const sealed = this.#seal(a, 'authority');
+      const sealed = seal(a, 'authority', this.#key);
       // Conservatively allow a full rollback journal plus new data and page
       // overhead, rather than relying on SQLite's normal small append journal.
       if(sealed.length>MAX_AUTHORITY_RECORD||2*(this.#authorityBytes()+sealed.length+65536)>MAX_AUTHORITY)fail('DURABLE_LIMIT');
@@ -204,7 +159,7 @@ export class DurableMemory {
       } catch (error) { try { this.#authority!.exec('ROLLBACK'); } catch {} throw error; }
       this.#fault?.('after-authority-commit');
       this.#authorityBytes();
-      this.#sequence = sequence; this.#previous = sha(sealed); this.#bytes += bytes.length;
+      this.#sequence = sequence; this.#previous = sha(sealed); this.#latestCheckpoint = checkpoint; this.#bytes += bytes.length;
     } catch (error) {
       this.#poisoned = true;
       if (error instanceof CoreError) throw error;
@@ -252,6 +207,25 @@ export class DurableMemory {
     if (!entry) fail('DURABLE_REQUEST_REQUIRED'); entry.reserved = true;
     this.#safety.reserved++; this.#save(); // Must complete before a provider can begin I/O.
   }
+  /** Safe metadata only. Observing a head does not make it an independently
+   * trusted/latest anchor; callers must retain it outside rollbackable backups. */
+  get head(): DurableHeadPin { this.#guard(); return makeHead(this.#identity, this.#sequence, this.#previous); }
+  exportBackup(target: string, options: { fault?: (point: BackupFault) => void } = {}): BackupVerification {
+    this.#guard();
+    const inside = relative(this.#directory, resolve(target));
+    if (inside === '' || (inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))) fail('DURABLE_BACKUP_PATH');
+    const head = this.head;
+    this.#exporting = true; // Synchronous snapshot + no reentrant source operations.
+    try {
+      const authority = this.#authority!.serialize();
+      const checkpoint = readBoundedFile(join(this.#directory, this.#latestCheckpoint), MAX_IMAGE * 2);
+      return writeCurrentStateBackup(this.#directory, target, { authority, checkpoint },
+        { key: this.#key, identity: this.#identity, maxCalls: this.#safety.maxCalls, expectedHead: head }, options.fault);
+    } catch (error) {
+      if (error instanceof CoreError) throw error;
+      fail('DURABLE_BACKUP_IO');
+    } finally { this.#exporting = false; } // Export failure cannot poison a healthy source.
+  }
   get reserved(): number { this.#guard(); return this.#safety.reserved; }
   get status() {
     this.#guard(); return { version: 1, identity: this.#identity, sequence: this.#sequence, restored: this.restored,
@@ -265,5 +239,5 @@ export class DurableMemory {
     try { this.#authority?.close(); } catch {} try { this.#lock?.close(); } catch {}
     this.#authority = undefined; this.#lock = undefined;
   }
-  close(): void { if (this.#closed) return; this.#closed = true; try { this.store.close(); } finally { this.#release(); this.#key.fill(0); } }
+  close(): void { if (this.#exporting) fail('DURABLE_SNAPSHOT_BUSY'); if (this.#closed) return; this.#closed = true; try { this.store.close(); } finally { this.#release(); this.#key.fill(0); } }
 }
