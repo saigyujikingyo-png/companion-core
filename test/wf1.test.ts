@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,mkdirSync,readFileSync,writeFileSync,copyFileSync,readdirSync } from 'node:fs';
+import { mkdtempSync,mkdirSync,readFileSync,writeFileSync,copyFileSync,readdirSync,realpathSync,symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -20,8 +20,9 @@ import type { Authority,CampaignSpec,FormalSpec,Json,Plan,Seal } from '../src/wf
 const marker='SYNTHETIC_PRIVATE_MARKER_DO_NOT_PROJECT_70a069bd';
 const error=(code:string)=>(e:unknown)=>e instanceof Wf1Error&&e.code===code&&e.message===code;
 const formal=(n:number):FormalSpec=>({verifier:'json.pointer.v1',input:{document:{fixture:n},pointer:'/fixture'}});
-function fixture(){
-  const base=mkdtempSync(join(tmpdir(),'companion-wf1-fixture-')),root=join(base,'run'),hostRoot=join(base,'host');mkdirSync(root);mkdirSync(hostRoot);
+function fixture(parent=tmpdir()){
+  // Provision canonical roots even when the host's TEMP parent is an alias (for example macOS /var).
+  const base=realpathSync(mkdtempSync(join(parent,'companion-wf1-fixture-'))),root=join(base,'run'),hostRoot=join(base,'host');mkdirSync(root);mkdirSync(hostRoot);
   const authorityPath=join(hostRoot,'authority.json'),key=Buffer.alloc(32,7),now=1000,objective=marker;
   const authority:Authority={schemaVersion:'wf1-host/1',campaignId:'fixture-campaign',revision:1,runtimeId:'fixture-runtime',status:'ACTIVE',expiresAt:3_601_000,head:null,
     rights:{seal:true,coordinate:true,generate:true,review:true,retain:true}};
@@ -97,6 +98,15 @@ test('custody encrypts exact bytes, denies train capability reads and refuses a 
   assert.equal(ports.custody.read(ref).toString('utf8'),marker);assert.throws(()=>ports.train.read(ref),error('WF1_ROLE_ACCESS'));
   const path=join(f.root,'custody-'+ref.id+'.bin'),before=readFileSync(path);assert.ok(!before.includes(Buffer.from(marker)));
   const wrong=createArtifactBroker(f.root,f.spec.id,Buffer.alloc(32,8));assert.throws(()=>wrong.custody.read(ref),error('WF1_SEALED_UNAVAILABLE'));assert.deepEqual(readFileSync(path),before);
+});
+
+test('fixture canonicalizes an aliased TEMP parent while production still refuses alias paths',()=>{
+  const f=fixture(),alias=join(f.base,'alias-run');symlinkSync(f.root,alias,process.platform==='win32'?'junction':'dir');
+  assert.throws(()=>createArtifactBroker(alias,f.spec.id,f.key),error('WF1_PATH'));
+  const throughAlias=fixture(alias),canonical=realpathSync(throughAlias.root);
+  assert.equal(throughAlias.root,canonical);assert.equal(throughAlias.authorityPath,realpathSync(throughAlias.authorityPath));
+  const ports=createArtifactBroker(throughAlias.root,throughAlias.spec.id,throughAlias.key),ref=ports.train.put('fixture-path',marker);
+  assert.equal(ports.train.read(ref).toString('utf8'),marker);
 });
 test('seal prerequisite and request caps refuse before any teacher send',()=>{
   const f=fixture(),m=mockProvider(),c=campaign(f,m.provider);try{
