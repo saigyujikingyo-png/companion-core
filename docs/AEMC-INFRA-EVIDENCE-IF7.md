@@ -1,6 +1,20 @@
 # IF7 本机闭环与 IF0–IF6 发布证据
 
-日期：2026-10-27。IF0–IF6为 **MERGED / CROSS_PLATFORM_CI_PASS**；IF7为 **LOCAL_VERIFIED / UNCOMMITTED / UNMERGED / CI_NOT_RUN**。完整架构仍 `IN_PROGRESS / TRAINING_NOT_ADMITTED`。本页补充实际发布与新切片证据，不改写 [IF6原回执](AEMC-INFRA-EVIDENCE-IF6.md)。源码、合成测试、生产接受和训练准入分账。
+## 本轮发布整合：独立PR候选
+
+2026-10-27。原IF7在 `06fc8b2` 的136文件冻结候选通过893/893与TS后，发现公开main已整合WF2为 `87eab00cd03867535cc8a32afcbbc3a4dd12546a`。未覆盖或重置任一旧树：先在原分支保留12文件恢复提交 `8d480ffbae863daf1c6a02d28d9c187422e87ff7`，再从新main建立 `codex/aemc-if7-integration-20261027`，cherry-pick为源码整合提交 `24f0f797134ad0af23f81b7e7f202dcb20e9e8df`。
+
+冲突仅README/ROADMAP相邻首段，完整保留WF2首段及IF7冻结正文。5个IF7源码/测试文件与原author manifest完全一致，其余280个main原有blob不变；AGENTS及本机TrainingRoot相关既有内容未改，也未新增本机路径。随后只做本页等6份文档的发布时态校正，最终文档提交和精确head见独立PR；相对main仍为原12文件范围，冻结PLAN不变。
+
+新组合只执行一次实际单worker `npm test`，**984/984**、0fail/cancel/skip/todo，Node79.3116973s/npm79.7722263s；此前顺序 `npm run typecheck` exit0，2.7423561s。新的162代码文件manifest前后相同，SHA `e08a8403ae6b25092f8bf0343b15a8af7b36f242b719e6fdc08019067f9c8680`。fresh可用RAM3.960GiB、Node24.16.0/npm11.13.0；原893不是该组合的执行结果，各轮不相加。
+
+原生TEMP证据为 `%LOCALAPPDATA%\Temp\aemc-if7-integration-verify-20261027T131811612Z`。`summary.json` SHA `bdc963ed6b26a8d068a5eec641b0f872a194521db2f27e0268fa666a93b302a5`；`test.log` SHA `d82ba6118a77698c8b074e915009d4c83eeddaec2f75927ef70f1b90e47f523e`；`typecheck.log` SHA `3c60fa22bd04e0a2acd9cfaffcd8a3547c9e21e72735492f1152dcaac8732233`。日志在另一次调用中复读核准；文档时态修正没有改变已测源码，未重跑whole或旧成本实验。
+
+当前为 **LOCAL_VERIFIED / PR_CANDIDATE**，不预写CI或merge通过；精确head须按该PR的全部现有自然CI（core四平台及WF2 native三平台）和独立审查记录验收。未在本机启动真实Harness、调用真实provider/API、训练或部署；whole内合成provider测试正常执行。
+
+## 原冻结回执：以下保留历史时点
+
+下文为原 `06fc8b2` 基线的冻结与IF0–IF6发布快照；其中未提交、未合并、CI_NOT_RUN等状态属于当时记录，不代表本轮PR实时状态。日期：2026-10-27。IF0–IF6为 **MERGED / CROSS_PLATFORM_CI_PASS**；原IF7冻结为 **LOCAL_VERIFIED / UNCOMMITTED / UNMERGED / CI_NOT_RUN**。完整架构仍 `IN_PROGRESS / TRAINING_NOT_ADMITTED`。不改写 [IF6原回执](AEMC-INFRA-EVIDENCE-IF6.md)；源码、合成测试、生产接受和训练准入分账。
 
 ## PR #1 条件合并已完成
 

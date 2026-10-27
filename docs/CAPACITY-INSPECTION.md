@@ -2,6 +2,8 @@
 
 `LocalSqliteAuthority.inspectCapacity()` and `AnchoredVault.inspectCapacity(request)` inspect retained storage without opening a live vault. They do not boot a Store, sweep TTL, change runtime epochs or leases, convert requests to UNKNOWN, admit a legacy import, reconcile a pending operation, or write an inspected image. The frozen [implementation contract](CAPACITY-INSPECTION-PLAN.md) defines this slice; existing [authority capacity admission](AUTHORITY-CAPACITY.md) remains unchanged.
 
+Release candidate, 2026-10-27: the original IF7 freeze at `06fc8b2` passed 893/893 and typecheck. It is now integrated with WF2 main `87eab00`; the new combination passed one single-worker 984/984 run and typecheck, with 162 code files unchanged before/after execution. Exact-head cross-platform CI, independent review release and merge status belong to its separate PR and are not predicted here. This work did not deploy or start training.
+
 ```ts
 const authorityReport = authority.inspectCapacity();
 const report = AnchoredVault.inspectCapacity({
@@ -65,10 +67,10 @@ Final author verification on Windows/Node 24.16.0 used a fresh native TEMP names
 
 The affected files are anchored-vault, authority-capacity, durable-fanout, durable-retrieval, incremental-storage and legacy-m2-import tests. These two suites are separate execution layers, not a whole-suite run. Source and test files were frozen afterward in a new 136-file manifest including the four paths omitted from the earlier draft manifest. Independent whole validation and exact-commit cross-platform CI remain separate; no claim of macOS/Linux IF7 execution or production acceptance follows from these Windows author results.
 
-## Independent closure
+## Original IF7 freeze: independent closure
 
 Two independent Astra max reviewers verified both P2 fixes and the compaction fixture interval, with no remaining actionable P1/P2. Each matched all 136 frozen source/test/package files by bytes and SHA-256. Their final reviews were static; they did not execute tests.
 
 GPT-6.1 Sol separately ran one independent Windows/Node24.16.0 validation: `npm run typecheck` exited 0 and the actual single-worker `npm test` passed **893/893**, with zero failed/cancelled/skipped/todo. Node duration was 51.772s. All 136 files matched the author manifest before execution and were unchanged afterward; a separate read verified the persisted logs. These results do not add to the author counts. See [IF7 evidence and prior PR delivery](AEMC-INFRA-EVIDENCE-IF7.md) for hashes, failures retained and CI boundaries.
 
-IF7 remains local, uncommitted and unmerged. The passing merge-point CI covers IF0–IF6, not this new slice. Production custody, authority rollover, retention/GC, full retrieval diagnosis and AR1 quality remain separate work. No new training, provider, private migration, deployment or merge is authorized by this API.
+The original `06fc8b2` freeze was local, uncommitted and unmerged at that historical checkpoint. The current WF2 integration is a separate PR candidate with the 984/984 evidence above; its exact-head CI and merge results are recorded by the PR. Earlier merge-point CI covers IF0–IF6. Production custody, authority rollover, retention/GC, full retrieval diagnosis and AR1 quality remain separate work. This API grants no training, provider, private migration or deployment permission.

@@ -1,16 +1,16 @@
 # AEMC 训练前基础设施总矩阵 / IF7
 
-[当前开发状态](AEMC-DEVELOPMENT-STATUS.md)汇总18项目标。IF0–IF6 已合并，含 [durable retrieval bridge](DURABLE-RETRIEVAL.md) 与 [authority capacity admission](AUTHORITY-CAPACITY.md)；新 [IF7 容量检查](CAPACITY-INSPECTION.md)在独立工作树通过本机验证，推进I01/I03运维观测，完整目标未关闭。I06质量实验仍未启动。
+[当前开发状态](AEMC-DEVELOPMENT-STATUS.md)汇总18项目标。IF0–IF6已合并；[IF7容量检查](CAPACITY-INSPECTION.md)原 `06fc8b2` 冻结候选完成893/893与TS后，已整合WF2 main `87eab00`，新组合实际984/984与TS通过，当前为独立PR候选。精确head CI和合并结果以PR记录为准；本轮未部署或训练。IF7推进I01/I03观测，完整目标未关闭，I06质量实验仍未启动。
 
 日期：2026-10-27。总状态：**IN_PROGRESS / TRAINING_NOT_ADMITTED**。本文件是完整范围的实施台账。[IF0](AEMC-INFRA-EVIDENCE-IF0.md)、[IF1](AEMC-INFRA-EVIDENCE-IF1.md)、[IF2](AEMC-INFRA-EVIDENCE-IF2.md)保留原快照证据；新 [增量存储/压实](INCREMENTAL-STORAGE.md)与[旧M2导入](LEGACY-M2-IMPORT.md)落实当前本机子集。任何切片都不替代全部目标。
 
 ## 来源与证据
 
-- [当前 IF7 与发布证据](AEMC-INFRA-EVIDENCE-IF7.md)：PR #1 合并 SHA `06fc8b2`，精确 head 的两组四平台 CI 及合并后 main 四平台 CI 均通过。IF7 本机独立893/893、typecheck，136文件前后无漂移；仍未提交或获得新IF7 CI/生产接受。
+- [当前 IF7 与发布证据](AEMC-INFRA-EVIDENCE-IF7.md)：PR #1合并 `06fc8b2` 的跨平台CI已完成。IF7原基线893/893、136文件一致为历史证据；WF2整合组合984/984、162代码文件一致为本轮证据。独立PR的精确head CI另记，不将任一本机结果外推为生产接受。
 - [IF5/IF6 历史组合证据](AEMC-INFRA-EVIDENCE-IF6.md)：874/874、typecheck、两位独立终审与固定协议成本测量通过；相对完整br4的hot逻辑新增字节分别减少47.40%/49.08%/49.64%。原134源码文件冻结及当时尚未执行CI的状态保留；不把旧成本测量当IF7的新测量。
 - [IF3/IF4 历史组合证据](AEMC-INFRA-EVIDENCE-IF4.md)：822/822 whole、typecheck、两位独立终审和最终三 arm 成本测量通过。相对同 codec 完整快照，各工作负载减少47.38%/49.14%/49.58% hot逻辑文件增量；保留源文件，未做GC。该本机合成接受不关闭矩阵其余缺口。
 - 开工基线：`d23921f5abc5be10f15883a1a5289af842299b3f`。manual worktree 分支：`codex/aemc-infrastructure-20261027`；已核 top-level、clean 初态及 log-5。它不是 app-managed worktree。
-- 独立只读查询 GitHub 确认 [validation 40425316221](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425316221) 与 [main 40425590234](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425590234) 均为上述 SHA，Windows/macOS/Ubuntu24.x/Ubuntu24.16 四个 job 均 SUCCESS。这些结果只覆盖基线，不能给本批未提交修改背书。
+- 独立只读查询 GitHub 确认 [validation 40425316221](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425316221) 与 [main 40425590234](https://github.com/saigyujikingyo-png/companion-core/actions/runs/40425590234) 均为上述 SHA，Windows/macOS/Ubuntu24.x/Ubuntu24.16 四个 job 均 SUCCESS。这些历史结果只覆盖当时基线，不覆盖IF7或当前WF2整合组合。
 - 用户研究材料《AEMC v0.9 自主睡眠与跨代认知连续性整合研究总纲》SHA256：`0aef56521b4c809f25dd0ea9051803889ec278a842f1841d143c7e1f81425ec5`。只读材料，不复制原件或把其中设想当执行许可；其 v0.6 附录与新主张分账。
 - 本目录基线文档的已实施/研究阴性/历史原生回执均保留；没有读取真实聊天、私有记忆、密封教学或旧运行库。WF1 DS1/GPT0 STOPPED、0产物是主控交接状态，本批不重试、不重放、不修改 campaign。
 - 证据层固定为：静态合同 → 作者专项 → 独立审查 → whole → 精确新提交 CI → 原生宿主 → 产品/科学接受。各层不相加、不互替。未获得的层标 NOT_RUN/NOT_STARTED/UNKNOWN。

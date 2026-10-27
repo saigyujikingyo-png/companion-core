@@ -2,7 +2,7 @@
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
 
-[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并至 `main`（`06fc8b2`），合并前后四平台 CI 均通过；增量存储、旧 M2 导入、持久消费者检索接线与容量准入已落地。继续开发的 [IF7 容量检查 API](docs/CAPACITY-INSPECTION.md)无需启动 Store，已通过本机独立 **893/893 与类型检查**，仍在独立工作树，未提交或合并。具体发布、审查与验证分层见 [IF7 证据](docs/AEMC-INFRA-EVIDENCE-IF7.md)。完整目标仍 IN_PROGRESS，未授予训练准入。
+[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并（`06fc8b2`），合并前后四平台 CI 均通过。[IF7 容量检查 API](docs/CAPACITY-INSPECTION.md)原冻结候选通过独立893/893与类型检查后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker **984/984 与类型检查**通过。当前为独立PR候选，精确head的跨平台CI与合并状态以该PR实际记录为准；具体分层见 [IF7 证据](docs/AEMC-INFRA-EVIDENCE-IF7.md)。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
 
 [IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；[IF5/IF6 本机组合证据](docs/AEMC-INFRA-EVIDENCE-IF6.md)保留874/874及成本测量，后续提交与合并结果以 IF7 证据为准。本批未启动训练。
 

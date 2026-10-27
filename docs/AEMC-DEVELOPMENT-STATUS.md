@@ -1,6 +1,6 @@
 # AEMC 开发状态、架构取舍与发布进度
 
-2026-10-27。IF0–IF6 已按用户确认的条件经 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并，`main` 合并点为 `06fc8b2265aec5fcba8cb851ac55a14326a99e22`，合并前后四平台 CI 通过。IF7 在此基线上另建 `codex/aemc-capacity-inspection-20261027`，已完成实现、作者验证、两位独立审查及一次独立893/893/TS验证；当前为 **LOCAL_VERIFIED / UNCOMMITTED / UNMERGED**。完整目标仍 **IN_PROGRESS / TRAINING_NOT_ADMITTED**，不计算混合完成率。
+2026-10-27。IF0–IF6 已经 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并于 `06fc8b2265aec5fcba8cb851ac55a14326a99e22`，合并前后四平台CI通过。IF7原冻结候选在该基线完成作者验证、两位独立审查及一次独立893/893/TS验证；随后保留WF2内容整合到 `main` 的 `87eab00cd03867535cc8a32afcbbc3a4dd12546a`。当前 `codex/aemc-if7-integration-20261027` 新组合实际单worker984/984与TS通过，为 **LOCAL_VERIFIED / PR_CANDIDATE**；精确head的跨平台CI、审查放行和合并结果以独立PR记录为准，不能预报通过。本轮未部署或启动训练；完整目标仍 **IN_PROGRESS / TRAINING_NOT_ADMITTED**，不计算混合完成率。
 
 ## 已落地的能力链
 
@@ -50,11 +50,11 @@ IF7先把容量瓶颈变成可核对的事实，再设计长期运维。新 [ins
 
 [IF4证据](AEMC-INFRA-EVIDENCE-IF4.md)保留原822/822、类型检查和三组成本测量；相对同codec完整快照，hot逻辑新增字节减少47.38%–49.58%，不是设备物理写入量。IF5作者关联159/159与独立静态审查完成。IF6作者分项含真实进程恢复、hot journal、legacy登记回滚、吞异常和TTL跨vault接缝，失败/环境拒绝与返验分别保留。[最终IF5/IF6组合证据](AEMC-INFRA-EVIDENCE-IF6.md)已闭合：独立874/874、typecheck与成本测量通过，134源码文件逐项一致，两位独立终审无剩余可操作P1/P2。相对完整br4，三种工作负载的hot逻辑新增字节分别减少47.40%/49.08%/49.64%；不把各轮专项数量相加。
 
-本轮 [IF7证据](AEMC-INFRA-EVIDENCE-IF7.md)新增作者19/19专项、161/161关联、TS0；两位独立Astra max复核两项P2修补无剩余P1/P2。实际GPT-6.1 Sol完成一次本机独立893/893与TS0，136文件运行前后及作者manifest逐项一致。新切片未获得精确提交CI，不复用合并点CI。该轮未重测旧压缩成本。
+原 `06fc8b2` 冻结的 [IF7证据](AEMC-INFRA-EVIDENCE-IF7.md)保留作者19/19专项、161/161关联、TS0及两位独立Astra max审查。Sol当时一次独立893/893与TS0、136文件前后及作者manifest一致。新的WF2整合组合另做一次984/984与TS0，162代码文件前后无漂移；各轮不相加，精确提交CI单独记账。两轮均未重测旧压缩成本。
 
 下一步按依赖推进：
 
-1. IF0–IF6发布闭环已完成。IF7保留独立工作树和冻结源码，后续形成独立提交/PR并验证Windows/macOS/Ubuntu固定Node及Ubuntu24.x；本机通过不替代这些结果，先前合并授权不自动延伸为新切片自动合并。
+1. IF0–IF6发布闭环已完成。IF7独立整合提交候选按本轮用户确认条件送PR，核全部现有跨平台CI及独立审查后才合并；本机通过不替代这些结果，部署与训练仍独立准入。
 2. 容量运维：IF7已提供generation、Store image/ingress、Safety与authority receipts的独立占用。下一阶段先定义保持幂等/消费账本的rollover与冷历史协议及迁移故障门，再讨论GC；不能丢掉已消费ID或UNKNOWN，也不因观测空blockers自动写入。
 3. 生产信任域：冻结authority/custody owner、独立备份/共同回滚威胁、实际恢复RPO/RTO与旧writer停用方案，再做真实环境准入；目录名字本身不提供信任。
 4. AR1质量：先固定来源权利、query/support答案、家族/时间切分、算法版本、质量与总成本门，再比较BM25、embedding、PPR及seed策略。检索引用有效不等于答案正确；本轮不调用模型或训练。
@@ -66,6 +66,6 @@ IF7先把容量瓶颈变成可核对的事实，再设计长期运维。新 [ins
 
 已保留IF4历史38文件原生TEMP候选，含按旧132源码manifest验证的恢复文件；早期沙箱TEMP副本未跨调用保留，已明确作废。最终IF5/IF6候选另存完整文件清单、字节快照与hash，精确原生TEMP位置记在排除入库的交接中；不能冒称等于旧候选。公开文档使用 `%LOCALAPPDATA%\Temp` / `<INFRA_WORKTREE>` 路径占位符，原始日志及本地交接保留精确路径。
 
-IF7工作树以实际合并SHA新建，不复制其他dirty工作。Astra xhigh为唯一实现者，交回后Root只整合文档；两位Astra max只读审查，Sol仅执行独立验证与TEMP留证。原Core/WF2、storage lab及旧infra树保持各自成果。IF7源码在最终136文件manifest冻结后无改动，当前未提交、未发布，也没有新CI；不擅自合并第二个切片。机械发布与验证已按用户要求分派实际GPT-6.1 Sol。
+IF7原工作树保留冻结候选及恢复提交，源码作者为Astra xhigh；原冻结时未提交、未发布且无新CI。Sol随后从WF2 main `87eab00` 新建独立整合树，只机械保留README/ROADMAP双方段落并校正文档时态；5个IF7源码/测试文件与原冻结逐字节一致，其余main代码不改。新组合162代码文件验证与精确PR/CI分层留证。原Core/WF2、storage lab及旧infra树保留各自成果，机械发布与验证按用户要求由实际GPT-6.1 Sol承担。
 
 合并不构成部署、真实私有迁移、provider调用或训练准入；这些接受层始终单独记录。
