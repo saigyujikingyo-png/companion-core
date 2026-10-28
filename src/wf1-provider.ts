@@ -12,6 +12,7 @@ import { pilotBody,validatePilotRequest,validatePilotEnvelopeExtras,WF2_PILOT_PR
 import { unitBody,validateUnitRequest,WF2_UNIT_PROFILE_DIGEST } from './wf2-unit-pilot.ts';
 import type { ResponseDiagnostic } from './wf2-response-diagnostic.ts';
 import { validatePilotRequest as validateCorpusRequest } from './corpus-teacher-types.ts';
+import { PRODUCTION,validateProductionRequest } from './corpus-production-types.ts';
 
 export function providerBody(provider:Provider,payload:unknown,operation:Operation='candidate',policy:CampaignVersion='wf1-campaign/0.3',profileDigest?:string,unitIndex?:number|null):string {
   if(policy==='wf1-campaign/0.8'){if(profileDigest!==WF2_UNIT_PROFILE_DIGEST||unitIndex===undefined)stop('WF2_UNIT_BINDING');return unitBody(provider,payload,operation,unitIndex);}
@@ -35,24 +36,32 @@ export function nativeUsage(value:unknown):Usage|null {
     return {input,completion,reasoning};
   }catch{return null;}
 }
+/** Production-only Retry-After parsing; wall time is independent of elapsed timing. */
+export function productionRetryAfter(value:string|null,wallNow:number):{retryAfterMs:number|null;retryAfterStatus:'MISSING'|'VALID'|'INVALID'}{
+  if(value===null)return {retryAfterMs:null,retryAfterStatus:'MISSING'};
+  let ms:number;
+  if(/^\d+$/.test(value)){const seconds=Number(value);ms=seconds*1000;if(!Number.isSafeInteger(seconds)||!Number.isSafeInteger(ms))return {retryAfterMs:null,retryAfterStatus:'INVALID'};}
+  else{if(!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(value))return {retryAfterMs:null,retryAfterStatus:'INVALID'};const at=Date.parse(value);if(!Number.isSafeInteger(at)||!Number.isSafeInteger(wallNow))return {retryAfterMs:null,retryAfterStatus:'INVALID'};ms=Math.max(0,at-wallNow);}
+  return Number.isSafeInteger(ms)?{retryAfterMs:ms,retryAfterStatus:'VALID'}:{retryAfterMs:null,retryAfterStatus:'INVALID'};
+}
 /** Fixed non-streaming transport. Reasoning, native final and inert strict arguments have separate custody kinds.
  * No env discovery, SDK retries, redirects, tool execution or caller-selected endpoints. */
 export class TeacherProvider {
-  #keys:Record<Provider,string|null>;#fetch:typeof fetch;#busy=false;#now:()=>number;#lane:'SYNTHETIC_FIXTURE'|'NATIVE_FETCH';
-  constructor(credentials:Record<Provider,string|null>,dependencies:{fetch?:typeof fetch;now?:()=>number}={}){
+  #keys:Record<Provider,string|null>;#fetch:typeof fetch;#busy=false;#now:()=>number;#wallNow:()=>number;#lane:'SYNTHETIC_FIXTURE'|'NATIVE_FETCH';
+  constructor(credentials:Record<Provider,string|null>,dependencies:{fetch?:typeof fetch;now?:()=>number;wallNow?:()=>number}={}){
     this.#keys={...credentials};for(const key of Object.values(this.#keys))if(key!==null&&(typeof key!=='string'||key.length===0||key.length>4096||/[\r\n]/.test(key)))stop('WF1_CREDENTIAL');
-    this.#fetch=dependencies.fetch??fetch;this.#lane=dependencies.fetch?'SYNTHETIC_FIXTURE':'NATIVE_FETCH';this.#now=dependencies.now??(()=>performance.now());
+    this.#fetch=dependencies.fetch??fetch;this.#lane=dependencies.fetch?'SYNTHETIC_FIXTURE':'NATIVE_FETCH';this.#now=dependencies.now??(()=>performance.now());this.#wallNow=dependencies.wallNow??Date.now;
   }
   get transportLane(){return this.#lane;}
   async submit(provider:Provider,body:string,port:ArtifactPort,signal:AbortSignal,authorizeSend:<T>(send:()=>T)=>T=send=>send(),contract?:{operation:Operation;binding:RequestBinding}):Promise<ProviderResult>{
-    if(contract)(contract.binding.payloadCodec==='CORPUS_TEACHER_V1'?validateCorpusRequest:contract.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract.binding.protocol==='UNIT_DEEPSEEK_JSON_FINAL_V1'?validateUnitRequest:contract.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'?validatePilotRequest:contract.binding.profileDigest!==undefined?validateNamedDataRequest:contract.binding.payloadCodec===undefined?validateStrictDataRequest:validateFixedSlotRequest)(provider,contract.operation,body,contract.binding);
-    if(this.#busy)stop('WF1_IN_FLIGHT');if(!this.#keys[provider])stop('WF1_CREDENTIAL_UNAVAILABLE');if(Buffer.byteLength(body)>WF1.requestBytes)stop('WF1_REQUEST_BYTES');
+    if(contract)(contract.binding.payloadCodec==='CORPUS_PRODUCTION_V1'?validateProductionRequest:contract.binding.payloadCodec==='CORPUS_TEACHER_V1'?validateCorpusRequest:contract.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract.binding.protocol==='UNIT_DEEPSEEK_JSON_FINAL_V1'?validateUnitRequest:contract.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'?validatePilotRequest:contract.binding.profileDigest!==undefined?validateNamedDataRequest:contract.binding.payloadCodec===undefined?validateStrictDataRequest:validateFixedSlotRequest)(provider,contract.operation,body,contract.binding);
+    if(this.#busy)stop('WF1_IN_FLIGHT');if(!this.#keys[provider])stop('WF1_CREDENTIAL_UNAVAILABLE');if(Buffer.byteLength(body)>(contract?.binding.payloadCodec==='CORPUS_PRODUCTION_V1'?PRODUCTION.requestBytes:WF1.requestBytes))stop('WF1_REQUEST_BYTES');
     const start=this.#now();this.#busy=true;
     const empty:ProviderResult={outcome:'SUBMIT_UNKNOWN',httpStatus:null,failure:'TRANSPORT_UNKNOWN',transportLane:this.#lane,requestedModel:MODELS[provider],returnedModel:null,requestId:null,finishReason:null,
       reasoningPresent:false,contentPresent:false,usage:null,rawRef:null,reasoningRef:null,finalRef:null,elapsedMs:0,responseFailureCode:'TRANSPORT_UNKNOWN',
       ...(contract?{payloadOrigin:contract.binding.protocol==='DEEPSEEK_STRICT_DATA_ARGS_V1'?'STRICT_TOOL_ARGUMENTS' as const:contract.binding.protocol==='DEEPSEEK_NAMED_DATA_ARGS_V1'?'NAMED_TOOL_ARGUMENTS' as const:'NATIVE_FINAL' as const,argumentsRef:null}:{})};
     let rawOperation:Promise<ProviderResult>|undefined;
-    try{return await bounded(signal,WF1.requestMs,inner=>{
+    try{return await bounded(signal,contract?.binding.payloadCodec==='CORPUS_PRODUCTION_V1'?PRODUCTION.requestMs:WF1.requestMs,inner=>{
       rawOperation=this.#request(provider,body,port,inner,empty,authorizeSend,contract).finally(()=>{this.#busy=false;});return rawOperation;
     });}catch{return {...empty,responseFailureCode:'UNKNOWN',elapsedMs:Math.max(0,Math.ceil(this.#now()-start))};}
     finally{if(!rawOperation)this.#busy=false;}
@@ -62,6 +71,7 @@ export class TeacherProvider {
     try{signal.throwIfAborted();response=await authorizeSend(()=>this.#fetch(contract?.binding.endpoint??ENDPOINTS[provider],{method:'POST',redirect:'error',headers:{'content-type':'application/json',accept:'application/json',authorization:'Bearer '+this.#keys[provider]},body,signal}));}
     catch{return {...base,elapsedMs:Math.max(0,Math.ceil(this.#now()-start))};}
     base.httpStatus=Number.isInteger(response.status)&&response.status>=100&&response.status<=599?response.status:null;
+    if(contract?.binding.payloadCodec==='CORPUS_PRODUCTION_V1'&&response.status===429)Object.assign(base,productionRetryAfter(response.headers.get('retry-after'),this.#wallNow()));
     let raw:Uint8Array|undefined,reader:ReadableStreamDefaultReader<Uint8Array>|undefined;const diagnostic:ResponseDiagnostic={code:'UNKNOWN'};
     const put:ArtifactPort['put']=(kind,bytes)=>{try{return port.put(kind,bytes);}catch(error){diagnostic.code='ARTIFACT_WRITE_FAILED';throw error;}};
     try{
@@ -95,7 +105,7 @@ export class TeacherProvider {
       base.outcome=base.finishReason==='stop'&&base.contentPresent&&!pending&&!signal.aborted?'COMPLETED':'INCOMPLETE_OUTPUT';
       base.failure=base.outcome==='COMPLETED'?null:'INCOMPLETE_FINAL';
       base.responseFailureCode=base.outcome==='COMPLETED'?'NONE':'INCOMPLETE_FINAL';
-      if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='CORPUS_TOGETHER_SCHEMA_V1'||contract?.binding.protocol==='UNIT_DEEPSEEK_JSON_FINAL_V1')&&base.outcome==='COMPLETED'){
+      if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='CORPUS_TOGETHER_SCHEMA_V1'||contract?.binding.protocol==='UNIT_DEEPSEEK_JSON_FINAL_V1'||contract?.binding.protocol==='CORPUS_PRODUCTION_DEEPSEEK_V1')&&base.outcome==='COMPLETED'){
         let value;try{value=parseJson(message.content as string);}catch(error){diagnostic.code=argumentsFailureCode(error,message.content as string,'FINAL');throw error;}
         if(value===null||typeof value!=='object'||Array.isArray(value)){diagnostic.code='FINAL_ROOT_NOT_OBJECT';stop('WF2_PILOT_FINAL_ROOT');}
       }
