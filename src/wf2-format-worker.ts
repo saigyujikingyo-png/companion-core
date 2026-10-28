@@ -6,7 +6,7 @@ import { HostAuthority,privateRoot } from './wf1-storage.ts';
 import { TeacherProvider } from './wf1-provider.ts';
 import { FORMAT_PROFILE_DIGEST,FORMAT_RESERVE_MICRO_USD,FormatProbe,validateFormatSpec,WF2_FORMAT } from './wf2-format.ts';
 
-export const FORMAT_BUILD_FILES=['wf2-format.ts','wf2-format-worker.ts','wf1-types.ts','wf1-json.ts','wf1-contract.ts','wf1-verifier.ts','wf1-storage.ts','wf1-provider.ts','wf2-teacher-policy.ts','wf2-strict-data.ts','wf2-fixed-slots.ts','wf2-named-data.ts','wf2-together-pilot.ts','wf2-unit-pilot.ts','wf2-response-diagnostic.ts','runtime.ts','validation.ts'] as const;
+export const FORMAT_BUILD_FILES=['wf2-format.ts','wf2-format-worker.ts','wf1-types.ts','wf1-json.ts','wf1-contract.ts','wf1-verifier.ts','wf1-storage.ts','wf1-provider.ts','wf1-usage-diagnostic.ts','wf2-teacher-policy.ts','wf2-strict-data.ts','wf2-fixed-slots.ts','wf2-named-data.ts','wf2-together-pilot.ts','wf2-unit-pilot.ts','wf2-response-diagnostic.ts','runtime.ts','validation.ts'] as const;
 export function formatBuildDigest():string {return hash(Buffer.concat(FORMAT_BUILD_FILES.flatMap(name=>[Buffer.from(name+'\0'),readFileSync(new URL(name,import.meta.url))])));}
 export function describeFormatWorker(){return {version:'wf2-format-worker-description/1',buildDigest:formatBuildDigest(),profileDigest:FORMAT_PROFILE_DIGEST,
   command:'node src/wf2-format-worker.ts',runtime:'Node >=24.16 <25, native TypeScript stripping; no loader or install',

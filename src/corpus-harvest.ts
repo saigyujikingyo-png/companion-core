@@ -1,5 +1,6 @@
 import { artifactRef } from './wf1-contract.ts';
-import { canonical,copyJson,digest,hash,id,integer,oneOf,parseJson,shape,stop,text,unique } from './wf1-json.ts';
+import { canonical,copyJson,digest,fields,hash,id,integer,oneOf,parseJson,shape,stop,text,unique } from './wf1-json.ts';
+import { USAGE_PARSE_CODES } from './wf1-usage-diagnostic.ts';
 import { verifyFormal } from './wf1-verifier.ts';
 import { UNIT_SCHEDULE,unitBinding,unitBody,unitCompletion,unitPayload,unitProvider,validatePlanUnit,WF2_UNIT_POLICY,WF2_UNIT_PROFILE_DIGEST } from './wf2-unit-pilot.ts';
 import type { CampaignLedger,ArtifactPort } from './wf1-storage.ts';
@@ -12,7 +13,8 @@ function attempt(input:unknown,operation:'candidate'|'review'):Attempt {
   const a=shape(input,['id','operation','provider','phase','requestCommitment','requestRef','familyId','startedAt','requestBinding','unitIndex','deadline','inputReserved','completionReserved','estimatedMicroUsdReserved','outcome','result']);
   id(a.id);id(a.familyId);integer(a.startedAt);integer(a.deadline);digest(a.requestCommitment);ref(a.requestRef,'provider-request');
   if(a.operation!==operation||a.outcome!=='COMPLETED'||!a.result)stop('CP0_QUALIFICATION');
-  const r=shape(a.result,['outcome','requestedModel','returnedModel','requestId','transportLane','httpStatus','failure','finishReason','reasoningPresent','contentPresent','usage','rawRef','reasoningRef','finalRef','elapsedMs','payloadOrigin','responseFailureCode','argumentsRef']);
+  const r=fields(a.result,['outcome','requestedModel','returnedModel','requestId','transportLane','httpStatus','failure','finishReason','reasoningPresent','contentPresent','usage','rawRef','reasoningRef','finalRef','elapsedMs','payloadOrigin','responseFailureCode','argumentsRef'],['usageParseCode']);
+  if(r.usageParseCode!==undefined)oneOf(r.usageParseCode,USAGE_PARSE_CODES);
   const model=operation==='candidate'?WF2_UNIT_POLICY.teacher.model:WF2_UNIT_POLICY.reviewer.model;
   if(r.outcome!=='COMPLETED'||r.requestedModel!==model||r.returnedModel!==model||r.failure!==null||r.httpStatus!==200||r.finishReason!=='stop'||r.contentPresent!==true||r.payloadOrigin!=='NATIVE_FINAL')stop('CP0_QUALIFICATION');
   ref(r.finalRef,'native-final');oneOf(r.transportLane,['NATIVE_FETCH','SYNTHETIC_FIXTURE']);const usage=shape(r.usage,['input','completion','reasoning']);integer(usage.input);integer(usage.completion);if(usage.reasoning!==null)integer(usage.reasoning);
