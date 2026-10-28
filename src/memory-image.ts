@@ -65,6 +65,77 @@ export function inspectMemoryImageCapacity(image:Uint8Array,expected:MemorySchem
         headSequence:state.head_seq as number,floorSequence:state.floor_seq as number},limits:{...FANOUT_LIMITS}}:{applicable:false,counts:null,limits:null}});
   }finally{db.close();}
 }
+
+const REPACK_SOURCE_ID='2026-04-09 11:41:38 4525003a53a7fc63ca75c59b22c79608659ca12f0131f52c18637f829977f20b';
+/** This gate belongs only to physical repack. All temporary sorting and VACUUM
+ * run after these settings, on this owned disposable unnamed RAM connection. */
+export function configureRepackRuntime(db:DatabaseSync):void{
+  const runtime=db.prepare('SELECT sqlite_version() AS version,sqlite_source_id() AS source').get()!;
+  const options=new Set(db.prepare('PRAGMA compile_options').all().map(row=>row.compile_options));
+  if(runtime.version!=='3.53.0'||runtime.source!==REPACK_SOURCE_ID||!options.has('ENABLE_FTS5')
+    ||![1,2,3].some(n=>options.has(`TEMP_STORE=${n}`))||options.has('TEMP_STORE=0')||db.isTransaction)fail('REPACK_RUNTIME');
+  db.exec('PRAGMA temp_store=MEMORY; PRAGMA main.journal_mode=MEMORY; PRAGMA cache_spill=OFF;');
+  if(db.prepare('PRAGMA temp_store').get()!.temp_store!==2||db.prepare('PRAGMA main.journal_mode').get()!.journal_mode!=='memory'
+    ||db.prepare('PRAGMA cache_spill').get()!.cache_spill!==0
+    ||db.prepare('PRAGMA database_list').all().some(row=>row.name!=='main'||row.file!==''))fail('REPACK_RUNTIME');
+}
+
+/** Logical identity, ordered by explicit business PKs, with type and byte-length
+ * framing. FTS rowid and AUTOINCREMENT state are explicitly retained. Implicit
+ * rowids of ordinary tables are not application identities. No row arrays. */
+export function fingerprintMemoryDatabase(db:DatabaseSync,schema:MemorySchema):string{
+  assertMemoryLayout(db,schema);
+  const digest=createHash('sha256');
+  const field=(tag:string,bytes:Uint8Array)=>{digest.update(tag);const n=Buffer.alloc(8);n.writeBigUInt64BE(BigInt(bytes.length));digest.update(n);digest.update(bytes);};
+  const tables=['meta','scopes','nodes','ingress','dependencies','jobs','outbox','artifacts','revocations',
+    ...(schema===2?['fanout_state','fanout_batches','fanout_items','fanout_consumers','fanout_projection','sqlite_sequence']:[]),'memory_fts','memory_fts_config'];
+  for(const table of tables){
+    const info=db.prepare(`PRAGMA table_info("${table}")`).all();
+    const columns=table==='memory_fts'?['rowid','node_id','statement']:info.map(row=>row.name as string);
+    const keys=table==='memory_fts'?['rowid']:table==='sqlite_sequence'?['name']:info.filter(row=>(row.pk as number)>0).sort((a,b)=>(a.pk as number)-(b.pk as number)).map(row=>row.name as string);
+    if(!columns.length||!keys.length)fail('REPACK_LOGICAL_SCHEMA');
+    field('T',Buffer.from(table));for(const column of columns)field('C',Buffer.from(column));
+    const query=db.prepare(`SELECT ${columns.map((column,i)=>`typeof("${column}") AS t${i},CASE WHEN typeof("${column}")='text' THEN CAST("${column}" AS BLOB) ELSE "${column}" END AS v${i}`).join(',')} FROM "${table}" ORDER BY ${keys.map(key=>`"${key}"`).join(',')}`);
+    query.setReadBigInts(true);
+    for(const row of query.iterate()){
+      digest.update('R');
+      for(let i=0;i<columns.length;i++){
+        const type=row[`t${i}`] as string,value=row[`v${i}`];let bytes:Buffer;
+        switch(type){
+          case 'null':bytes=Buffer.alloc(0);break;
+          case 'integer':bytes=Buffer.from(String(value));break;
+          case 'real':bytes=Buffer.alloc(8);bytes.writeDoubleBE(value as number);break;
+          // Hash the exact stored text bytes, including malformed UTF-8; a JS
+          // string conversion could otherwise conflate replacement characters.
+          case 'text':bytes=Buffer.from(value as Uint8Array);break;
+          case 'blob':bytes=Buffer.from(value as Uint8Array);break;
+          default:fail('REPACK_LOGICAL_TYPE');
+        }
+        try{field(type,bytes);}finally{bytes.fill(0);}
+      }
+    }
+    digest.update('E');
+  }
+  return digest.digest('hex');
+}
+
+/** Physical packing only: no MemoryStore boot, live SQL, data deletion or path.
+ * Refuses no benefit before callers create a target or consume an operation ID. */
+export function repackMemoryImage(image:Uint8Array,expected:MemorySchema,expectedHighWater?:number):Uint8Array{
+  assertSchema(expected);const db=openImage(image);let result:Uint8Array|undefined;
+  try{
+    configureRepackRuntime(db);
+    const before=inspectMemoryDatabase(db,expected),fingerprint=fingerprintMemoryDatabase(db,expected);
+    if(expectedHighWater!==undefined&&before.revocationHighWater!==expectedHighWater)fail('ANCHOR_CORRUPT');
+    if(db.isTransaction)fail('REPACK_RUNTIME');
+    db.exec('VACUUM');
+    const after=inspectMemoryDatabase(db,expected);
+    if(before.revocationHighWater!==after.revocationHighWater||fingerprint!==fingerprintMemoryDatabase(db,expected))fail('REPACK_LOGICAL_MISMATCH');
+    result=db.serialize();
+    if(result.length>MAX_IMAGE||result.length>=image.length)fail('REPACK_NO_BENEFIT');
+    const accepted=result;result=undefined;return accepted;
+  }finally{result?.fill(0);db.close();}
+}
 export const MEMORY_MIGRATIONS=Object.freeze([{id:'memory-1-to-2',from:1 as const,to:2 as const}]);
 /** Atomic migration of a private RAM copy. No source file, image byte, lease,
  * runtime epoch or source ledger is modified by the migration itself. */
