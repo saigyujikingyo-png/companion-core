@@ -1,6 +1,7 @@
 /** WF1 is teacher calibration. No Student inference, training or public data publication. */
 import type { FailureDiagnostic } from './wf2-failure-diagnostic.ts';
 import type { ResponseFailureCode } from './wf2-response-diagnostic.ts';
+import type { UsageParseCode } from './wf1-usage-diagnostic.ts';
 export type Json = null|boolean|number|string|Json[]|{[key:string]:Json};
 export type Provider = 'deepseek'|'together';
 export type Operation = 'seal'|'plan'|'rubric'|'candidate'|'review'|'comparison_candidate'|'comparison_review';
@@ -21,7 +22,7 @@ export type ProviderResult = { outcome:Outcome; requestedModel:string; returnedM
   httpStatus:number|null; failure:'TRANSPORT_UNKNOWN'|'HTTP_STATUS'|'RESPONSE_LIMIT'|'RESPONSE_PROTOCOL'|'MODEL_IDENTITY'|'INCOMPLETE_FINAL'|null;
   finishReason:string|null; reasoningPresent:boolean; contentPresent:boolean; usage:Usage|null;
   rawRef:ArtifactRef|null; reasoningRef:ArtifactRef|null; finalRef:ArtifactRef|null; elapsedMs:number;
-  payloadOrigin?:'STRICT_TOOL_ARGUMENTS'|'NAMED_TOOL_ARGUMENTS'|'NATIVE_FINAL';argumentsRef?:ArtifactRef|null;responseFailureCode?:ResponseFailureCode;retryAfterMs?:number|null;retryAfterStatus?:'MISSING'|'VALID'|'INVALID' };
+  payloadOrigin?:'STRICT_TOOL_ARGUMENTS'|'NAMED_TOOL_ARGUMENTS'|'NATIVE_FINAL';argumentsRef?:ArtifactRef|null;responseFailureCode?:ResponseFailureCode;usageParseCode?:UsageParseCode;retryAfterMs?:number|null;retryAfterStatus?:'MISSING'|'VALID'|'INVALID' };
 export type RequestBinding={protocol:'DEEPSEEK_STRICT_DATA_ARGS_V1'|'DEEPSEEK_NAMED_DATA_ARGS_V1'|'NATIVE_JSON_FINAL_V1'|'TOGETHER_SCHEMA_FINAL_V1'|'UNIT_TOGETHER_SCHEMA_FINAL_V1'|'UNIT_DEEPSEEK_JSON_FINAL_V1'|'CORPUS_TOGETHER_SCHEMA_V1'|'CORPUS_DEEPSEEK_JSON_V1'|'CORPUS_PRODUCTION_DEEPSEEK_V1'|'CORPUS_QUALITY_AUDIT_NATIVE_V1';endpoint:string;toolName:string|null;schemaDigest:string;payloadCodec?:'WF2_FIXED_SLOTS_V1'|'WF2_CANONICAL_V1'|'WF2_UNIT_V1'|'CORPUS_TEACHER_V1'|'CORPUS_PRODUCTION_V1'|'CORPUS_QUALITY_AUDIT_V1';profileDigest?:string;unitIndex?:number|null};
 export type Attempt = { id:string; operation:Operation; provider:Provider; phase:Phase; requestCommitment:string;
   requestRef:ArtifactRef;requestBinding?:RequestBinding;unitIndex?:number|null;

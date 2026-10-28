@@ -1,5 +1,5 @@
 import { bounded } from './runtime.ts';
-import { canonical,fields,integer,parseJson,stop,text,Wf1Error } from './wf1-json.ts';
+import { canonical,fields,parseJson,stop,text,Wf1Error } from './wf1-json.ts';
 import { completionCap,ENDPOINTS,MODELS,WF1 } from './wf1-types.ts';
 import type { CampaignVersion,Operation,Provider,ProviderResult,RequestBinding,Usage } from './wf1-types.ts';
 import type { ArtifactPort } from './wf1-storage.ts';
@@ -14,6 +14,7 @@ import type { ResponseDiagnostic } from './wf2-response-diagnostic.ts';
 import { validatePilotRequest as validateCorpusRequest } from './corpus-teacher-types.ts';
 import { PRODUCTION,validateProductionRequest } from './corpus-production-types.ts';
 import { QA,validateAuditRequest } from './corpus-qa-types.ts';
+import { parseNativeUsage } from './wf1-usage-diagnostic.ts';
 
 export function providerBody(provider:Provider,payload:unknown,operation:Operation='candidate',policy:CampaignVersion='wf1-campaign/0.3',profileDigest?:string,unitIndex?:number|null):string {
   if(policy==='wf1-campaign/0.8'){if(profileDigest!==WF2_UNIT_PROFILE_DIGEST||unitIndex===undefined)stop('WF2_UNIT_BINDING');return unitBody(provider,payload,operation,unitIndex);}
@@ -28,14 +29,7 @@ export function providerBody(provider:Provider,payload:unknown,operation:Operati
   if(Buffer.byteLength(body,'utf8')>WF1.requestBytes)stop('WF1_REQUEST_BYTES');return body;
 }
 export function nativeUsage(value:unknown):Usage|null {
-  if(value===undefined||value===null)return null;
-  try{
-    const u=fields(value,['prompt_tokens','completion_tokens'],['total_tokens','prompt_tokens_details','completion_tokens_details','prompt_cache_hit_tokens','prompt_cache_miss_tokens']);
-    const input=integer(u.prompt_tokens),completion=integer(u.completion_tokens);
-    if(u.total_tokens!==undefined&&integer(u.total_tokens)!==input+completion)stop('WF1_USAGE');let reasoning:number|null=null;
-    if(u.completion_tokens_details!==undefined&&u.completion_tokens_details!==null){const d=fields(u.completion_tokens_details,[],['reasoning_tokens','accepted_prediction_tokens','rejected_prediction_tokens']);if(d.reasoning_tokens!==undefined)reasoning=integer(d.reasoning_tokens,0,completion);}
-    return {input,completion,reasoning};
-  }catch{return null;}
+  return parseNativeUsage(value).usage;
 }
 /** Production-only Retry-After parsing; wall time is independent of elapsed timing. */
 export function productionRetryAfter(value:string|null,wallNow:number):{retryAfterMs:number|null;retryAfterStatus:'MISSING'|'VALID'|'INVALID'}{
@@ -59,7 +53,7 @@ export class TeacherProvider {
     if(this.#busy)stop('WF1_IN_FLIGHT');if(!this.#keys[provider])stop('WF1_CREDENTIAL_UNAVAILABLE');if(Buffer.byteLength(body)>(contract?.binding.payloadCodec==='CORPUS_QUALITY_AUDIT_V1'?QA.requestBytes:contract?.binding.payloadCodec==='CORPUS_PRODUCTION_V1'?PRODUCTION.requestBytes:WF1.requestBytes))stop('WF1_REQUEST_BYTES');
     const start=this.#now();this.#busy=true;
     const empty:ProviderResult={outcome:'SUBMIT_UNKNOWN',httpStatus:null,failure:'TRANSPORT_UNKNOWN',transportLane:this.#lane,requestedModel:MODELS[provider],returnedModel:null,requestId:null,finishReason:null,
-      reasoningPresent:false,contentPresent:false,usage:null,rawRef:null,reasoningRef:null,finalRef:null,elapsedMs:0,responseFailureCode:'TRANSPORT_UNKNOWN',
+      reasoningPresent:false,contentPresent:false,usage:null,usageParseCode:'NOT_REACHED',rawRef:null,reasoningRef:null,finalRef:null,elapsedMs:0,responseFailureCode:'TRANSPORT_UNKNOWN',
       ...(contract?{payloadOrigin:contract.binding.protocol==='DEEPSEEK_STRICT_DATA_ARGS_V1'?'STRICT_TOOL_ARGUMENTS' as const:contract.binding.protocol==='DEEPSEEK_NAMED_DATA_ARGS_V1'?'NAMED_TOOL_ARGUMENTS' as const:'NATIVE_FINAL' as const,argumentsRef:null}:{})};
     let rawOperation:Promise<ProviderResult>|undefined;
     try{return await bounded(signal,contract?.binding.payloadCodec==='CORPUS_QUALITY_AUDIT_V1'?QA.requestMs:contract?.binding.payloadCodec==='CORPUS_PRODUCTION_V1'?PRODUCTION.requestMs:WF1.requestMs,inner=>{
@@ -88,7 +82,7 @@ export class TeacherProvider {
       let parsedEnvelope;try{parsedEnvelope=parseJson(new TextDecoder('utf-8',{fatal:true}).decode(raw));}catch(error){diagnostic.code=parseFailureCode(error,'ENVELOPE');throw error;}
       const envelope=fields(parsedEnvelope,['choices'],['id','object','created','model','usage','system_fingerprint','service_tier',...((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='CORPUS_TOGETHER_SCHEMA_V1'||contract?.binding.protocol==='CORPUS_QUALITY_AUDIT_NATIVE_V1'&&provider==='together')?['prompt','warnings']:[])]);
       if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='CORPUS_TOGETHER_SCHEMA_V1'||contract?.binding.protocol==='CORPUS_QUALITY_AUDIT_NATIVE_V1'&&provider==='together'))validatePilotEnvelopeExtras(envelope);
-      base.usage=nativeUsage(envelope.usage);if(envelope.model!==undefined)base.returnedModel=text(envelope.model,256);if(envelope.id!==undefined)base.requestId=text(envelope.id,256);
+      Object.assign(base,parseNativeUsage(envelope.usage));if(envelope.model!==undefined)base.returnedModel=text(envelope.model,256);if(envelope.id!==undefined)base.requestId=text(envelope.id,256);
       if(base.returnedModel!==MODELS[provider])stop('WF1_RETURNED_MODEL');
       if(!Array.isArray(envelope.choices)||envelope.choices.length!==1)stop('WF1_RESPONSE');
       const choice=fields(envelope.choices[0],['index','message','finish_reason'],['logprobs',...((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='CORPUS_TOGETHER_SCHEMA_V1'||contract?.binding.protocol==='CORPUS_QUALITY_AUDIT_NATIVE_V1'&&provider==='together')?['text','seed','top_logprobs']:[])]);if((contract?.binding.protocol==='TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='UNIT_TOGETHER_SCHEMA_FINAL_V1'||contract?.binding.protocol==='CORPUS_TOGETHER_SCHEMA_V1'||contract?.binding.protocol==='CORPUS_QUALITY_AUDIT_NATIVE_V1'&&provider==='together'))validatePilotEnvelopeExtras({},choice);if(choice.index!==0)stop('WF1_RESPONSE');
