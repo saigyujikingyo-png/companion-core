@@ -22,6 +22,35 @@ import type {Safety,Terminal} from '../src/durable-codec.ts';
 import {MAX_PATCH,MAX_REPLAY_BYTES} from '../src/incremental-codec.ts';
 import {DurableMemory} from '../src/durable-memory.ts';
 import {inspectLegacyM2} from '../src/legacy-m2-import.ts';
+import {CoreError} from '../src/validation.ts';
+
+// Test policy is independent of configureRepackRuntime: never classify support by
+// catching the production gate. Probe failures fail module loading, not admission.
+const auditedSource='2026-04-09 11:41:38 4525003a53a7fc63ca75c59b22c79608659ca12f0131f52c18637f829977f20b';
+const expectation=process.env.IF9_REPACK_EXPECTATION??'metadata-policy';
+assert.ok(['required-supported','metadata-policy'].includes(expectation),'invalid IF9_REPACK_EXPECTATION');
+const runtime=(()=>{
+  const db=new DatabaseSync(':memory:');
+  try{
+    const row=db.prepare('SELECT sqlite_version() AS version,sqlite_source_id() AS source').get()!;
+    assert.equal(typeof row.version,'string');assert.equal(typeof row.source,'string');
+    const options=db.prepare('PRAGMA compile_options').all().map(row=>row.compile_options);
+    assert.ok(options.length>0&&options.every(value=>typeof value==='string'));
+    return{version:row.version,source:row.source,options};
+  }finally{db.close();}
+})();
+const metadataSupported=runtime.version==='3.53.0'&&runtime.source===auditedSource&&runtime.options.includes('ENABLE_FTS5')
+  &&[1,2,3].some(n=>runtime.options.includes(`TEMP_STORE=${n}`))&&!runtime.options.includes('TEMP_STORE=0');
+// A required baseline always runs positive tests, even if its metadata regresses.
+const positiveRepack=expectation==='required-supported'||metadataSupported;
+const runtimeRefusal=(error:unknown)=>error instanceof CoreError&&error.code==='REPACK_RUNTIME'&&error.message==='REPACK_RUNTIME';
+test(`IF9 runtime capability contract: ${positiveRepack?'POSITIVE_REQUIRED':'REJECTION_REQUIRED'} (${expectation})`,t=>{
+  if(expectation==='required-supported')assert.equal(metadataSupported,true,'required baseline lost audited repack support');
+  t.diagnostic(JSON.stringify({node:process.versions.node,sqlite:runtime.version,source:runtime.source,expectation,
+    positiveRepack:positiveRepack?'EXECUTED_BY_NAMED_TESTS':'NOT_EXECUTED_UNSUPPORTED',
+    positiveScenarios:['schema1/2 shrink','no-benefit/schema/mismatch refusal','target boot/fencing','three child crash points','competing authority'],
+    runtimeRefusal:positiveRepack?'MOCK_GATE_CASES':'REAL_RAM_AND_PUBLIC_AND_CHILD',nonRepack:'ALWAYS_EXECUTED'}));
+});
 
 const clock={wall:()=>100,monotonic:()=>0},who={tenantId:'synthetic',subjectId:'subject',personaId:'companion',relationshipId:'test'};
 const input=(key:string,body='Synthetic violet memory')=>({source:'synthetic',eventKey:key,evidence:{speakerId:'subject',speakerRole:'subject' as const,
@@ -51,6 +80,36 @@ function fillAndRevoke(store:MemoryStore,count=12){
 }
 const request=(f:ReturnType<typeof fixture>,operationId='repack')=>({authority:f.authority,vaultId:'v',keys:f.config.keys,maxCalls:4,
   targetDirectory:join(f.root,operationId),storageDomain:'payload',operationId});
+function authorityBusiness(directory:string):string{
+  const db=new DatabaseSync(join(directory,'authority.sqlite'),{readOnly:true});
+  try{return JSON.stringify(['metadata','vaults','receipts'].map(table=>[table,db.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all()]));}
+  finally{db.close();}
+}
+function withoutVacuum(body:()=>void):void{
+  const exec=DatabaseSync.prototype.exec;let calls=0;
+  DatabaseSync.prototype.exec=function(sql:string){if(/\bVACUUM\b/i.test(sql))calls++;return exec.call(this,sql);};
+  try{body();assert.equal(calls,0,'unsupported runtime must not execute VACUUM');}finally{DatabaseSync.prototype.exec=exec;}
+}
+
+if(!positiveRepack)for(const schema of [1,2] as const)test(`UNSUPPORTED schema${schema}: real RAM/public repack refuses REPACK_RUNTIME with no mutation or consumed ID`,t=>{
+  const f=fixture(t,schema);fillAndRevoke(f.v.store,6);f.v.claim('held','p');f.v.reserve('held');
+  const r=request(f),old=f.v.head,before=reconstruct(old,directoryReader(old.directory),f.config.keys,4),imageHash=sha(before.image);
+  const source=files(old.directory),authorityFiles=files(f.authority.directory),business=authorityBusiness(f.authority.directory);
+  let faults=0;
+  withoutVacuum(()=>{
+    assert.throws(()=>repackMemoryImage(before.image,schema,before.state.revocationHighWater),runtimeRefusal);
+    assert.throws(()=>AnchoredVault.repackStore({...r,fault:()=>{faults++;}}),runtimeRefusal);
+  });
+  assert.equal(faults,0);assert.equal(sha(before.image),imageHash);assert.equal(existsSync(r.targetDirectory),false);
+  assert.deepEqual(files(old.directory),source);assert.equal(authorityBusiness(f.authority.directory),business);
+  assert.deepEqual(files(f.authority.directory),authorityFiles);assert.deepEqual(f.v.head,old);
+  const row=f.authority.inspect('v')!;assert.equal(row.status,'ACTIVE');assert.equal(row.pending,null);assert.deepEqual(row.head,old);
+  assert.equal(f.authority.transaction(tx=>tx.receipt('v',r.operationId)),null);
+  const after=reconstruct(old,directoryReader(old.directory),f.config.keys,4);
+  assert.deepEqual(after.image,before.image);assert.deepEqual(after.state,before.state);after.image.fill(0);before.image.fill(0);
+  // Reusing this exact ID for an ordinary transform proves refusal consumed none.
+  const compacted=AnchoredVault.compact(r);assert.equal(compacted.operationId,r.operationId);assert.equal(compacted.kind,'compaction');
+});
 
 test('IF9 explicit Store repack API exists',()=>{
   assert.equal(typeof (AnchoredVault as any).repackStore,'function');
@@ -61,7 +120,7 @@ test('IF9 explicit Safety packed profile writes a bounded frame',()=>{
   assert.equal(frame.baseline.depth,1);
 });
 
-for(const schema of [1,2] as const)test(`schema${schema} repack preserves every logical value and shrinks ordinary freed pages`,()=>{
+if(positiveRepack)for(const schema of [1,2] as const)test(`SUPPORTED schema${schema} repack preserves every logical value and shrinks ordinary freed pages`,()=>{
   const store=new MemoryStore(':memory:',{schemaVersion:schema,clock});
   try{
     const data=fillAndRevoke(store);
@@ -79,20 +138,27 @@ for(const schema of [1,2] as const)test(`schema${schema} repack preserves every 
   }finally{store.close();}
 });
 
-test('runtime gate precedes inspection, rejects source/config/file/transaction and admits only configured unnamed RAM',()=>{
+if(positiveRepack)test('SUPPORTED native runtime configures unnamed RAM and rejects an open transaction',()=>{
   const db=new DatabaseSync(':memory:');try{configureRepackRuntime(db);assert.equal(db.prepare('PRAGMA temp_store').get()!.temp_store,2);
     db.exec('BEGIN');assert.throws(()=>configureRepackRuntime(db),/REPACK_RUNTIME/);db.exec('ROLLBACK');}finally{db.close();}
-  for(const change of ['source','version','temp0','missing-temp','fts','filename']){
-    let writes=0;const fake={isTransaction:false,exec:()=>{writes++;},prepare:(sql:string)=>({
+});
+else test('UNSUPPORTED native runtime rejects REPACK_RUNTIME before configuration or VACUUM',()=>{
+  const db=new DatabaseSync(':memory:');const before=db.prepare('PRAGMA temp_store').get();
+  try{withoutVacuum(()=>assert.throws(()=>configureRepackRuntime(db),runtimeRefusal));assert.deepEqual(db.prepare('PRAGMA temp_store').get(),before);}
+  finally{db.close();}
+});
+test('runtime gate mock source/config/file/transaction refusals always execute independently',()=>{
+  for(const change of ['source','version','temp0','missing-temp','fts','transaction','filename','attached','temp-setting','journal','spill']){
+    let writes=0;const fake={isTransaction:change==='transaction',exec:()=>{writes++;},prepare:(sql:string)=>({
       get:()=>sql.startsWith('SELECT')?{version:change==='version'?'3.52.0':'3.53.0',source:change==='source'?'unknown':'2026-04-09 11:41:38 4525003a53a7fc63ca75c59b22c79608659ca12f0131f52c18637f829977f20b'}:
-        sql.includes('temp_store')?{temp_store:2}:sql.includes('journal_mode')?{journal_mode:'memory'}:{cache_spill:0},
-      all:()=>sql.includes('compile_options')?[...(change==='fts'?[]:[{compile_options:'ENABLE_FTS5'}]),...(change==='missing-temp'?[]:[{compile_options:change==='temp0'?'TEMP_STORE=0':'TEMP_STORE=1'}])]:[{name:'main',file:change==='filename'?'file.sqlite':''}]
+        sql.includes('temp_store')?{temp_store:change==='temp-setting'?1:2}:sql.includes('journal_mode')?{journal_mode:change==='journal'?'delete':'memory'}:{cache_spill:change==='spill'?1:0},
+      all:()=>sql.includes('compile_options')?[...(change==='fts'?[]:[{compile_options:'ENABLE_FTS5'}]),...(change==='missing-temp'?[]:[{compile_options:change==='temp0'?'TEMP_STORE=0':'TEMP_STORE=1'}])]:[{name:change==='attached'?'other':'main',file:change==='filename'?'file.sqlite':''}]
     })};
-    assert.throws(()=>configureRepackRuntime(fake as any),/REPACK_RUNTIME/);assert.equal(writes,change==='filename'?1:0);
+    assert.throws(()=>configureRepackRuntime(fake as any),runtimeRefusal);assert.equal(writes,['filename','attached','temp-setting','journal','spill'].includes(change)?1:0);
   }
 });
 
-test('Store no benefit and malformed schema refuse without target or consumed operation; different transform conflicts',t=>{
+if(positiveRepack)test('SUPPORTED Store no benefit and malformed schema refuse without target or consumed operation; different transform conflicts',t=>{
   const f=fixture(t,1),r=request(f),before=f.v.head;
   assert.throws(()=>AnchoredVault.repackStore(r),/REPACK_NO_BENEFIT/);assert.equal(existsSync(r.targetDirectory),false);assert.deepEqual(f.v.head,before);
   assert.equal(f.authority.transaction(tx=>tx.receipt('v',r.operationId)),null);
@@ -101,19 +167,24 @@ test('Store no benefit and malformed schema refuse without target or consumed op
   const s=new MemoryStore(':memory:',{clock});try{const image=s.snapshot();database(image,db=>{db.exec('CREATE TABLE extra (id INTEGER)');assert.throws(()=>repackMemoryImage(db.serialize(),1),/SCHEMA_MISMATCH/);});}finally{s.close();}
 });
 
-test('typed fingerprint catches changed values even when counts/highwater match; mismatch refuses packing',()=>{
+test('typed fingerprint always detects changed values, FTS config and malformed UTF8 even when counts/highwater match',()=>{
   const s=new MemoryStore(':memory:',{clock});try{fillAndRevoke(s,6);const image=s.snapshot(),before=fingerprint(image,1);
     database(image,db=>{db.exec("UPDATE revocations SET reason='changed'");assert.notEqual(fingerprintMemoryDatabase(db,1),before);});
     database(image,db=>{db.exec("INSERT INTO memory_fts(memory_fts,rank) VALUES('secure-delete',0)");assert.notEqual(fingerprintMemoryDatabase(db,1),before);});
     database(image,db=>{db.exec("INSERT INTO meta VALUES ('opaque',CAST(x'FF' AS TEXT))");const first=fingerprintMemoryDatabase(db,1);
       db.exec("UPDATE meta SET value=CAST(x'FE' AS TEXT) WHERE key='opaque'");assert.notEqual(fingerprintMemoryDatabase(db,1),first);});
+    assert.equal(fingerprint(image,1),before);
+  }finally{s.close();}
+});
+if(positiveRepack)test('SUPPORTED post-VACUUM logical mismatch refuses packing and preserves original image',()=>{
+  const s=new MemoryStore(':memory:',{clock});try{fillAndRevoke(s,6);const image=s.snapshot(),before=fingerprint(image,1);
     const exec=DatabaseSync.prototype.exec;DatabaseSync.prototype.exec=function(sql:string){const result=exec.call(this,sql);if(sql==='VACUUM')exec.call(this,"UPDATE revocations SET recorded_at=101");return result;};
     try{assert.throws(()=>repackMemoryImage(image,1),/REPACK_LOGICAL_MISMATCH/);}finally{DatabaseSync.prototype.exec=exec;}
     assert.equal(fingerprint(image,1),before);
   }finally{s.close();}
 });
 
-test('public Store repack retains source, Safety, jobs, ledger and all fanout state; new generation boots and accepts writes',t=>{
+if(positiveRepack)test('SUPPORTED public Store repack retains source, Safety, jobs, ledger and all fanout state; new generation boots and accepts writes',t=>{
   const f=fixture(t),data=fillAndRevoke(f.v.store),handle=f.v.store.registerConsumer('scene',data.scope,'scene-source-refs-v1');f.v.store.pruneJournal(2);
   f.v.claim('pending','p');f.v.reserve('pending');f.v.source(data.current);
   const old=f.v.head,decoded=reconstruct(old,directoryReader(old.directory),f.config.keys,4),before=files(old.directory),r=request(f);
@@ -209,7 +280,8 @@ for(const profile of ['blocks-br4-v1','full-br4-v1'] as const)test(`${profile} e
   d.image.fill(0);after.image.fill(0);
 });
 
-for(const operation of ['repack','upgrade'] as const)for(const point of ['prepared','record-published','finalized'] as const)test(`actual child ${operation} exit ${point} preserves source and exact retry/reconcile`,t=>{
+function crashCases(operation:'repack'|'upgrade'):void{
+for(const point of ['prepared','record-published','finalized'] as const)test(`${operation==='repack'?'SUPPORTED ':''}actual child ${operation} exit ${point} preserves source and exact retry/reconcile`,t=>{
   const f=fixture(t,1);if(operation==='repack')fillAndRevoke(f.v.store,6);f.v.claim('held','p');f.v.reserve('held');const r=request(f);f.v.close();const source=files(f.config.directory);
   const script=`import {AnchoredVault} from './src/anchored-vault.ts';import {LocalSqliteAuthority} from './src/local-sqlite-authority.ts';let chunks=[];for await(const c of process.stdin)chunks.push(c);const x=JSON.parse(Buffer.concat(chunks).toString());const authority=LocalSqliteAuthority.open(x.authority),keys={...x.keys,storageDEK:Buffer.from(x.keys.storageDEK,'base64'),ingressKey:Buffer.from(x.keys.ingressKey,'base64')};const request={...x.request,authority,keys,fault:p=>{if(p===x.point)process.exit(42);}};if(x.operation==='repack')AnchoredVault.repackStore(request);else AnchoredVault.upgradeStorage({...request,storageProfile:'blocks-br4-safety-br4-v1'});`;
   const child=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),windowsHide:true,timeout:20000,encoding:'utf8',input:JSON.stringify({authority:f.authorityConfig,operation,point,
@@ -224,6 +296,24 @@ for(const operation of ['repack','upgrade'] as const)for(const point of ['prepar
   }
   const reconciled=AnchoredVault.reconcile(r),retried=operation==='repack'?AnchoredVault.repackStore(r):AnchoredVault.upgradeStorage({...r,storageProfile:PACKED_SAFETY_PROFILE});assert.deepEqual(reconciled,retried);
   const d=reconstruct(reconciled.newHead,directoryReader(r.targetDirectory),f.config.keys,4);assert.equal(d.state.safety.ingress[0]!.state,'pending');assert.equal(d.state.safety.reserved,1);d.image.fill(0);
+});
+}
+crashCases('upgrade');
+if(positiveRepack)crashCases('repack');
+else test('UNSUPPORTED actual child repack refuses REPACK_RUNTIME before every fault hook and VACUUM; no mutation or consumed ID',t=>{
+  const f=fixture(t,2);fillAndRevoke(f.v.store,6);f.v.claim('held','p');f.v.reserve('held');const r=request(f);f.v.close();
+  const row=f.authority.inspect('v')!,source=files(f.config.directory),authorityFiles=files(f.authority.directory),business=authorityBusiness(f.authority.directory);
+  const before=reconstruct(row.head!,directoryReader(f.config.directory),f.config.keys,4);
+  const script=`import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {CoreError} from './src/validation.ts';import {AnchoredVault} from './src/anchored-vault.ts';import {LocalSqliteAuthority} from './src/local-sqlite-authority.ts';let chunks=[];for await(const c of process.stdin)chunks.push(c);const x=JSON.parse(Buffer.concat(chunks).toString());const authority=LocalSqliteAuthority.open(x.authority),keys={...x.keys,storageDEK:Buffer.from(x.keys.storageDEK,'base64'),ingressKey:Buffer.from(x.keys.ingressKey,'base64')};let faults=0,vacuums=0;const exec=DatabaseSync.prototype.exec;DatabaseSync.prototype.exec=function(sql){if(/\\bVACUUM\\b/i.test(sql))vacuums++;return exec.call(this,sql);};try{assert.throws(()=>AnchoredVault.repackStore({...x.request,authority,keys,fault:()=>{faults++;}}),e=>e instanceof CoreError&&e.code==='REPACK_RUNTIME'&&e.message==='REPACK_RUNTIME');assert.equal(faults,0);assert.equal(vacuums,0);console.log(JSON.stringify({code:'REPACK_RUNTIME',faults,vacuums}));}finally{DatabaseSync.prototype.exec=exec;authority.close();}`;
+  const child=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),windowsHide:true,timeout:20000,encoding:'utf8',input:JSON.stringify({authority:f.authorityConfig,
+    request:{vaultId:'v',maxCalls:4,targetDirectory:r.targetDirectory,storageDomain:'payload',operationId:r.operationId},keys:{version:2,keyEpoch:1,storageDEK:Buffer.from(f.config.keys.storageDEK).toString('base64'),ingressKey:Buffer.from(f.config.keys.ingressKey).toString('base64')}})});
+  assert.equal(child.status,0,child.stderr);assert.deepEqual(JSON.parse(child.stdout),{code:'REPACK_RUNTIME',faults:0,vacuums:0});
+  assert.equal(existsSync(r.targetDirectory),false);assert.deepEqual(files(f.config.directory),source);
+  assert.equal(authorityBusiness(f.authority.directory),business);assert.deepEqual(files(f.authority.directory),authorityFiles);
+  assert.deepEqual(f.authority.inspect('v'),row);assert.equal(row.pending,null);assert.equal(f.authority.transaction(tx=>tx.receipt('v',r.operationId)),null);
+  const after=reconstruct(row.head!,directoryReader(f.config.directory),f.config.keys,4);
+  assert.deepEqual(after.image,before.image);assert.deepEqual(after.state,before.state);after.image.fill(0);before.image.fill(0);
+  assert.equal(AnchoredVault.compact(r).operationId,r.operationId);
 });
 
 test('packed profile backup/restore/rekey/compaction remain self-contained and profile-bound',t=>{
@@ -258,17 +348,21 @@ test('legacy import into packed profile keeps lineage, admission, Safety and bac
   assert.equal(AnchoredVault.verifyBackup({backupDirectory:newBackup,authority,keys,maxCalls:4}).head.legacyImport!.lineageId,checked.lineageId);
 });
 
-test('authority guard fences a real competitor during repack and another vault pending refuses new maintenance',t=>{
+if(positiveRepack)test('SUPPORTED authority guard fences a real competitor during repack',t=>{
   const f=fixture(t,1);fillAndRevoke(f.v.store,4);let attempts=0;const r=request(f);
   AnchoredVault.repackStore({...r,fault:point=>{if(point==='stage-written'){
     attempts++;const script=`import assert from 'node:assert/strict';import {LocalSqliteAuthority} from './src/local-sqlite-authority.ts';const a=LocalSqliteAuthority.open(${JSON.stringify(f.authorityConfig)});assert.throws(()=>a.inspect('v'),/ANCHOR_BUSY/);a.close();`;
     const child=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),windowsHide:true,timeout:15000,encoding:'utf8'});assert.equal(child.status,0,child.stderr);
-  }}});assert.equal(attempts,1);f.v.close();
+  }}});assert.equal(attempts,1);
+});
+
+test('another vault pending always refuses new maintenance without changing source or receipt',t=>{
+  const f=fixture(t,1);fillAndRevoke(f.v.store,4);f.v.close();
   const other=AnchoredVault.create({...f.config,directory:join(f.root,'other'),vaultId:'other'},4,{clock});t.after(()=>other.close());
   const pending={...request(f,'other-upgrade'),vaultId:'other',storageProfile:PACKED_SAFETY_PROFILE};
   assert.throws(()=>AnchoredVault.upgradeStorage({...pending,fault:p=>{if(p==='prepared')throw Error('STOP');}}),/STOP/);
-  const source=files(r.targetDirectory),head=f.authority.inspect('v')!.head;
+  const source=files(f.config.directory),head=f.authority.inspect('v')!.head;
   assert.throws(()=>AnchoredVault.upgradeStorage({...request(f,'blocked'),storageProfile:PACKED_SAFETY_PROFILE}),/ANCHOR_.*PENDING/);
-  assert.deepEqual(f.authority.inspect('v')!.head,head);assert.deepEqual(files(r.targetDirectory),source);assert.equal(f.authority.transaction(tx=>tx.receipt('v','blocked')),null);
+  assert.deepEqual(f.authority.inspect('v')!.head,head);assert.deepEqual(files(f.config.directory),source);assert.equal(f.authority.transaction(tx=>tx.receipt('v','blocked')),null);
   AnchoredVault.reconcile(pending);
 });
