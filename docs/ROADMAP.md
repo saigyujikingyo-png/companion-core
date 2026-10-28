@@ -2,9 +2,9 @@
 
 **本批 WF2：** [教师控制与小批验收](WF2-VALIDATION.md)分列旧阴性、公开检查与代码证据；first-four 仅以4 unique（3 train /1 dev）`PILOT_ONLY`为上限，余12 families /8 pairs `NOT_RUN`。最终 medium 已停止、合格0，工程 `PARTIAL`。下一批先做无正文阶段/拒绝诊断，再研究小单元生成/任务拆分；独立确定性标签须单列来源与新协议，均非本批已实现。
 
-**当前 IF8–IF10：** IF0–IF8已合并；IF8的[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596e`，merge7/7 CI通过。[IF9](CAPACITY-REPACK.md)的[PR #5](https://github.com/saigyujikingyo-png/companion-core/pull/5)在 `beed926` 完成独立审查及14/14跨平台CI，仍OPEN / DRAFT、未合并。[IF10](SAFETY-COLD-SEGMENT.md)已实现不可变Safety终态冷段，完整幂等、UNKNOWN、额度、反馈与撤销保持；独立本机1098/1098及strict TS通过，228执行文件无漂移。目前未提交、无IF10 CI；审查与成本范围见[新证据](AEMC-INFRA-EVIDENCE-IF10.md)。[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。本轮未部署或启动训练。
+**当前工程基线：** IF9（PR #5）、IF10（#6）、IF11 authority永久冷路由（#12）、当前代fanout（#17）、E1a（#13）及E1b（#16）已合并。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的BCD/共享raw HTTP/E2合并为 `b58310c`，tree与1393项/strict/独审候选一致，push+PR 14/14通过；合并后main 7/7 CI通过。[E3a](ENDOGENOUS-LIFECYCLE.md) 本轮新增 SINGLE_MESSAGE_CONTROL_PROTOTYPE，一生一个入站槽/一次显式consider，接收不等于接单；真实AgentAPI、多消息rollover、ACTION、部署、跨机及训练不在本片接受范围。历史测试数量和成本不跨轮相加。
 
-容量路线已从IF9压实推进到[IF10 Safety不可变终态单冷段](SAFETY-COLD-SEGMENT.md)的本机候选；下一步按[长期容量设计](LONG-TERM-CAPACITY-DESIGN.md)分别冻结Store整图及authority精确索引路由合同，不能丢失任何旧键或把UNKNOWN归档当解决。IF10保留8192总限、旧文件和精确当前恢复约束，三组小历史成本为负收益，较大固定案例只证明有条件的应用写入减少。生产authority/custody与恢复准入独立推进。[三域架构决议](ADR-MEMORY-TOOL-BOUNDARY.md)明确内在痕迹可有损修订、外部原件经主动工具访问、精确控制面继续无损；有限PDF双路径/情感痕迹/冷热修订闭环及[I17有限候选原型](BAYESIAN-RECONSTRUCTION-DESIGN.md)可在稳定基线上独立推进。输入与评测先冻结，认知效果、AR1、生产与训练仍未接受。以下更早切片保留历史验证范围。
+容量路线已有IF9物理压实、IF10 Safety终态冷段和IF11 authority有界永久冷路由；当前代fanout只消除旧代历史对当前512 nodes/2048 edges准入的污染，不释放永久历史。[长期容量设计](LONG-TERM-CAPACITY-DESIGN.md)继续保留Store完整RAM serialize、精确旧键/UNKNOWN、原总限及可信恢复边界；P5冷Store镜像负成本实验暂停，不推广或调参。IF10三组小历史成本为负，较大固定案例只证明有条件的应用写入减少。生产authority/custody与恢复准入独立推进。[三域架构决议](ADR-MEMORY-TOOL-BOUNDARY.md)与[I17](BAYESIAN-RECONSTRUCTION-DESIGN.md)仍按各自冻结入口推进，不以工程接口验收代替认知质量或训练接受。以下更早切片保留当时验证范围，其中旧“持久fanout未实现”时态已被后续实现取代。
 
 [历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
 

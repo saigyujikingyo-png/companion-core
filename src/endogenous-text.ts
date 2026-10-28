@@ -1,7 +1,7 @@
 import { isPromise } from 'node:util/types';
 import { profileDigest, validateHybridProfile } from './hybrid-profile.ts';
 import type { HybridProfile } from './hybrid-profile.ts';
-import type { EndogenousTextPort } from './endogenous-lifecycle.ts';
+import type { EndogenousTextPort, EndogenousTextRequest } from './endogenous-lifecycle.ts';
 import type { RawTextMessage, RawTextPort } from './raw-text-http.ts';
 
 const instruction = 'Choose one bounded internal lifecycle decision. No human input is supplied. '
@@ -22,6 +22,12 @@ export function createEndogenousTextPort(raw: RawTextPort, declaredProfile: Hybr
         controlId: request.ownerEpoch, decisionId: request.decisionId, sequence: request.sequence, trigger: request.trigger,
         modelProfile: { profileId: profile.profileId, digest, identity: 'DECLARATION_ONLY', loadedModel: 'NOT_AUTHENTICATED' } }) }),
     ]);
+    return dispatchRawText(raw, request, messages, generate);
+  };
+}
+
+/** Shared native lifetime bridge; purpose-specific codecs supply their own messages. */
+export function dispatchRawText(raw: RawTextPort, request: EndogenousTextRequest, messages: readonly RawTextMessage[], generate = raw.generate): Promise<string> {
     // Reservation invokes this port under the authority lock. Leave that guard before
     // any Store/currentness check, but retain the ORIGINAL dispatch deadline.
     return Promise.resolve().then(() => {
@@ -39,5 +45,4 @@ export function createEndogenousTextPort(raw: RawTextPort, declaredProfile: Hybr
         || Object.hasOwn(promise, 'then') || Object.hasOwn(promise, 'constructor')) return new Promise<string>(() => {});
       return promise; // Settlement follows the raw port's fetch/read/cancel cleanup.
     });
-  };
 }

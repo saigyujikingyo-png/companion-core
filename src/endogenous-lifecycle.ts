@@ -5,12 +5,12 @@ import { fail } from './validation.ts';
 /** E1a is a trusted, process-local scheduling port, not an evidence/model/action API. */
 export type EndogenousRequest = Readonly<{
   ownerEpoch: string; decisionId: string; sequence: number; session: number;
-  trigger: 'boot' | 'resume' | 'wake'; signal: AbortSignal;
+  trigger: 'boot' | 'resume' | 'wake' | 'consider'; signal: AbortSignal;
 }>;
 /** A stable ordinary native Promise containing JSON; no thenables/subclasses/species hooks. */
 export type EndogenousDecisionPort = (request: EndogenousRequest) => Promise<string>;
 export type EndogenousChoice = { version: 1; choice: 'REST' | 'NOOP'; nextWakeInMs?: number };
-export type EndogenousProfile = 'rest-noop-v1' | 'text-choice-v1';
+export type EndogenousProfile = 'rest-noop-v1' | 'text-choice-v1' | 'message-choice-v1';
 export type EndogenousTextRequest = EndogenousRequest & Readonly<{
   deadlineMonotonicMs: number; validateCurrent(): true;
 }>;
@@ -38,9 +38,12 @@ export interface EndogenousSession {
   close(): void;
   read(): EndogenousSnapshot;
 }
+export type EndogenousMessageSession = Pick<EndogenousSession, 'pause' | 'close' | 'read'> & {
+  consider(deadlineMonotonicMs: number): void;
+};
 /** Trusted synchronous checkpoint hooks. No hook may return before its commit finishes. */
 export interface EndogenousJournal {
-  withReservedDispatch(entry: EndogenousEntry, invoke: () => void): 'DISPATCHED' | 'STOPPED_UNRESERVED' | 'STOPPED_RESERVED';
+  withReservedDispatch(entry: EndogenousEntry, invoke: () => void, deadlineMonotonicMs?: number): 'DISPATCHED' | 'STOPPED_UNRESERVED' | 'STOPPED_RESERVED';
   terminal(entry: EndogenousEntry, deadlineMonotonicMs?: number): void;
   validateCurrent?(deadlineMonotonicMs: number): void;
   stop(entries: readonly EndogenousEntry[], state: EndogenousState): void;
@@ -66,7 +69,7 @@ function decision(input: unknown, profile: EndogenousProfile): EndogenousChoice 
   try { value = JSON.parse(input); } catch { fail('E1_INVALID_DECISION'); }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('E1_INVALID_DECISION');
   const v = value as Record<string, unknown>;
-  if (profile === 'text-choice-v1' && v.choice === 'TEXT') {
+  if (profile !== 'rest-noop-v1' && v.choice === 'TEXT') {
     if (Object.keys(v).sort().join(',') !== 'choice,text,version' || v.version !== 1 || typeof v.text !== 'string'
       || !v.text.trim() || Buffer.from(v.text, 'utf8').toString('utf8') !== v.text || v.text.includes('\0') || Buffer.byteLength(v.text, 'utf8') > 160) fail('E1_INVALID_DECISION');
     return { version: 1, choice: 'TEXT', text: v.text };
@@ -74,6 +77,7 @@ function decision(input: unknown, profile: EndogenousProfile): EndogenousChoice 
   if (Object.keys(v).some(key => !['version', 'choice', 'nextWakeInMs'].includes(key)) || v.version !== 1
     || (v.choice !== 'REST' && v.choice !== 'NOOP')) fail('E1_INVALID_DECISION');
   if (Object.hasOwn(v, 'nextWakeInMs')) {
+    if (profile === 'message-choice-v1') fail('E1_INVALID_DECISION');
     if (typeof v.nextWakeInMs !== 'number' || !integer(v.nextWakeInMs, MIN_WAKE_MS, MAX_TIME_MS)) fail('E1_INVALID_DECISION');
     return { version: 1, choice: v.choice, nextWakeInMs: v.nextWakeInMs };
   }
@@ -103,10 +107,11 @@ export class EndogenousOwner {
   readonly #profile: EndogenousProfile;
   readonly #acceptText: EndogenousTextAcceptance | undefined;
   readonly #settledObserver: EndogenousSettlement | undefined;
+  readonly #stopped: (() => void) | undefined;
   #textAcceptance: { valid: boolean } | null = null;
 
   constructor(options: { limits?: Partial<EndogenousLimits>; clock?: () => number; journal?: EndogenousJournal;
-    profile?: EndogenousProfile; acceptText?: EndogenousTextAcceptance; settled?: EndogenousSettlement;
+    profile?: EndogenousProfile; acceptText?: EndogenousTextAcceptance; settled?: EndogenousSettlement; stopped?: () => void;
     recovered?: { controlId: string; entries: readonly EndogenousEntry[]; session: number; remainingMs: number } } = {}) {
     const limits = { maxCalls: 16, maxDurationMs: 60_000, callTimeoutMs: 5_000, maxResultBytes: 4_096, ...options.limits };
     if (!integer(limits.maxCalls, 1, 64) || !integer(limits.maxDurationMs, 10, MAX_TIME_MS)
@@ -116,10 +121,11 @@ export class EndogenousOwner {
     this.#clock = options.clock ?? (() => performance.now());
     this.#journal = options.journal;
     this.#profile = options.profile ?? 'rest-noop-v1';
-    if (!['rest-noop-v1', 'text-choice-v1'].includes(this.#profile)
-      || (options.acceptText !== undefined && (this.#profile !== 'text-choice-v1' || typeof options.acceptText !== 'function'))) fail('E1_INVALID_PORT');
+    if (!['rest-noop-v1', 'text-choice-v1', 'message-choice-v1'].includes(this.#profile)
+      || (options.acceptText !== undefined && (this.#profile === 'rest-noop-v1' || typeof options.acceptText !== 'function'))) fail('E1_INVALID_PORT');
     this.#acceptText = options.acceptText;
     this.#settledObserver = options.settled;
+    this.#stopped = options.stopped;
     this.#epoch = options.recovered?.controlId ?? randomUUID();
     this.#restored = options.recovered !== undefined;
     if (options.recovered) {
@@ -129,10 +135,19 @@ export class EndogenousOwner {
     }
   }
 
-  bind(port: EndogenousDecisionPort): EndogenousSession { return this.#bind(port); }
+  bind(port: EndogenousDecisionPort): EndogenousSession {
+    if (this.#profile === 'message-choice-v1') fail('E1_CONTROL_PROFILE');
+    return this.#bind(port);
+  }
   bindText(port: EndogenousTextPort): EndogenousSession {
     if (this.#profile !== 'text-choice-v1') fail('E1_CONTROL_PROFILE');
     return this.#bind(port);
+  }
+  bindMessage(port: EndogenousTextPort): EndogenousMessageSession {
+    if (this.#profile !== 'message-choice-v1') fail('E1_CONTROL_PROFILE');
+    const session = this.#bind(port), binding = this.#binding!;
+    return Object.freeze({ pause: session.pause, close: session.close, read: session.read,
+      consider: (deadline: number) => this.#exclusive(() => this.#activate(binding, 'consider', deadline)) });
   }
   #bind(port: EndogenousDecisionPort | EndogenousTextPort): EndogenousSession {
     return this.#exclusive(() => {
@@ -202,7 +217,10 @@ export class EndogenousOwner {
   #stop(binding: Binding, state: EndogenousState, code: Code, persist = true): void {
     // Automatic capacity exhaustion stops generation, not an already accepted final
     // TEXT delivery. Explicit pause/close/fault still revoke that ephemeral capability.
-    if (!(state === 'exhausted' && code === 'CAPACITY')) this.#revokeTextAcceptance();
+    if (!(state === 'exhausted' && code === 'CAPACITY')) {
+      this.#revokeTextAcceptance();
+      try { this.#stopped?.(); } catch { /* Trusted local cleanup cannot prevent the stop. */ }
+    }
     this.#clearTimer();
     binding.fence = {};
     // Closed/faulted/exhausted sessions cannot be revived by pause.
@@ -229,27 +247,33 @@ export class EndogenousOwner {
     return now;
   }
   #capacity(): boolean {
-    return this.#entries.length < this.#limits.maxCalls && (this.#entries.length + 1) * RESULT_BYTES <= this.#limits.maxResultBytes;
+    return (this.#profile !== 'message-choice-v1' || this.#entries.length === 0)
+      && this.#entries.length < this.#limits.maxCalls && (this.#entries.length + 1) * RESULT_BYTES <= this.#limits.maxResultBytes;
   }
-  #activate(binding: Binding, trigger: 'boot' | 'resume'): void {
+  #activate(binding: Binding, trigger: 'boot' | 'resume' | 'consider', deadline?: number): void {
     this.#current(binding);
     if (this.#closed || this.#faulted) fail('E1_OWNER_CLOSED');
-    if (binding.state !== (trigger === 'boot' ? 'created' : 'paused')) fail('E1_STATE');
+    if (this.#profile === 'message-choice-v1' && trigger !== 'consider') fail('E1_CONTROL_PROFILE');
+    if (trigger === 'consider') {
+      if (this.#entries.length || !['created', 'paused'].includes(binding.state)
+        || !Number.isFinite(deadline) || deadline! < 0) fail('E3_CONSIDER_UNAVAILABLE');
+    } else if (binding.state !== (trigger === 'boot' ? 'created' : 'paused')) fail('E1_STATE');
     // No waiter or auto-resume: the host must explicitly try again after actual settlement.
     if (this.#raw) fail('E1_RAW_BUSY');
     const now = this.#now(binding);
     if (now === null) return;
+    if (deadline !== undefined && now >= deadline) fail('E3_MESSAGE_EXPIRED');
     if (this.#expires === null) this.#expires = now + this.#limits.maxDurationMs;
-    this.#dispatch(binding, trigger, now);
+    this.#dispatch(binding, trigger, now, deadline);
   }
-  #dispatch(binding: Binding, trigger: EndogenousRequest['trigger'], now: number): void {
+  #dispatch(binding: Binding, trigger: EndogenousRequest['trigger'], now: number, deadline?: number): void {
     if (this.#raw) fail('E1_RAW_BUSY');
     if (!this.#capacity()) { this.#stop(binding, 'exhausted', 'CAPACITY'); return; }
     const sequence = this.#entries.length + 1;
     const entry: Entry = { decisionId: `${this.#epoch}:${sequence}`, session: binding.id, sequence, outcome: 'PENDING', code: null };
     this.#entries.push(entry); // Reserve call, retained entry and full response allowance before any callback.
     const raw: Raw = { binding, fence: binding.fence, entry, controller: new AbortController(),
-      deadline: Math.min(now + this.#limits.callTimeoutMs, this.#expires!) };
+      deadline: Math.min(now + this.#limits.callTimeoutMs, this.#expires!, deadline ?? Infinity) };
     this.#raw = raw;
     binding.state = 'deciding'; binding.code = null;
     this.#arm(binding, raw.deadline, 'deadline', now);
@@ -259,7 +283,7 @@ export class EndogenousOwner {
         try {
           const request = { ownerEpoch: this.#epoch, decisionId: entry.decisionId,
             sequence, session: binding.id, trigger, signal: raw.controller.signal };
-          if (this.#profile === 'text-choice-v1') {
+          if (this.#profile !== 'rest-noop-v1') {
             raw.request = Object.freeze({ ...request, deadlineMonotonicMs: raw.deadline,
               validateCurrent: () => this.#exclusive(() => this.#validateText(raw, false)) });
             promise = (binding.port as EndogenousTextPort)(raw.request);
@@ -268,7 +292,7 @@ export class EndogenousOwner {
         catch { portThrew = true; }
       };
       if (this.#journal) {
-        const dispatched = this.#journal.withReservedDispatch(entry, invoke);
+        const dispatched = this.#journal.withReservedDispatch(entry, invoke, raw.deadline);
         if (dispatched !== 'DISPATCHED') {
           // Only an explicit, durably stopped pre-reservation refusal can discard the RAM
           // preview. This is not a refund; uncertain writes retain their conservative slot.
@@ -322,7 +346,7 @@ export class EndogenousOwner {
       let choice: ReturnType<typeof decision>;
       try { choice = decision(value, this.#profile); }
       catch { this.#unknown(raw, 'INVALID_DECISION'); this.#stop(binding, 'paused', 'INVALID_DECISION'); return; }
-      try { this.#journal?.terminal({ ...raw.entry, outcome: choice.choice }, this.#profile === 'text-choice-v1' ? raw.deadline : undefined); }
+      try { this.#journal?.terminal({ ...raw.entry, outcome: choice.choice }, this.#profile !== 'rest-noop-v1' ? raw.deadline : undefined); }
       catch { this.#unknown(raw, 'JOURNAL'); this.#journalFailed(); return; }
       raw.entry.outcome = choice.choice;
       if (choice.choice === 'TEXT') {

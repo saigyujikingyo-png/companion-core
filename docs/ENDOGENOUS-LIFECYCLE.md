@@ -135,6 +135,8 @@ host.acknowledgeNativeCompletion(deliveryId);
 
 Host 在离开 dispatch guard 后用原 `decisionId` 调用既有 Safety `claim/reserve`，每次慢写后复核原期限。准备、take 和 ACK 继续写既有 `ready/taken/acknowledged`，并在写后重新核 scope/runtime、窗口和期限。REST/NOOP 或未投递 TEXT 的 Safety `failed` 在已预扣时保守归 `unknown`；这表示未完成投递，和 E1 已知 REST/NOOP/TEXT 选择是不同事实。已真实完成的 native ACK 若提交后才越期，持久 acknowledged 事实不可逆，接口仍拒绝、不续期、不重放。没有为清账制造 ready 或 ACK。
 
+E2/E3 Host 构造时捕获原 scope，并把它显式传入 control open/bind。同一 Vault guard 中必须匹配 id、generation、consentRevision、runtimeEpoch，检查早于 runFence 写入与 owner 占用；不能把 scope B 的 control/额度用于 scope A 的窗口与交付。错配拒绝后仍可用正确 scope 构造。低层 `openEndogenousTextControl` / `openEndogenousMessageControl` 保留不传 expectedScope 的受信 control-only 调用兼容性；这不构成 Host scope 绑定，两个 Host 均不可省略该检查。
+
 TEXT 通信窗口使用独立 RAM `CompanionWindowPolicy`，不修改旧 human-ACK grant 门、不修改 observed presence、不唤醒旧主动交流 scheduler。dispatch 捕获原 window id/generation、权限 epoch（或无窗口）及原到期；新 grant 不复活旧文本。没有窗口仍可决策，结果不投递。`clearCommunicationWindow()` 表示 off/quiet；pause/reset/close 撤销窗口与待投递文本，close 是明确断连。共享 CoupledSession 收到显式 `quiet:true` 时也总撤销 TEXT 窗口，包括旧 quiet 已为 true 的情况；仅 availability 变化会使旧请求／delivery 失效，但保留尚有效的独立窗口供未来请求使用。available=false 本身不是断连。
 
 模型输出不经过 `submit()`，不创建人类 Event/Evidence、memory Proposal、appraisal、反馈或奖励。Coupled 新 prepare 入口只接收受信的已接受文本，take/ACK 使用独立的 durable TEXT 证明和原期限，不误用只适用于 deciding 的 dispatch validator。最后一次配额的成功 TEXT 可以在原许可内完成一次投递；显式 pause/close 仍撤销它。崩溃／重开不恢复正文、通信窗口或原 monotonic deadline，普通重开默认 paused；未决 UNKNOWN/held 不退款、不通过新 owner/ID 清除。仅原同进程实际 settle 观察者可清 held。
@@ -142,3 +144,28 @@ TEXT 通信窗口使用独立 RAM `CompanionWindowPolicy`，不修改旧 human-A
 交付证明还必须通过本次接受的 RAM seal：同步 hook 活动期间可用于 prepare，只有 hook 返回 literal `true` 后才继续有效；false、throw、Promise/thenable 返回立即撤销。显式 pause/close、fault 和重绑定也撤销已保存证明，不能只凭历史 TEXT 条目恢复许可。自动 CAPACITY 停止保留已接受末次文本的原到期许可；之后显式 close 会关闭 RAM owner、停止 timer 并撤销证明，持久控制若已 EXHAUSTED 则保留该不可逆停止态，重开仍拒绝，不改变消费或 held。`onReady` 元数据通知在 E1 settlement 临界区退出后的微任务中发出，先复核同一 ready、原窗口／期限与交付证明；已撤销的排队通知直接丢弃。通知可以同步调用 Host pause/close，普通异步回调拒绝被消费，不等待、不续期，也不改变 raw settlement。
 
 作者入口 `test/endogenous-text.test.ts` 使用 P4/schema2 的真实新建文件 Vault、固定合成时钟、受控故障和真实 localhost HTTP：无输入/无窗口、明确窗口、慢 claim/reserve/terminal/ready/taken/ACK、取消后 cleanup 挂起、purge/consent/runtime fencing、晚 settle、正常及未决重开、旧 profile 拒绝 TEXT。合成 native consumer 完成后 ACK 只验证接口组合，不是 DSH 部署或真实模型选择质量。当前 DSH stdio 仍使用旧 M2，本切片没有迁移该生产入口，也没有运行真实模型、音频、训练或正式质量实验。独立审查、whole 与跨平台 CI 仍需按新候选验收。
+
+## E3a：单消息控制原型
+
+`SINGLE_MESSAGE_CONTROL_PROTOTYPE` 使用显式独立的 `message-choice-v1`：一个 control 一生最多一个入站槽、一次显式 `consider()`。它不是长期收件队列，control rollover、真正 AgentAPI 接线、跨机和 ACTION 执行尚未实现。现有 `rest-noop-v1` / `text-choice-v1` 的格式、默认行为和提示词保持；旧 control 不能转换 profile、清账或增加额度。
+
+```ts
+vault.createEndogenousMessageControl(scope, { maxDurationMs: 60_000, callTimeoutMs: 5_000 });
+const host = new AnchoredMessageHost({ vault, scope, raw, profile, resources, clock,
+  binding: { origin: authenticatedOrigin, route: authorizedRoute } });
+const receipt = host.receive({ messageId, text, expiresAt: originalWallExpiry });
+// MESSAGE_RECEIVED：metadata durable / body volatile；零模型、记忆提取、任务或执行。
+host.grantCommunicationWindow('fresh-explicit-permission', 10_000, 'trusted-stdio');
+host.consider(); // 可选且仅一次；送达不等于接单。
+// TEXT 的 ready/take/实际 native completion/ACK 与 E2 相同，不能把 receipt 当完成证明。
+```
+
+可信调用者在构造前认证 origin、route 与 scope；消息 payload 只有 messageId、text、expiresAt，不能自称身份。正文最多4096 UTF-8 bytes，拒绝不完整编码、NUL、额外字段及 accessor/proxy；正文只保留于 RAM，不写 Event/Evidence/Job/Proposal。`src/message-choice.ts` 使用独立 external-message-choice codec，把来信明确标为外部引用；输出仅 REST（本次延后、不安排重试）、NOOP（沉默）或≤160 UTF-8 bytes的 TEXT（回应或拒绝的表达），整包仍≤256 bytes，禁止 nextWake/ACTION/额外字段。它不推断长期人格或主体选择质量。
+
+原 `endogenous_control_v1` 只在新 profile 下含 `inbound: null | {keyDigest,fingerprint,expiresAt,sequence:null|1}`。Vault HMAC 的 key 绑定原 origin/route/messageId，fingerprint 绑定正文、原 wall expiry 与原 control/scope 身份；没有第二张表或账本。首次 receipt 仅在精确 CAS 持久完成后返回。同 key/fingerprint 返回已有技术事实，不补 RAM、不续期；异 fingerprint 冲突，异 key 拒绝占用。完整未来最坏单 entry/数字/终态先验序列化校验仍受16KiB门约束，最多一条消费记录，不提高原上限。
+
+`consider` 需要最初 live RAM admission；同一次 reservation CAS 将 sequence=1、原 controlId:1、PENDING、held 和完整消费一起落盘，再沿用 Safety 原 ID claim/reserve。deadline 取原 message expiry、control expiry、consider 起点加 callTimeout 的最小值；message expiry 可以长于 control，其原值保留于 fingerprint/receipt，不能借此延长运行许可。monotonic 起点在可能慢的 guard 读取前采样；receive、reservation、Safety 写入、raw 最后 literal-true gate、accept、take、ACK 后均检查原期限。REST/NOOP 不调度下一次，末次 TEXT 的原交付能力仍可完成一次 native ACK。模型选择、Safety 未完成投递的 UNKNOWN 和实际 native ACK 分层保留，不退款或制造 ACK 清账。
+
+`withdraw()` / pause / close（明确断连）和 scope/runtime fence 撤销原 RAM admission、正文引用与待交付能力。未 consider 的消息没有 timer；read、重复 receive 或 consider 观察到原期限已过时惰性撤销。新通信窗口不会复活旧正文或输出。已传入 raw transport 的引用随其真实 cleanup 生命周期释放，取消不是实际 settlement。普通恢复保留 HMAC 元数据、原 ID/expiry/消费，但绝不补正文或自动 consider；sequence=null 明确为 NOT_CONSIDERED_UNAVAILABLE，不能伪称 UNKNOWN。PENDING 沿原协议变 UNKNOWN/held，只有原同进程 actual settle 可释放 held。新 message facade 可以在 EXHAUSTED/RECONCILE_REQUIRED 下读取 receipt 与重复事实，不能 dispatch；旧 E1/E2 的停止态重开门不变。FENCED/身份错误继续拒绝执行 facade，而普通 Core/backup 依原协议可用。
+
+`test/message-choice.test.ts` 用 P4/schema2 真文件、合成 native Promise/consumer 与一次真实子进程退出验证收件、一次考虑、独立交付、慢写越期、冲突、撤销、重开和 UNKNOWN/held。本片不调用真实模型/AgentAPI/DSH、工具执行、音频或训练。独审、whole、CI 与产品/跨机接受继续分开。
