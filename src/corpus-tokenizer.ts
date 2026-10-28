@@ -54,7 +54,14 @@ export function validateTokenizerProfile(input:unknown):CorpusTokenizerProfile {
 export function measureCorpusRow(row:CorpusRow,profileInput:unknown,pythonPath:string):CorpusTokenMeasurement {
   const profile=validateTokenizerProfile(profileInput);if(!isAbsolute(text(pythonPath,4096)))stop('CP0_TOKENIZER_RUNTIME');
   const own=copyJson(row) as unknown as CorpusRow;if(own.evidenceClass!=='EXACT_VERIFIED'||own.selectedTargetScope!=='EXACT_RATIONAL_TYPED_TARGET_ONLY'||verifyFormal({verifier:own.projection.tool,input:own.projection.input},own.projection.typedTarget).status!=='VERIFIED')stop('CP0_TOKENIZER_ROW');
-  const user=canonical({tool:own.projection.tool,input:own.projection.input}),assistant=canonical(own.projection.typedTarget),rowDigest=hash(canonical(own)),tokenizerProfileDigest=hash(canonical(profile));
+  const user=canonical({tool:own.projection.tool,input:own.projection.input}),assistant=canonical(own.projection.typedTarget),rowDigest=hash(canonical(own));
+  return measureBoundCorpusText({rowDigest,user,assistant},profile,pythonPath);
+}
+/** Pure bounded token measurement. This grants no data/evidence/training status; callers
+ * must validate their own row contract. CP0's exact-rational row gate remains above. */
+export function measureBoundCorpusText(pair:{rowDigest:string;user:string;assistant:string},profileInput:unknown,pythonPath:string):CorpusTokenMeasurement {
+  const profile=validateTokenizerProfile(profileInput);if(!isAbsolute(text(pythonPath,4096)))stop('CP0_TOKENIZER_RUNTIME');
+  const own=shape(copyJson(pair),['rowDigest','user','assistant']),rowDigest=digest(own.rowDigest),user=text(own.user,65536),assistant=text(own.assistant,65536),tokenizerProfileDigest=hash(canonical(profile));
   if(Buffer.byteLength(user)+Buffer.byteLength(assistant)>profile.maxInputBytes)stop('CP0_TOKENIZER_LIMIT');
   const env:NodeJS.ProcessEnv={HF_HUB_OFFLINE:'1',TRANSFORMERS_OFFLINE:'1',TOKENIZERS_PARALLELISM:'false',PYTHONDONTWRITEBYTECODE:'1'};
   for(const name of ['SystemRoot','WINDIR','TEMP','TMP','PATH'])if(process.env[name]!==undefined)env[name]=process.env[name];

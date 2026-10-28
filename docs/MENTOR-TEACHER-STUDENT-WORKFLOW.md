@@ -57,7 +57,9 @@ flowchart LR
 | WF5–6 | BF16 merge等价、NVFP4再量化与独立复评，随后shadow、当前权限激活及合法ancestor回退 |
 | WF7 | 私有运行feedback/sleep候选，前台抢占、去重与有界新attempt；不自动回灌公共Student |
 
-Student v1起点为已后训练的 [Nemotron 3.5 Super VL BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16)。[AutoModel精确recipe](https://docs.nvidia.com/nemo/automodel/nightly/recipes-e2e-examples/nemotron-3-5-super-vl)的8×H100/约39GiB每卡仅是CORD-v2工作负载参考；不代表本项目资源已准入。[NIM指南](https://docs.nvidia.com/nim/large-language-models/latest/get-started/advanced/get-started-nemotron-3.5-super-vl.html)区分BF16 LoRA与NVFP4服务能力。TJ1小训练独立验收，Windows实际runner不自动具备Linux多卡LoRA能力。
+**2026-10-28 模型选择修订：** Student v1 的交付目标固定为[官方 Nemotron 3.5 Super VL NVFP4 混合精度版本](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4/tree/da5b2650a835292c678994a1fa3fb653250fb508)，不要求所有模块、梯度或优化器都用四位。上表 BF16 LoRA/merge 指官方支持的适配与 QAD/export 路线候选；实际后端仍需验证，也不默认 packed NVFP4 checkpoint 可直接微调。[精度、Mamba 状态与训练路线](CORPUS-TEACHER-PILOT.md#official-precision-and-training-route)单独说明。
+
+原研究中的 [AutoModel recipe](https://docs.nvidia.com/nemo/automodel/nightly/recipes-e2e-examples/nemotron-3-5-super-vl) 8×H100/约39GiB每卡记录仅是当时 CORD-v2 工作负载参考，不是本项目训练资源准入或最低配置。[NIM 指南](https://docs.nvidia.com/nim/large-language-models/latest/get-started/advanced/get-started-nemotron-3.5-super-vl.html)的 BF16 LoRA 与 NVFP4 服务支持也须按实际版本分别验证。TJ1 小训练独立验收，Windows 实际 runner 不自动具备 Linux 多卡 LoRA 能力。
 
 200–500个独立评测家族、3,000–5,000个候选是规划起点，不是充分性或合格数量承诺。中文陪伴、平淡/沉默/忙碌不打扰、误解修复、偏好变化及跨会话恢复要盲评；科学、工具、来源、视觉和权限各守硬回归，不能用平均分掩盖退化，证据不足记INCONCLUSIVE。
 
