@@ -1,6 +1,6 @@
 # QA index archive metadata reuse
 
-This slice opens an already accepted f1 QA index after its execution authority
+This slice opens an already accepted F1 or F2 QA index after its execution authority
 expires or is revoked. It exposes a private verified metadata view and writes a
 new encrypted selection manifest. It never restores sending/resume rights, reads
 source samples or verdict notes, retokenizes, or authorizes Student training.
@@ -26,10 +26,20 @@ The externally authenticated descriptor is its trust boundary.
 `QaIndexArchiveDescriptor/0.1` binds the frozen spec/source lineage, ledger and
 authority raw SHA-256, authority identity/status/revision/head and sequence,
 selection/index/manifest refs and index digest, accepted receipt digest, and
-reader/profile digests. The only legacy profile is producer build
+reader/profile digests. The original F1 profile is producer build
 `f1b8d25398fc287bc665a2faea38ef00f69a236815057e799b3591fca6e0e9c9`.
 `corpus-qa-legacy-f1.ts` freezes its schema, target/model/profile identities and
-selection/measurement wire validators. Future builds need a separately reviewed
+selection/measurement wire validators. Its constants and archive profile digest
+remain unchanged. The separately frozen F2 pair is build
+`6f3fdad98aeeb67c9daddb7c05f5b972d7ce0c1f437939e9850967542bd8ba1c`
+and QA profile
+`a782b492ab39749bf6cf627d824d2a8d89a4d1627fb8bf204d30e0fba810699f`.
+Both use `CorpusQualityAudit/0.1` and the same storage schema. F2 changes the
+rubric output contract and safe failure codes; source, targets, Student,
+tokenizer, retention and crypto constraints remain frozen. A descriptor declares
+`QA_F1` or `QA_F2` with its exact corresponding archive profile digest. Mixed
+build/profile pairs and unknown writers fail even with an identical schema.
+Future builds need a separately reviewed
 adapter; changing current target constants cannot reinterpret this archive.
 
 `QaIndexReadGrant/0.1` is a new finite, revocable capability for
@@ -74,6 +84,19 @@ PASS and cross-index eligibility. This makes no semantic or all-history guarante
 Student/tokenizer/generation/audit target and QA purpose profiles must match.
 The manifest records each source lineage and input order. Token totals come from
 the bound source selection measurements, without sample reads or tokenization.
+Overlapping source job/unit identities still fail with `CQA_INDEX_CONFLICT`.
+The host must explicitly exclude a superseded failed audit before assembly;
+the library does not choose the best verdict independently for each row.
+
+The writer now creates `QaArchiveAssemblySelectionManifest/0.2` with matching
+`QaArchiveAssemblyChunk/0.2`, `QaArchiveAssemblyReceipt/0.2`, and cipher AAD/KDF
+domain `/0.2`. Each input records its F1/F2 writer profile and the verified
+manifest's rubric reference and ciphertext digest. `rubricContentDigest` is
+always `UNKNOWN_NOT_INDEXED`: a public output-contract digest is not a digest of
+the audit's particular rubric text. Different audit rubric references/digests
+need not agree. Rubric bodies are never read. Existing `/0.1` files/receipts are
+unchanged and unsupported by the new cold consumer; no upgrade or recovery is
+inferred from their presence.
 
 The writer uses encrypted chunks of at most 32 selected metadata rows and an
 encrypted manifest. It returns only aggregate counts/token totals and digests.
@@ -87,10 +110,53 @@ ciphertext `commitDigest`, complete GCM authentication and plaintext
 `manifestDigest`. An interrupted/truncated final file, thrown write, or missing
 receipt has no success claim and must not be consumed or automatically retried.
 A grant withdrawal after output creation may leave encrypted files while the
-operation refuses to return a receipt. No cold assembly consumer/recovery API is
-provided in this slice; any future consumer must independently authorize access,
-verify those bindings and recheck source retention. Source-row dereferencing is
-a separate future authorization.
+operation refuses to return a receipt. Source-row dereferencing is a separate
+future authorization.
+
+## Cold metadata verification ABI
+
+`openQualityArchiveAssembly` in `src/corpus-qa-archive-assembly.ts` accepts:
+
+- `approvedTrainingRoot`, `runtimeRoot`, `assemblyId`, an assembly key supplied by
+  the trusted host, `readerBuildDigest`, and `purposeDigest`;
+- the successfully returned `/0.2` `receipt` and its independently pinned
+  canonical SHA-256 `receiptDigest`;
+- 1–8 explicitly ordered `readers`, newly opened with `openQualityIndexArchive`
+  and current per-source grants; their descriptor digests must equal the receipt's
+  `inputDescriptorDigests` in that exact order;
+- `admission: () => QaArchiveAssemblyReadGrant` and optional test clock `now`.
+
+The finite `QaArchiveAssemblyReadGrant/0.1` contains `grantId`, `revision`,
+`receiptDigest`, `purposeDigest`, `status`, `readAllowed`, `retainAllowed`,
+`validFrom`, `expiresAt`, and `scope: QA_INDEX_MANIFEST_SELECTION_METADATA_ONLY`.
+Its identity cannot change during one reader lifetime. The host authenticates
+the receipt's provenance and pins its loaded code closure; a JSON found beside
+the ciphertext is not proof that the writer successfully returned it. This API
+does not discover receipt files, obtain keys, or issue grants.
+
+The frozen handle exposes only `check()`, `readVerifiedReceipt()`, and `close()`.
+`check()` checks current permission/source snapshots and the committed file hash;
+only `readVerifiedReceipt()` performs full cold verification. It authenticates
+the full manifest ciphertext/GCM and plaintext digest, reconstructs every source
+metadata view, reruns `assembleScopedIndexes`, and compares exact input lineage,
+all selected metadata rows, 32-row chunk order/size/count, membership, inherited
+measurements and train/dev token totals. It rehashes all consumed chunks and the
+manifest before returning the aggregate receipt. It exposes no row accessor.
+
+Each file read, unsealed value and final result requires the current assembly
+grant and every current source/parent-retention check. Failure or close clears
+the owned key and permanently closes the handle; derived keys are cleared after
+each artifact. Renewing a grant requires a new reader. Old execution authority is
+never revived. Missing receipts, missing final files, truncated or altered data,
+foreign inputs/profiles and withdrawn sources fail; encrypted pending copies are
+never consumed, promoted or automatically retried. Cross-process receipt custody
+and any real host rollout remain separate from this library's synthetic checks.
+
+Run `node scripts/qa-archive-cold-synthetic.ts` for an executable fixture-only
+example of writer close, fresh source readers, independent cold permission,
+full verification and permanent refusal after withdrawal. It creates fresh OS
+temporary artifacts and synthetic keys, prints only aggregate counts/digests,
+and never accepts a real corpus path, reads sample bodies or calls an API.
 
 ## Synthetic validation
 
@@ -103,3 +169,11 @@ zeroization, immutable capabilities, link/journal/mutation rejection, exclusive
 commit and truncated ciphertext. Fixtures create fresh temporary directories;
 no real archive, API, harness or Student training is used. Existing QA regression
 is run separately from whole-project/CI acceptance.
+
+`test/corpus-qa-archive-cold.test.ts` additionally covers exact F2 admission,
+mixed F1/F2 provenance, absent/foreign `/0.1` receipts, external pin failures,
+full-hash/GCM failures, malicious but authenticated rewritten metadata/rows/token
+totals, changed input order, rubric-content mislabeling, missing/duplicate/reordered
+chunks, mid-read grant/source withdrawal, concurrent artifact mutation, closed
+handle/key ownership, source overlap refusal, zero rows and the full 1536-row
+cold reconstruction. These tests do not confer real data or training acceptance.
