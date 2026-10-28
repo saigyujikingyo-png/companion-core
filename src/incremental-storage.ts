@@ -8,6 +8,8 @@ import { decodeBlocks, encodeBlocks, MAX_CHAIN, MAX_PATCH, MAX_REPLAY_BYTES, val
 import type { BlockEncoding } from './incremental-codec.ts';
 import { fail } from './validation.ts';
 import type {LegacyImportProof} from './legacy-import-types.ts';
+import {decodeSafetyCarrier,encodeSafetyCarrier,PACKED_SAFETY_PROFILE,validateSafetyCarrier} from './safety-carrier.ts';
+import type {SafetyCarrier} from './safety-carrier.ts';
 
 export const FRAME_LIMIT=MAX_PATCH+4*1024*1024+32, RECORD_LIMIT=32768, MANIFEST_LIMIT=65536;
 export type FrozenV3={format:typeof INCREMENTAL_FORMAT;head:VaultHead;blob:string;blobDigest:string;blobLength:number;record:string};
@@ -15,7 +17,8 @@ export type FrameRecord=Omit<VaultRecord,'version'> & {version:3;previousHead:Va
 type Header={version:3;identity:VaultIdentity;sequence:number;safety:Safety;revocationHighWater:number;ingressKeyDigest:string;
   blocks:BlockEncoding;depth:number};
 export type Baseline={image:Uint8Array;depth:number;readBytes:number;decodedBytes:number};
-type Loaded={stage:FrozenV3;state:Header;record:FrameRecord;payload:Buffer;recordBytes:Buffer;blobBytes:Buffer};
+type WireHeader=Omit<Header,'safety'> & {safety:Safety|SafetyCarrier};
+type Loaded={stage:FrozenV3;state:Header;decodedBytes:number;record:FrameRecord;payload:Buffer;recordBytes:Buffer;blobBytes:Buffer};
 export type Reconstructed={stage:FrozenV3;state:Header;record:FrameRecord;image:Buffer;baseline:Baseline;files:Map<string,Buffer>};
 export type FrameReader=(name:string,maximum:number)=>Buffer;
 function seal(plain:Uint8Array,purpose:string,identity:VaultIdentity,key:Uint8Array):Buffer{
@@ -32,9 +35,10 @@ export function freezeFrame(identity:VaultIdentity,sequence:number,operationId:s
     bytes:Buffer;stage:FrozenV3;blob:Buffer;baseline:Baseline;
   }{
   if(identity.format!==INCREMENTAL_FORMAT||!identity.storageProfile||sequence>MAX_COMMITS)fail('INCREMENTAL_PROFILE');
+  const packedSafety=identity.storageProfile===PACKED_SAFETY_PROFILE?encodeSafetyCarrier(safety,identity,safety.maxCalls):null;
   const build=(allow:boolean)=>{
     const encoded=encodeBlocks(image,baseline?.image??null,identity.storageProfile!,allow),base=encoded.descriptor.mode==='base';
-    const state:Header={version:3,identity,sequence,safety,revocationHighWater,ingressKeyDigest:sha(keys.ingressKey),blocks:encoded.descriptor,depth:base?1:baseline!.depth+1};
+    const state:WireHeader={version:3,identity,sequence,safety:packedSafety??safety,revocationHighWater,ingressKeyDigest:sha(keys.ingressKey),blocks:encoded.descriptor,depth:base?1:baseline!.depth+1};
     const header=Buffer.from(JSON.stringify(state));if(header.length>4*1024*1024)fail('INCREMENTAL_LIMIT');
     const prefix=Buffer.alloc(4);prefix.writeUInt32BE(header.length);const plain=Buffer.concat([prefix,header,encoded.payload]);
     let blob:Buffer;try{blob=seal(plain,'frame',identity,keys.storageDEK);}finally{plain.fill(0);header.fill(0);encoded.payload.fill(0);}
@@ -45,10 +49,10 @@ export function freezeFrame(identity:VaultIdentity,sequence:number,operationId:s
     const stage:FrozenV3={format:INCREMENTAL_FORMAT,head:{...identity,sequence,digest:sha(bytes)},blob:`blob-${sha(blob)}.bin`,blobDigest:sha(blob),blobLength:blob.length,record:bytes.toString('base64')};
     const stageBytes=Buffer.from(JSON.stringify(stage));if(stageBytes.length>MANIFEST_LIMIT)fail('INCREMENTAL_LIMIT');
     return{bytes:stageBytes,stage,blob,baseline:{image,depth:state.depth,
-      readBytes:(base?0:baseline!.readBytes)+blob.length+bytes.length,decodedBytes:(base?0:baseline!.decodedBytes)+state.blocks.rawLength}};
+      readBytes:(base?0:baseline!.readBytes)+blob.length+bytes.length,decodedBytes:(base?0:baseline!.decodedBytes)+state.blocks.rawLength+(packedSafety?.decodedBytes??0)}};
   };
   let result=build(!!baseline&&baseline.depth<MAX_CHAIN);
-  if(result.baseline.readBytes>MAX_REPLAY_BYTES||result.baseline.decodedBytes>MAX_REPLAY_BYTES)result=build(false);
+  if(result.baseline.readBytes>MAX_REPLAY_BYTES||result.baseline.decodedBytes>MAX_REPLAY_BYTES){result.blob.fill(0);result.bytes.fill(0);result=build(false);}
   return result;
 }
 export function parseFrozenV3(bytes:Uint8Array):FrozenV3{
@@ -58,7 +62,7 @@ export function parseFrozenV3(bytes:Uint8Array):FrozenV3{
     ||typeof stage.record!=='string'||!integer(stage.blobLength,28)||stage.blobLength>FRAME_LIMIT||!/^[a-f0-9]{64}$/.test(stage.blobDigest)
     ||stage.blob!==`blob-${stage.blobDigest}.bin`)fail('INCREMENTAL_CORRUPT');validateHead(stage.head);return stage;
 }
-function load(head:VaultHead,reader:FrameReader,keys:KeySet,maxCalls:number,overlay?:FrozenV3):Loaded{
+function load(head:VaultHead,reader:FrameReader,keys:KeySet,maxCalls:number,remainingDecoded:number,overlay?:FrozenV3):Loaded{
   validateHead(head);if(head.format!==INCREMENTAL_FORMAT||head.keyEpoch!==keys.keyEpoch)fail('INCREMENTAL_PROFILE');
   const identity=identityOf(head),rowBytes=overlay?Buffer.from(overlay.record,'base64'):reader(`record-${head.sequence}.bin`,RECORD_LIMIT);
   if(rowBytes.length>RECORD_LIMIT||sha(rowBytes)!==head.digest||(overlay&&(!same(overlay.head,head)||rowBytes.toString('base64')!==overlay.record)))fail('INCREMENTAL_CORRUPT');
@@ -72,14 +76,23 @@ function load(head:VaultHead,reader:FrameReader,keys:KeySet,maxCalls:number,over
   if(sha(blob)!==row.checkpointDigest)fail('INCREMENTAL_CORRUPT');
   const stage:FrozenV3={format:INCREMENTAL_FORMAT,head,blob:blobName,blobDigest:row.checkpointDigest,blobLength:blob.length,record:rowBytes.toString('base64')};
   if(overlay&&!same(stage,overlay))fail('INCREMENTAL_CORRUPT');
-  const decoded=unseal(blob,'frame',identity,keys.storageDEK);let state:Header,payload:Buffer;
+  const decoded=unseal(blob,'frame',identity,keys.storageDEK);let wire:WireHeader,payload:Buffer;
   try{const n=decoded.readUInt32BE();if(n>4*1024*1024||n+4>decoded.length)fail('INCREMENTAL_CORRUPT');
-    state=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(decoded.subarray(4,4+n)));payload=Buffer.from(decoded.subarray(4+n));}finally{decoded.fill(0);}
+    wire=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(decoded.subarray(4,4+n)));payload=Buffer.from(decoded.subarray(4+n));}finally{decoded.fill(0);}
+  const state=wire as Header;
+  try{
   if(!record(state)||state.version!==3||!same(state.identity,identity)||state.sequence!==head.sequence||state.revocationHighWater!==row.revocationHighWater
     ||!integer(state.depth,1)||state.depth>MAX_CHAIN)fail('INCREMENTAL_CORRUPT');
-  if(state.ingressKeyDigest!==sha(keys.ingressKey))fail('ANCHOR_INGRESS_KEY');validateSafetyState(state.safety,identity,maxCalls);validateBlocks(state.blocks,payload.length);
+  if(state.ingressKeyDigest!==sha(keys.ingressKey))fail('ANCHOR_INGRESS_KEY');validateBlocks(state.blocks,payload.length);
+  const packed=identity.storageProfile===PACKED_SAFETY_PROFILE;
+  if(packed)validateSafetyCarrier(wire.safety);
+  const decodedBytes=state.blocks.rawLength+(packed?(wire.safety as SafetyCarrier).decodedBytes:0);
+  if(decodedBytes>remainingDecoded)fail('INCREMENTAL_REPLAY_LIMIT');
+  if(packed)state.safety=decodeSafetyCarrier(wire.safety as SafetyCarrier,identity,maxCalls);
+  else validateSafetyState(state.safety,identity,maxCalls);
   if(state.blocks.mode==='base'?state.depth!==1:head.sequence===1||identity.storageProfile==='full-br4-v1')fail('INCREMENTAL_CHAIN');
-  return{stage,state,record:row,payload,recordBytes:rowBytes,blobBytes:blob};
+  return{stage,state,decodedBytes,record:row,payload,recordBytes:rowBytes,blobBytes:blob};
+  }catch(error){payload.fill(0);throw error;}
 }
 /** Only the required base-to-head chain is read/verified. This is NOT an audit
  * of every retained historical blob, record or orphan stage in the directory. */
@@ -89,8 +102,8 @@ export function reconstruct(head:VaultHead,reader:FrameReader,keys:KeySet,maxCal
   const boundedReader:FrameReader=(name,maximum)=>{const remaining=MAX_REPLAY_BYTES-actualRead;if(remaining<=0)fail('INCREMENTAL_REPLAY_LIMIT');
     const data=reader(name,Math.min(maximum,remaining));actualRead+=data.length;if(data.length>maximum||actualRead>MAX_REPLAY_BYTES)fail('INCREMENTAL_REPLAY_LIMIT');return data;};
   try{
-    for(;;){if(frames.length>=MAX_CHAIN)fail('INCREMENTAL_CHAIN_LIMIT');const frame=load(cursor,boundedReader,keys,maxCalls,frames.length===0?overlay:undefined);
-      frames.push(frame);readBytes+=frame.blobBytes.length+frame.recordBytes.length;decodedBytes+=frame.state.blocks.rawLength;
+    for(;;){if(frames.length>=MAX_CHAIN)fail('INCREMENTAL_CHAIN_LIMIT');const frame=load(cursor,boundedReader,keys,maxCalls,MAX_REPLAY_BYTES-decodedBytes,frames.length===0?overlay:undefined);
+      frames.push(frame);readBytes+=frame.blobBytes.length+frame.recordBytes.length;decodedBytes+=frame.decodedBytes;
       if(readBytes>MAX_REPLAY_BYTES||decodedBytes>MAX_REPLAY_BYTES)fail('INCREMENTAL_REPLAY_LIMIT');
       files.set(frame.stage.blob,frame.blobBytes);files.set(`record-${cursor.sequence}.bin`,frame.recordBytes);
       if(frame.state.blocks.mode==='base')break;cursor=frame.record.previousHead!;

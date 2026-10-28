@@ -1,6 +1,6 @@
 # AEMC 开发状态、架构取舍与发布进度
 
-2026-10-27。IF0–IF6 已由 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并于 `06fc8b2`。IF7保留WF2整合到main `87eab00` 后，实际单worker984/984与TS、独立审查和精确head14/14跨平台CI通过；[PR #2](https://github.com/saigyujikingyo-png/companion-core/pull/2)已合并为 `4e0892c0e618304e8e0c84daa9e97b74edbb81ba`，合并后7/7 CI通过。IF8以该提交为基线在 `codex/aemc-receipt-rollover-20261027` 独立树实现回执无损rollover；作者20/20、关联180/180通过，两位独立静态审查无剩余P1/P2，独立 **1004/1004与TS通过、219执行文件零漂移**。当前 **LOCAL_VERIFIED / UNCOMMITTED**，尚未提交/推送/合并。完整分层见 [IF8证据](AEMC-INFRA-EVIDENCE-IF8.md)。本轮未部署或启动训练；完整目标仍 **IN_PROGRESS / TRAINING_NOT_ADMITTED**，不计算混合完成率。
+2026-10-27。IF0–IF8已合并。IF7由[PR #2](https://github.com/saigyujikingyo-png/companion-core/pull/2)合并为 `4e0892c`，984/984与TS、独立审查、head14/14和merge7/7 CI通过。IF8的同库回执无损rollover通过独立1004/1004与TS、两路审查及精确head14/14 CI后，由[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596eb403fd54f128b776d9d966c49dfa0da33`，merge7/7 CI通过。基于该提交的IF9独立树已实现Store镜像无损压实及显式Safety载体压缩；作者24/24、关联204/204和TS0、221执行文件0漂移，两路独立审查及独立1028/1028与TS通过。IF9为LOCAL_VERIFIED / UNCOMMITTED，尚无新CI。完整分层见[当前证据](AEMC-INFRA-EVIDENCE-IF9.md)。本轮未部署或启动训练；完整目标仍 **IN_PROGRESS / TRAINING_NOT_ADMITTED**，不计算混合完成率。
 
 ## 已落地的能力链
 
@@ -13,6 +13,8 @@ flowchart LR
   B --> F[IF6 写入容量准入与完成预算]
   F --> H[IF7 无需boot的分层容量检查]
   H --> R[IF8 同库回执无损rollover 永久幂等键]
+  R --> S[IF9 Store物理压实 Safety载体压缩]
+  S -. 设计 .-> L[IF10 终态冷段 精确索引闭包]
   E --> G[后续 AR1 质量实验 尚未启动]
   A -. 当前授权快照 .-> Q[I17 贝叶斯重构 DESIGN_ONLY]
   E -. I06接口与评测合同 .-> Q
@@ -29,6 +31,7 @@ flowchart LR
 | IF6 容量失败处理 | 新PREPARED前预演最终化与日志预算；单pending全局新写门；捕获mutation异常也不能提交部分状态 | OS磁盘空间预分配、无限容量、全部旧异常pending可恢复、混跑旧writer安全 |
 | IF7 容量观测 | 同authority guard读取exact head；不boot、不扫TTL、不改额度/epoch；分层计数与字节、受限目录扫描、冻结metadata输出；pending只给metadata | 当前检索许可、剩余可写次数、空间预留、历史GC/authority rollover、生产监控与真实容量接受 |
 | IF8 回执容量治理 | 显式schema4；有界Brotli4完整回执分段、统一精确查回、同guard原子repack；永久PK/UNKNOWN/额度/撤销保持；同cap真实写失败后页复用并恢复业务 | 物理authority替换或缩文件、GC、无限容量、已超软界库修复、Store/Safety/永久索引长期增长、生产资格 |
+| IF9 Store与Safety容量治理 | 显式repackStore仅私有RAM SQLite物理压实，完整逻辑指纹/新目标/fencing；新Safety profile有界raw/Brotli载体、展开前预算、完整原语义及自包含恢复 | 不清理长期索引、不突破8192/16MiB、不减少全部CPU/RAM路径、不保证所有载体更小；IF9提交CI及生产未验收 |
 
 IF5选择先接完整性边界：持久消费者已有实际进度，旧RetrievalService却仍依赖手工refs。新增 [durable retrieval](DURABLE-RETRIEVAL.md)使两者形成真实调用链，原AR0字面/共享来源排序保持不变；先解决选集的完整性与当前权限，再做排名质量实验。
 
@@ -38,11 +41,15 @@ IF7先把容量瓶颈变成可核对的事实，再设计长期运维。新 [ins
 
 IF8落实了上述协议的首个有界子集：[receipt segment rollover](RECEIPT-ROLLOVER.md)保留完整原始JSON与全部复合主键，压缩载荷并复用SQLite页面。普通UPDATE缩短回执未释放叶页的失败促成原子批量repack补充合同，原失败仍保留。普通131072B软界案例中61份回执的63847B原文存入7072B BLOB，32页文件保持、freelist 0→17；同cap fresh boot与新业务写入成功后余15页。它不清理消费记录，也不把freelist解释为磁盘缩小或剩余写次数。
 
-当前增量技术路线保持固定4KiB块replacement/XOR、标准Brotli4/raw、单密文blob和有界恢复链，定期向新目标compaction并保留原件。它减少持久化逻辑写入放大；SQLite serialize仍产生整库RAM image，不能将磁盘文件增量收益表述为整条CPU/内存路径已增量化。生产外锚也仍须独立防共同回滚，文件放在另一个目录不等于硬件信任。
+IF9的普通Store案例schema1由172032缩至114688B、schema2由225280缩至167936B，完整值和撤销保持；8192条高熵Safety结构压力原JSON1917066B、carrier760496B，另有真实公开API历史/恢复验证。结构压力不是8192次真实持久历史；空Safety的carrier273B大于原143B。具体上下文见[成本分项](AEMC-INFRA-EVIDENCE-IF9.md)。
+
+当前增量技术路线保持固定4KiB块replacement/XOR、标准Brotli4/raw、单密文blob和有界恢复链，定期向新目标compaction并保留旧加密源；IF9仅增加显式物理压实和新Safety profile。它减少持久化逻辑写入放大；SQLite serialize仍产生整库RAM image，不能将磁盘文件增量收益表述为整条CPU/内存路径已增量化。生产外锚也仍须独立防共同回滚，文件放在另一个目录不等于硬件信任。
+
+[新架构决议](ADR-MEMORY-TOOL-BOUNDARY.md)区分内在痕迹、外部工具原件与精确控制面：认知载荷可以有损、重新解释并可逆冷热迁移；原文件搜索/读取是工具动作；IF8/IF9幂等、UNKNOWN、撤销与额度仍精确。这不修改当前Store内容语义或宣称MemoryTrace/AffectTrace已实现。后台inspect/预取与实际回忆唤起分开，重复回忆不是新的独立事实证据。
 
 ## 总目标进度
 
-[完整矩阵](AEMC-INFRASTRUCTURE.md)的18项按当前缺口互斥分类如下。IF5补I05接线，IF6补I01/I02故障处理，IF7补I01/I03容量观测，IF8补回执无损压缩与页面复用；I17加入贝叶斯重构设计但分类不变。没有把质量、生产或完整训练前项自动转为已接受。
+[完整矩阵](AEMC-INFRASTRUCTURE.md)的18项按当前缺口互斥分类如下。IF5补I05接线，IF6补I01/I02故障处理，IF7补容量观测，IF8补回执压缩/页复用，IF9补Store碎片/Safety载体；三域与I17设计不改变分类。没有把质量、生产或完整训练前项自动转为已接受。
 
 | 当前类别 | 数量 | 条目 |
 |---|---:|---|
@@ -62,11 +69,11 @@ IF8落实了上述协议的首个有界子集：[receipt segment rollover](RECEI
 
 下一步按依赖推进：
 
-1. IF0–IF7发布闭环已完成。IF8当前完成实现、作者验证、两位静态审查和独立1004/1004与TS闭环；其提交CI、发布与生产接受尚未取得，不借用IF7的CI。
-2. 容量运维：在IF7分层观测和IF8同库receipt rollover之上，继续处理永久PK/legacy索引、Store image/ingress、Safety的长期增长；物理authority代际切换/冷历史需先冻结完整查询与迁移故障协议，再讨论GC。不能丢掉已消费ID或UNKNOWN，也不因观测空blockers自动写入。
+1. IF0–IF8发布闭环完成。IF9在独立树完成实现、作者验证、两路独立审查及独立1028/1028与TS闭环；提交CI及发布未取得，不能借用IF8的CI。
+2. 容量运维：IF9之后优先研究[Safety不可变终态单冷段](LONG-TERM-CAPACITY-DESIGN.md)，generation固定冷根、热冷全局精确查询、完整备份/rekey及同业务成本对照。Store ingress/图闭包和authority永久PK/legacy路由另设合同，首片仍保持8192总限。不丢旧ID/UNKNOWN，也不因inspect空blockers自动写入。
 3. 生产信任域：冻结authority/custody owner、独立备份/共同回滚威胁、实际恢复RPO/RTO与旧writer停用方案，再做真实环境准入；目录名字本身不提供信任。
 4. AR1质量：先固定来源权利、query/support答案、家族/时间切分、算法版本、质量与总成本门，再比较BM25、embedding、PPR及seed策略。检索引用有效不等于答案正确；本轮不调用模型或训练。
-5. [I17](BAYESIAN-RECONSTRUCTION-DESIGN.md)先固定有限候选先验/似然与缺失/冲突/权限规则；IF8闭环后实现有界模块，再按冻结family/time split比较prior-only、trace-only和Bayes，校准/查证收益独立验收。研究不依赖所有I06算法完成，仍须当前授权快照和接口/评测合同；目前DESIGN_ONLY / EXPERIMENT_NOT_RUN。概念registry、资产、可撤销状态、sleep和跨代迁移各自开放。
+5. [I17](BAYESIAN-RECONSTRUCTION-DESIGN.md)与[痕迹/PDF双路径/情感唤起最小切片](ADR-MEMORY-TOOL-BOUNDARY.md)先冻结有限输入、先验/似然、修订及预算；稳定基线上独立实现，不等待所有容量或I06算法完成。正式family/time split、校准/查证和耦合收益独立接受；目前DESIGN_ONLY / EXPERIMENT_NOT_RUN。概念registry、可撤销状态、sleep和跨代迁移各自开放。
 
 ## 发布与隔离边界
 

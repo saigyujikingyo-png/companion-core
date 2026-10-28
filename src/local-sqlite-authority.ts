@@ -451,7 +451,8 @@ export class LocalSqliteAuthority {
       if (old.authorityId !== next.authorityId || old.vaultId !== next.vaultId || old.identity !== next.identity) fail('ANCHOR_TRANSITION');
       if(!same(old.legacyImport,next.legacyImport))fail('LEGACY_IDENTITY');
       if(pending.kind==='storage-upgrade'){
-        if(old.format!==ANCHORED_FORMAT||next.format!==INCREMENTAL_FORMAT)fail('ANCHOR_TRANSITION');
+        if(next.format!==INCREMENTAL_FORMAT||(old.format!==ANCHORED_FORMAT&&
+          (old.format!==INCREMENTAL_FORMAT||old.storageProfile==='blocks-br4-safety-br4-v1'||next.storageProfile!=='blocks-br4-safety-br4-v1')))fail('ANCHOR_TRANSITION');
       }else if(old.format!==next.format||old.storageProfile!==next.storageProfile)fail('ANCHOR_TRANSITION');
       if(pending.kind==='compaction'&&next.format!==INCREMENTAL_FORMAT)fail('ANCHOR_TRANSITION');
       if (pending.kind === 'schema-migration') {

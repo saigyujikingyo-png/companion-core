@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { MemoryStore } from './store.ts';
 import type { Clock } from './store.ts';
-import { inspectMemoryImage, inspectMemoryImageCapacity, maintainFanoutImage, migrateMemoryImage } from './memory-image.ts';
+import { inspectMemoryImage, inspectMemoryImageCapacity, maintainFanoutImage, migrateMemoryImage, repackMemoryImage } from './memory-image.ts';
 import type { MemorySchema } from './memory-image.ts';
 import type { FanoutFault } from './fanout-types.ts';
 import type { SourceRef } from './contracts.ts';
@@ -467,31 +467,36 @@ export class AnchoredVault {
   }
   /** New active generation; retains the source directory and does not boot it. */
   static compact(request:CompactRequest):AnchorReceipt{return AnchoredVault.#rewriteCurrent(request);}
-  /** Explicit v2 -> v3 storage transition, independent of application schema. */
+  /** Explicit lossless RAM repack into a new generation; source retained. */
+  static repackStore(request:CompactRequest):AnchorReceipt{return AnchoredVault.#rewriteCurrent(request,undefined,'lossless-repack-v1');}
+  /** Explicit v2 -> v3 or old v3 -> packed Safety profile transition. */
   static upgradeStorage(request:CompactRequest & {storageProfile:StorageProfile}):AnchorReceipt{
-    if(!['blocks-br4-v1','full-br4-v1'].includes(request.storageProfile))fail('ANCHOR_STORAGE_PROFILE');
+    if(!['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1'].includes(request.storageProfile))fail('ANCHOR_STORAGE_PROFILE');
     return AnchoredVault.#rewriteCurrent(request,request.storageProfile);
   }
-  static #rewriteCurrent(request:CompactRequest,profile?:StorageProfile):AnchorReceipt{
+  static #rewriteCurrent(request:CompactRequest,profile?:StorageProfile,imageTransform?:'lossless-repack-v1'):AnchorReceipt{
     id(request.vaultId);id(request.operationId);const keys=copyKeys(request.keys);
     const target=storagePath(request.targetDirectory,request.storageDomain,request.authority,false),kind=profile?'storage-upgrade':'compaction';
     try{return request.authority.transaction(tx=>{
       const digest=(oldHead:VaultHead)=>sha(JSON.stringify({kind,oldHead,target,storageDomain:request.storageDomain,profile:profile??oldHead.storageProfile,
-        maxCalls:request.maxCalls,keyEpoch:keys.keyEpoch,storageKeyDigest:sha(keys.storageDEK),ingressKeyDigest:sha(keys.ingressKey)}));
+        maxCalls:request.maxCalls,keyEpoch:keys.keyEpoch,storageKeyDigest:sha(keys.storageDEK),ingressKeyDigest:sha(keys.ingressKey),...(imageTransform?{imageTransform}:{})}));
       const prior=tx.receipt(request.vaultId,request.operationId);if(prior){if(!prior.oldHead||prior.requestDigest!==digest(prior.oldHead))fail('ANCHOR_OPERATION_CONFLICT');return prior;}
       const row=tx.row(request.vaultId);if(!row?.head)fail('ANCHOR_UNREGISTERED');tx.assertActive(row.head);const oldHead=row.head;
-      if(profile?oldHead.format!==ANCHORED_FORMAT:oldHead.format!==INCREMENTAL_FORMAT)fail('ANCHOR_STORAGE_PROFILE');disjoint(oldHead.directory,target);
-      const decoded=readCurrent(oldHead,keys,request.maxCalls);
+      if(profile?oldHead.format!==ANCHORED_FORMAT&&(oldHead.format!==INCREMENTAL_FORMAT||profile!=='blocks-br4-safety-br4-v1'||oldHead.storageProfile==='blocks-br4-safety-br4-v1')
+        :oldHead.format!==INCREMENTAL_FORMAT)fail('ANCHOR_STORAGE_PROFILE');disjoint(oldHead.directory,target);
+      const decoded=readCurrent(oldHead,keys,request.maxCalls);let repacked:Uint8Array|undefined;
       try{
-        validateImage(decoded.image,decoded.state.revocationHighWater,oldHead.schemaVersion??1);
+        if(imageTransform){
+          repacked=repackMemoryImage(decoded.image,oldHead.schemaVersion??1,decoded.state.revocationHighWater);
+        }else validateImage(decoded.image,decoded.state.revocationHighWater,oldHead.schemaVersion??1);
         const identity:VaultIdentity={...identityOf(oldHead),format:INCREMENTAL_FORMAT,storageProfile:profile??oldHead.storageProfile!,
           instanceId:randomUUID(),ownerEpoch:oldHead.ownerEpoch+1,directory:target,storageDomain:request.storageDomain};
         validateIdentity(identity);createDirectory(target);writeNew(join(target,markerName(identity)),marker(identity));
-        const frozen=stageBytes(identity,1,request.operationId,decoded.image,decoded.state.safety,decoded.state.revocationHighWater,keys,null,oldHead);
+        const frozen=stageBytes(identity,1,request.operationId,repacked??decoded.image,decoded.state.safety,decoded.state.revocationHighWater,keys,null,oldHead);
         const stagePath=writeStage(target,request.operationId,frozen.bytes,frozen);request.fault?.('stage-written');
         const pending:PendingCommit={version:2,kind,operationId:request.operationId,requestDigest:digest(oldHead),oldHead,newHead:frozen.stage.head,stagePath,stageDigest:sha(frozen.bytes)};
         tx.prepare(pending);request.fault?.('prepared');publish(frozen.stage,request.fault);const receipt=tx.finalize(pending);request.fault?.('finalized');return receipt;
-      }finally{decoded.image.fill(0);}
+      }finally{decoded.image.fill(0);repacked?.fill(0);}
     });}finally{keys.storageDEK.fill(0);keys.ingressKey.fill(0);}
   }
   /** Capacity recovery reads the authority's exact CURRENT files, without booting

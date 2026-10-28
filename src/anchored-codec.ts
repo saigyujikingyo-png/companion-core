@@ -9,7 +9,7 @@ import type {LegacyImportProof} from './legacy-import-types.ts';
 export const ANCHORED_FORMAT = 'companion-anchored-vault-v2';
 export const INCREMENTAL_FORMAT = 'companion-anchored-vault-v3';
 export const INCREMENTAL_MARKER = 'AnchoredVault.v3';
-export type StorageProfile = 'blocks-br4-v1' | 'full-br4-v1';
+export type StorageProfile = 'blocks-br4-v1' | 'full-br4-v1' | 'blocks-br4-safety-br4-v1';
 export const VAULT_MARKER = 'AnchoredVault.v2';
 export const STAGE_LIMIT = MAX_IMAGE * 4;
 export type VaultIdentity = { format: typeof ANCHORED_FORMAT | typeof INCREMENTAL_FORMAT; authorityId: string; vaultId: string; identity: string;
@@ -81,7 +81,7 @@ export function validateIdentity(value: unknown): asserts value is VaultIdentity
   if (!record(value) || ![ANCHORED_FORMAT,INCREMENTAL_FORMAT].includes(value.format) || !integer(value.ownerEpoch, 1) || !integer(value.keyEpoch, 1)
     || typeof value.directory !== 'string' || !isAbsolute(value.directory)) fail('ANCHOR_CORRUPT');
   if (value.schemaVersion !== undefined && ![1,2].includes(value.schemaVersion)) fail('ANCHOR_CORRUPT');
-  if (value.format === INCREMENTAL_FORMAT ? !['blocks-br4-v1','full-br4-v1'].includes(value.storageProfile) : value.storageProfile !== undefined) fail('ANCHOR_STORAGE_PROFILE');
+  if (value.format === INCREMENTAL_FORMAT ? !['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1'].includes(value.storageProfile) : value.storageProfile !== undefined) fail('ANCHOR_STORAGE_PROFILE');
   text(value.identity,128);
   for (const field of ['authorityId', 'vaultId', 'instanceId', 'storageDomain']) id(value[field]);
   if(value.legacyImport!==undefined&&(!record(value.legacyImport)||Object.keys(value.legacyImport).sort().join(',')!=='lineageId,migrationId'

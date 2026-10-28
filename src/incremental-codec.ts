@@ -27,11 +27,11 @@ function patches(image: Uint8Array, previous: Uint8Array, xor: boolean): Buffer 
 /** Exact serialized bytes, including partial final blocks. No SQL or FTS replay. */
 export function encodeBlocks(image: Uint8Array, previous: Uint8Array | null, profile: StorageProfile, allowDelta = true): EncodedBlocks {
   if (!(image instanceof Uint8Array) || image.length > MAX_IMAGE || (previous && previous.length > MAX_IMAGE)
-    || !['blocks-br4-v1','full-br4-v1'].includes(profile)) fail('INCREMENTAL_LIMIT');
+    || !['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1'].includes(profile)) fail('INCREMENTAL_LIMIT');
   const full = compressed(Buffer.from(image));
   let best: EncodedBlocks = { descriptor: { mode:'base', codec:full.codec, rawLength:image.length,
     targetLength:image.length,targetHash:sha(image),baseHash:null,blockSize:BLOCK_SIZE },payload:full.payload };
-  if (previous && profile === 'blocks-br4-v1' && allowDelta) for (const mode of ['replace','xor'] as const) {
+  if (previous && profile !== 'full-br4-v1' && allowDelta) for (const mode of ['replace','xor'] as const) {
     const raw = patches(image,previous,mode === 'xor'), packed=compressed(raw);
     const candidate: EncodedBlocks = {descriptor:{...best.descriptor,mode,codec:packed.codec,rawLength:raw.length,baseHash:sha(previous)},payload:packed.payload};
     // Include descriptor bytes: comparing only compressed payload biases tiny deltas.
