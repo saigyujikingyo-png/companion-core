@@ -41,5 +41,5 @@ jobs:
           & $cp0Python -I -B -c "import importlib.metadata as m,platform; print({'python':platform.python_version(), **{n:m.version(n) for n in ['tokenizers','jinja2','markupsafe']}})"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:CP0_TOKENIZER_PYTHON = $cp0Python
-          node --test --test-concurrency=1 test/corpus-tokenizer.test.ts
+          node --test --test-concurrency=1 test/corpus-tokenizer.test.ts test/corpus-teacher.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

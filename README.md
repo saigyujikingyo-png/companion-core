@@ -1,5 +1,7 @@
 # Companion Core
 
+[CorpusTeacherPilot/0.1 双队列切片](docs/CORPUS-TEACHER-PILOT.md)已完成一次真实小批：Together/DeepSeek 共 13 次调用，6 条新候选中 5 条通过模型评审、1 条独立隔离；加密清单与 344 input / 1,256 loss / 1,600 full tokens 经新进程复核一致，结束后撤销调用权限，重复执行无新增请求。Student 目标固定为官方 Nemotron 3.5 Super VL 120B-A12B NVFP4 混合精度版本；保留 Mamba/attention/MoE 架构边界，packing 关闭。候选标记为 `MODEL_REVIEWED`，Student 训练未启动；跨平台验证按本切片提交的 CI 记录。
+
 [CorpusPipeline/0.1 的 CP0 第一片](docs/CORPUS-PIPELINE.md)已实际采收1条合格候选（train1/dev0），生成新的加密清单并通过独立进程核验。固定 Student tokenizer 测得94 input /18 loss /112 full tokens，另一进程重算一致；计量回执独立保存，旧 `.8` STOPPED 和失败原件保留。本次采收新增模型调用0，Student训练未启动。
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)已补齐失败诊断，并实现 [跨模型四单元 canary](docs/WF2-UNIT-PILOT.md)。真实 .8 完成4个密封单元和4个计划单元，调用 Together 11次、DeepSeek 1次后因第二候选未通过精确验算停止：已记录1条合格候选、1条隔离候选，原协议的四行 manifest 未完成。978项本地测试及独立审查通过；后续 CP0 单行采收独立记账，Student 推理/训练未执行，教学数据保持私有。
