@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -31,7 +31,7 @@ function deferred() {
   const promise = new Promise<string>(r => { resolve = r; }); return { promise, resolve };
 }
 function fixture(t: TestContext, schemaVersion: 1 | 2 = 1, fault?: (p: AnchoredFault) => void, clock?: Clock) {
-  const root = mkdtempSync(join(tmpdir(), 'companion-e1b-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'companion-e1b-')));
   const authorityConfig = { directory: join(root, 'authority'), authorityId: 'synthetic-authority', custodyDomain: 'synthetic-custody' };
   const authority = LocalSqliteAuthority.create(authorityConfig), keys = generateKeySet();
   const config = { directory: join(root, 'vault'), vaultId: 'synthetic-vault', identity: 'synthetic', storageDomain: 'synthetic-store', authority, keys, schemaVersion };

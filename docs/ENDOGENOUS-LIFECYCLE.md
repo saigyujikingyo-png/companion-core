@@ -102,3 +102,5 @@ E1b 的作者验证入口是 `test/endogenous-durable.test.ts`，加原64项 RAM
 
 本验收仅是合成数据下的有界持久控制、停机恢复和普通 Core 隔离证据。已消费额度与 UNKNOWN/held 不退款、不因重开或新ID恢复许可；正常期限拒绝仅停止E1，真实或不确定的持久化失败仍使 vault fail closed。真实模型自主选择、Host接线、外部 exactly-once、训练及主观体验均不在本验收范围内。
 E1b CI历史分层补充：上述完整1242/1242属于候选 `89ad9b7`。其首次自然CI在浮动Node24.21.0上因新测试无条件调用物理repack而触发既有 `REPACK_RUNTIME` 拒绝，暴露的是测试对实际能力的假定。随后仅测试增加实际runtime能力分支：supported保留原metadata检查，unsupported要求精确拒绝、零VACUUM且源字节不变，后半migration/rekey仍无条件执行；生产门和所有产品src字节均保持不变。独立原max仅审该test delta后无P1/P2；strictTS exit0和原生26/26专项通过，unsupported分支仍待新head自然CI。没有为test-only适配重复whole。首个sandbox TEMP路径失败仅保留TOOL_OUTPUT_ONLY事实，原沙箱日志不可恢复，不冒称已有原生日志；原CI失败及旧完整测试证据保留。
+
+后续浮动Node24.22.1自然CI已以实际 `UNSUPPORTED_REAL_REFUSAL` 分支通过原combined及后半migration/rekey。其后macOS正向legacy fixture因 `/var` 别名祖先被原路径门拒绝；仅两行测试修订以 `realpathSync.native` 规范新建fixture根，原symlink/path/runtime拒绝门和所有产品src不变。原max两行差量审查关闭，当前strictTS0／原生26通过；macOS通过与否只由此新head自然CI验收，旧失败保留，未重跑whole。
