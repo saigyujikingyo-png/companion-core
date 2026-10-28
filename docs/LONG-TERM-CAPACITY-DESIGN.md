@@ -1,14 +1,14 @@
 # 长期精确账本容量路线
 
-2026-10-28状态：Safety不可变终态单冷段已形成[IF10本机实现](SAFETY-COLD-SEGMENT.md)，以[冻结合同](IF10-SAFETY-COLD-SEGMENT-PLAN.md)和[分层证据](AEMC-INFRA-EVIDENCE-IF10.md)为准；独立1098/1098与strict TS通过，当前未提交、无IF10 CI。Store整图冷迁和authority永久索引路由仍为DESIGN_ONLY / NOT_IMPLEMENTED。下方拟定合同与接受出口保留2026-10-27方案形成时态，不替代最终实现合同。设计对象是精确运行控制记录，与[允许有损的内在痕迹](ADR-MEMORY-TOOL-BOUNDARY.md)分开，不通过删除幂等、UNKNOWN、撤销或提高现有上限取得容量收益。
+2026-10-28状态：IF9 Store物理压实/packed Safety（PR #5）、[IF10终态冷段](SAFETY-COLD-SEGMENT.md)（#6）与IF11 authority有界永久冷路由（#12）已合并；原[分层证据](AEMC-INFRA-EVIDENCE-IF10.md)保留当时本机1098项/成本/未提交的历史时态。当前代fanout（#17）只限制当前代准入扫描，不清理永久history。Store仍完整RAM serialize、16MiB图；Safety总8192与完整4MiB；authority四个不可复用slot；4096 commits/256MiB目录等原界保持。P5 Store冷镜像负成本实验暂停，不推广/调参；retained其他generation/backup仍unmeasured，无自动GC。下方拟定合同保留2026-10-27方案时态，已实现部分以最终合同为准。精确控制面与[允许有损的内在痕迹](ADR-MEMORY-TOOL-BOUNDARY.md)分开，不通过丢幂等/UNKNOWN/撤销或提高上限取得收益。
 
 ## 取舍和先后
 
 | 路线 | 决定与原因 |
 | --- | --- |
-| Safety不可变终态单冷段 | IF10本机候选已实现；查找与终态边界集中。减少热载荷不保证总收益，三组负结果和一个有条件应用写入收益均保留 |
-| Store tombstone/整图冷迁 | 后续独立合同；ingress返回节点当前revision/status，job/result、依赖、outbox和consumer仍引用节点，不能只搬一个表 |
-| authority跨代永久索引路由 | 后续可信根协议；receipts及legacy唯一索引跨vault，复制一个新库并不缩小精确索引，须完整查询、切换和故障闭包 |
+| Safety不可变终态单冷段 | IF10已合并；热冷精确查回保持。三组负结果及一个有条件应用写入收益保留，不保证总成本下降 |
+| Store tombstone/整图冷迁 | 未推广；P5冷镜像负成本实验暂停，Store仍全库RAM serialize。ingress/依赖/outbox/consumer闭包和永久旧键不能被清表替代 |
+| authority跨代永久索引路由 | IF11有界实现已合并，含永久索引归档/精确查回/可信根；四个不可复用slot，不是无限容量或自动GC |
 
 有限空间的精确映射不能无限记住任意新ID；Bloom过滤器、TTL遗忘或仅查询热区均不能替代永久重复/冲突判定。IF8复用回执页，IF9减少镜像碎片与Safety编码成本，都未解决无限历史。
 

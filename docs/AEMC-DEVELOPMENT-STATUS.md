@@ -1,6 +1,6 @@
 # AEMC 开发状态、架构取舍与发布进度
 
-2026-10-28。IF0–IF8已合并：IF7的[PR #2](https://github.com/saigyujikingyo-png/companion-core/pull/2)合并为 `4e0892c`，IF8的[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596eb403fd54f128b776d9d966c49dfa0da33`；各自独立验证、审查、精确head14/14与merge7/7 CI证据保留。[IF9 PR #5](https://github.com/saigyujikingyo-png/companion-core/pull/5)当前head `beed926203879bf31e3c4c6aefff124724accfc0` 已通过独立审查及14/14跨平台CI，仍OPEN / DRAFT、未合并；浮动Node验证严格能力拒绝，生产repack门未放宽。基于该head的IF10已实现不可变Safety终态单冷段，两位独立Astra max审查无剩余P1/P2；Sol一次独立本机1098/1098与strict TS通过，228执行文件前后无漂移。IF10目前LOCAL_VERIFIED / UNCOMMITTED，无IF10 CI。分层结果见[当前证据](AEMC-INFRA-EVIDENCE-IF10.md)，[IF9旧候选证据](AEMC-INFRA-EVIDENCE-IF9.md)保留历史时态。本轮未部署或启动训练；完整目标仍 **IN_PROGRESS / TRAINING_NOT_ADMITTED**，不计算混合完成率。
+2026-10-28。IF0–IF11的本机子集已合并：IF9 PR #5（merge `0819071`）、IF10 #6（`13df68c`）、IF11 authority有界永久冷路由 #12（`6a5ff1e`），以及当前代fanout #17（`945d091`）、E1a #13（`9a14839`）与E1b #16（`0f1aa77`）。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的BCD/共享raw HTTP/E2 TEXT Host 已合并为 `b58310ca7017834602ff92e470091daa141276df`，tree `c89ff6747fcefeada0097c0de51ad42a45334436` 与1393项/strict/独审候选相同；push+PR 14/14通过，合并后main 7/7 CI通过。E3a为本次SINGLE_MESSAGE_CONTROL_PROTOTYPE候选，独审/whole/CI分层另记；不宣称真实AgentAPI、长期消息产品、实际新provider/Host部署、跨机或训练接受。下面历史测试/成本保留原候选时态；完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED，不计算混合完成率。
 
 ## 已落地的能力链
 
@@ -14,8 +14,10 @@ flowchart LR
   F --> H[IF7 无需boot的分层容量检查]
   H --> R[IF8 同库回执无损rollover 永久幂等键]
   R --> S[IF9 Store物理压实 Safety载体压缩]
-  S --> L[IF10 终态冷段 本机候选]
-  L -. 独立后续合同 .-> X[Store整图与authority永久索引路由]
+  S --> L[IF10 Safety终态冷段]
+  L --> P[IF11 authority永久冷路由 有界]
+  P -. 尚未推广 .-> X[Store冷镜像与长期容量]
+
   E --> G[后续 AR1 质量实验 尚未启动]
   A -. 当前授权快照 .-> Q[I17 贝叶斯重构 DESIGN_ONLY]
   E -. I06接口与评测合同 .-> Q
@@ -32,8 +34,11 @@ flowchart LR
 | IF6 容量失败处理 | 新PREPARED前预演最终化与日志预算；单pending全局新写门；捕获mutation异常也不能提交部分状态 | OS磁盘空间预分配、无限容量、全部旧异常pending可恢复、混跑旧writer安全 |
 | IF7 容量观测 | 同authority guard读取exact head；不boot、不扫TTL、不改额度/epoch；分层计数与字节、受限目录扫描、冻结metadata输出；pending只给metadata | 当前检索许可、剩余可写次数、空间预留、历史GC/authority rollover、生产监控与真实容量接受 |
 | IF8 回执容量治理 | 显式schema4；有界Brotli4完整回执分段、统一精确查回、同guard原子repack；永久PK/UNKNOWN/额度/撤销保持；同cap真实写失败后页复用并恢复业务 | 物理authority替换或缩文件、GC、无限容量、已超软界库修复、Store/Safety/永久索引长期增长、生产资格 |
-| IF9 Store与Safety容量治理 | 显式repackStore仅私有RAM SQLite物理压实，完整逻辑指纹/新目标/fencing；新Safety profile有界raw/Brotli载体、展开前预算、完整原语义及自包含恢复 | 不清理长期索引、不突破8192/16MiB、不减少全部CPU/RAM路径、不保证所有载体更小；IF9提交CI已通过，PR仍草稿；生产未验收 |
-| IF10 Safety终态冷段 | 显式P4升级与归档、热冷全局精确账本、新代际自包含重封、文件闭包、冷段备份/rekey/reconcile；UNKNOWN/幂等/反馈/额度和旧源fencing保持 | 仍限8192条、15帧/31数据文件及64MiB恢复预算；不GC、不突破长期容量；仅本机候选，无IF10提交CI，不保证总IO/RAM/CPU下降 |
+| IF9 Store与Safety容量治理 | 已合并；显式repackStore仅私有RAM SQLite物理压实，完整逻辑指纹/新目标/fencing；packed Safety保留原语义与恢复 | 不清理长期索引、不突破8192/16MiB、不减少全部CPU/RAM路径、不保证所有载体更小；生产仍未验收 |
+| IF10 Safety终态冷段 | 已合并；显式P4升级/归档、热冷全局精确账本、新代际重封、备份/rekey/reconcile，保留UNKNOWN/额度/旧源fencing | 总Safety仍8192且完整展开4MiB；15帧/31数据文件、64MiB恢复预算仍在；不GC、不保证总成本下降 |
+| IF11 authority永久冷路由 | 已合并；永久索引归档与热冷精确查回，可信根/旧writer fence保持 | 仅四个不可复用slot；不是无限索引或自动GC |
+| 当前代fanout / E1 / E2 | 当前代nodes/按child筛edges；E1持久消费/原expiry/held/fence；E2受信TEXT Host与共享raw HTTP | 不释放旧history/逻辑总限；不是真实AgentAPI/新provider部署、跨机或自主质量接受 |
+| E3a单消息候选 | 本次SINGLE_MESSAGE_CONTROL_PROTOTYPE：单槽metadata、正文RAM、显式一次consider、独立TEXT交付 | 非长期队列；无rollover、ACTION、实际AgentAPI mount或训练 |
 
 IF5选择先接完整性边界：持久消费者已有实际进度，旧RetrievalService却仍依赖手工refs。新增 [durable retrieval](DURABLE-RETRIEVAL.md)使两者形成真实调用链，原AR0字面/共享来源排序保持不变；先解决选集的完整性与当前权限，再做排名质量实验。
 
@@ -73,8 +78,8 @@ IF10将完整不可变终态从每次热Safety载体中分离，所有旧键仍�
 
 下一步按依赖推进：
 
-1. IF0–IF8发布闭环完成。IF9的PR #5已有精确head14/14 CI与独立审查，仍草稿、未合并；不得把浮动runtime的明确拒绝解释为该版本VACUUM已接受。IF10两路独立审查及本机1098/1098与TS闭合，当前未提交，无IF10 CI；下一发布层另行绑定精确候选。
-2. 容量运维：[Safety不可变终态单冷段](SAFETY-COLD-SEGMENT.md)的本机子集已实现。后续分别冻结Store ingress/图闭包和authority永久PK/legacy路由合同，包含跨段查询完整性、撤销/消费者引用、可信根切换、失败恢复和总成本；尚未实现。IF10仍保持8192总限，不丢旧ID/UNKNOWN，不因inspect空blockers自动写入。
+1. IF0–IF11、当前代fanout及E1已合并；PR #21 BCD/E2及PR #23 scope修复已合并。E3a原冻结提交`de16f66`已完成作者专项、独审、一次独立本机1425/1425及strict；本次基于`6701d63`整合，保留PR #23回归，E2/E3含HTTP专项67/67及strict通过。本次PR的跨平台CI与发布仍待完成，不以旧执行树证据替代新组合接受。
+2. 容量运维：IF10与IF11本机子集已实现；Store仍全库RAM serialize并受16MiB图、4096 commits、256MiB目录界约束，Safety总8192及完整4MiB、authority四个不可复用slot保持。P5冷Store镜像实验负成本、暂停，不推广/调参；其他generation/backup retained容量仍unmeasured，无自动GC。当前代fanout优化不能清旧ID/UNKNOWN或解释为逻辑扩容。
 3. 生产信任域：冻结authority/custody owner、独立备份/共同回滚威胁、实际恢复RPO/RTO与旧writer停用方案，再做真实环境准入；目录名字本身不提供信任。
 4. AR1质量：先固定来源权利、query/support答案、家族/时间切分、算法版本、质量与总成本门，再比较BM25、embedding、PPR及seed策略。检索引用有效不等于答案正确；本轮不调用模型或训练。
 5. [I17](BAYESIAN-RECONSTRUCTION-DESIGN.md)与[痕迹/PDF双路径/情感唤起最小切片](ADR-MEMORY-TOOL-BOUNDARY.md)先冻结有限输入、先验/似然、修订及预算；稳定基线上独立实现，不等待所有容量或I06算法完成。正式family/time split、校准/查证和耦合收益独立接受；目前DESIGN_ONLY / EXPERIMENT_NOT_RUN。概念registry、可撤销状态、sleep和跨代迁移各自开放。

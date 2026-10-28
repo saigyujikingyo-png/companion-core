@@ -10,7 +10,7 @@ import type { MemorySchema } from './memory-image.ts';
 import type { FanoutFault } from './fanout-types.ts';
 import type { SourceRef, Scope } from './contracts.ts';
 import { bindControl, bootControl, encodeControl, fenceControl, newControl } from './endogenous-durable.ts';
-import type { DurableEndogenousSession, EndogenousControl, DurableTextAcceptance } from './endogenous-durable.ts';
+import type { DurableEndogenousSession, EndogenousControl, DurableTextAcceptance, DurableMessageSession, MessageBinding } from './endogenous-durable.ts';
 import type { EndogenousDecisionPort, EndogenousLimits, EndogenousOwner, EndogenousProfile, EndogenousTextPort, EndogenousSettlement } from './endogenous-lifecycle.ts';
 import { MAX_COMMITS, MAX_DISK, MAX_IMAGE, sha, validateIdentityBudget } from './durable-codec.ts';
 import type { Safety, Terminal } from './durable-codec.ts';
@@ -417,6 +417,9 @@ export class AnchoredVault {
   createEndogenousTextControl(scope: Scope, limits?: Partial<EndogenousLimits>): EndogenousControl {
     return this.#createEndogenous(scope, limits, 'text-choice-v1');
   }
+  createEndogenousMessageControl(scope: Scope, limits?: Partial<EndogenousLimits>): EndogenousControl {
+    return this.#createEndogenous(scope, limits, 'message-choice-v1');
+  }
   #createEndogenous(scope: Scope, limits: Partial<EndogenousLimits> | undefined, profile: EndogenousProfile): EndogenousControl {
     return this.#access(() => {
       this.#tx!.assertAdmitted(this.#head!);
@@ -433,12 +436,24 @@ export class AnchoredVault {
   openEndogenousControl(port: EndogenousDecisionPort): DurableEndogenousSession {
     return this.#openEndogenous(port, 'rest-noop-v1');
   }
-  openEndogenousTextControl(port: EndogenousTextPort, acceptText: DurableTextAcceptance, settled?: EndogenousSettlement, expectedScope?: Scope): DurableEndogenousSession {
+  /** Without expectedScope this is a trusted control-only API, not a Host binding. */
+  openEndogenousTextControl(port: EndogenousTextPort, acceptText: DurableTextAcceptance, settled?: EndogenousSettlement,
+    expectedScope?: Scope): DurableEndogenousSession {
     if (typeof acceptText !== 'function') fail('E1_INVALID_PORT');
-    return this.#openEndogenous(port, 'text-choice-v1', acceptText, settled, expectedScope);
+    return this.#openEndogenous(port, 'text-choice-v1', acceptText, settled, undefined, expectedScope);
   }
+  /** Trusted origin/route binding; payloads cannot choose their sender or route. */
+  openEndogenousMessageControl(binding: MessageBinding, port: EndogenousTextPort, acceptText: DurableTextAcceptance,
+    settled?: EndogenousSettlement, onRevoke?: () => void, expectedScope?: Scope): DurableMessageSession {
+    if (typeof acceptText !== 'function') fail('E1_INVALID_PORT');
+    return this.#openEndogenous(port, 'message-choice-v1', acceptText, settled, { ...binding, ...(onRevoke ? { onRevoke } : {}) }, expectedScope);
+  }
+  #openEndogenous(port: EndogenousDecisionPort | EndogenousTextPort, profile: 'message-choice-v1',
+    acceptText: DurableTextAcceptance, settled: EndogenousSettlement | undefined, message: MessageBinding & { onRevoke?: () => void }, expectedScope?: Scope): DurableMessageSession;
+  #openEndogenous(port: EndogenousDecisionPort | EndogenousTextPort, profile: 'rest-noop-v1' | 'text-choice-v1',
+    acceptText?: DurableTextAcceptance, settled?: EndogenousSettlement, message?: undefined, expectedScope?: Scope): DurableEndogenousSession;
   #openEndogenous(port: EndogenousDecisionPort | EndogenousTextPort, profile: EndogenousProfile,
-    acceptText?: DurableTextAcceptance, settled?: EndogenousSettlement, expectedScope?: Scope): DurableEndogenousSession {
+    acceptText?: DurableTextAcceptance, settled?: EndogenousSettlement, message?: MessageBinding & { onRevoke?: () => void }, expectedScope?: Scope): DurableEndogenousSession | DurableMessageSession {
     return this.#access(() => {
       this.#tx!.assertAdmitted(this.#head!);
       if (this.#endogenousBootBlocked) fail(this.#endogenousBootBlocked);
@@ -450,9 +465,10 @@ export class AnchoredVault {
         scope: id => this.#withStore(() => this.store.scope(id)), now: () => this.#wallNow(),
         assertCurrent: () => { this.#healthy(); this.#tx!.assertAdmitted(this.#head!); },
         poison: () => { this.#poisoned = true; },
-      }, this.#identity, port, this.#clock.monotonic, profile, acceptText, settled, expectedScope);
+      }, this.#identity, port, this.#clock.monotonic, profile, acceptText, settled,
+      message ? { ...message, digest: value => this.#digest(value) } : undefined, expectedScope);
       this.#endogenousOwner = bound.owner;
-      return bound.session;
+      return bound.messageSession ?? bound.session;
     });
   }
   claim(requestId: string, fingerprint: string): void {

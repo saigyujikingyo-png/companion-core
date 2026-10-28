@@ -2,7 +2,7 @@
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
 
-[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF8已合并；IF8由[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596e`，合并后7/7 CI通过。[IF9](docs/CAPACITY-REPACK.md)的[PR #5](https://github.com/saigyujikingyo-png/companion-core/pull/5)在 `beed926` 完成独立审查及14/14跨平台CI，仍OPEN / DRAFT，未合并；浮动Node按实际SQLite能力验证拒绝，未放宽生产repack门。[IF10 Safety终态冷段](docs/SAFETY-COLD-SEGMENT.md)已实现，独立本机1098/1098与strict TS通过，228执行文件无漂移；当前为未提交候选，无IF10 CI，最终审查分层见[当前证据](docs/AEMC-INFRA-EVIDENCE-IF10.md)。[长期容量](docs/LONG-TERM-CAPACITY-DESIGN.md)中的Store整图与authority永久索引路由、[内在痕迹/工具原件/精确控制三域](docs/ADR-MEMORY-TOOL-BOUNDARY.md)及[I17](docs/BAYESIAN-RECONSTRUCTION-DESIGN.md)仍有设计缺口。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
+[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF11 的本机子集已进入 main，包括 [IF9 Store 物理压实](docs/CAPACITY-REPACK.md)（PR #5）、[IF10 Safety 终态冷段](docs/SAFETY-COLD-SEGMENT.md)（#6）、IF11 authority 有界永久冷路由（#12）；当前 generation fanout（#17）、E1a（#13）与 E1b（#16）也已合并。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的 BCD/共享 raw HTTP/E2 TEXT Host 于2026-10-28合并为 `b58310c`（tree `c89ff674`，与1393项/strict/独审候选相同），push+PR 14/14 CI通过，合并后main 7/7 CI通过。E3a 为本次 [SINGLE_MESSAGE_CONTROL_PROTOTYPE](docs/ENDOGENOUS-LIFECYCLE.md) 候选，不是长期收件队列或真实 AgentAPI 部署。[长期容量](docs/LONG-TERM-CAPACITY-DESIGN.md)仍有整库RAM镜像、16MiB图、8192 Safety总数及authority四个不可复用槽等硬界；P5 Store冷镜像负成本实验暂停，未推广。既有成本/阴性证据保留；真实新provider/Host部署、跨机和训练没有由本轮合成验证取得接受。
 
 [IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；[IF5/IF6 本机组合证据](docs/AEMC-INFRA-EVIDENCE-IF6.md)保留874/874及成本测量，后续提交与合并结果以 IF7 证据为准。本批未启动训练。
 
