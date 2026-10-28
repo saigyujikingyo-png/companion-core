@@ -5,18 +5,20 @@ import { MAX_IMAGE, record, sha } from './durable-codec.ts';
 import type { Safety } from './durable-codec.ts';
 import { fail, text } from './validation.ts';
 import type {LegacyImportProof} from './legacy-import-types.ts';
-import {COLD_SAFETY_PROFILE,validateColdDescriptor} from './safety-format.ts';
+import {COLD_SAFETY_PROFILE,isColdSafetyProfile,validateColdDescriptor} from './safety-format.ts';
 import type {SafetyColdDescriptor} from './safety-format.ts';
+import {STORE_COLD_PROFILE,validateStoreColdDescriptor} from './store-cold-format.ts';
+import type {StoreColdDescriptor} from './store-cold-format.ts';
 
 export const ANCHORED_FORMAT = 'companion-anchored-vault-v2';
 export const INCREMENTAL_FORMAT = 'companion-anchored-vault-v3';
 export const INCREMENTAL_MARKER = 'AnchoredVault.v3';
-export type StorageProfile = 'blocks-br4-v1' | 'full-br4-v1' | 'blocks-br4-safety-br4-v1' | typeof COLD_SAFETY_PROFILE;
+export type StorageProfile = 'blocks-br4-v1' | 'full-br4-v1' | 'blocks-br4-safety-br4-v1' | typeof COLD_SAFETY_PROFILE | typeof STORE_COLD_PROFILE;
 export const VAULT_MARKER = 'AnchoredVault.v2';
 export const STAGE_LIMIT = MAX_IMAGE * 4;
 export type VaultIdentity = { format: typeof ANCHORED_FORMAT | typeof INCREMENTAL_FORMAT; authorityId: string; vaultId: string; identity: string;
   instanceId: string; ownerEpoch: number; keyEpoch: number; directory: string; storageDomain: string; schemaVersion?: 1 | 2; storageProfile?: StorageProfile;
-  legacyImport?:{lineageId:string;migrationId:string};safetyCold?:SafetyColdDescriptor|null };
+  legacyImport?:{lineageId:string;migrationId:string};safetyCold?:SafetyColdDescriptor|null;storeCold?:StoreColdDescriptor|null };
 export type VaultHead = VaultIdentity & { sequence: number; digest: string };
 export type KeySet = { version: 2; keyEpoch: number; storageDEK: Uint8Array; ingressKey: Uint8Array };
 export type VaultRecord = { version: 2; identity: VaultIdentity; sequence: number; operationId: string;
@@ -83,9 +85,11 @@ export function validateIdentity(value: unknown): asserts value is VaultIdentity
   if (!record(value) || ![ANCHORED_FORMAT,INCREMENTAL_FORMAT].includes(value.format) || !integer(value.ownerEpoch, 1) || !integer(value.keyEpoch, 1)
     || typeof value.directory !== 'string' || !isAbsolute(value.directory)) fail('ANCHOR_CORRUPT');
   if (value.schemaVersion !== undefined && ![1,2].includes(value.schemaVersion)) fail('ANCHOR_CORRUPT');
-  if (value.format === INCREMENTAL_FORMAT ? !['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1',COLD_SAFETY_PROFILE].includes(value.storageProfile) : value.storageProfile !== undefined) fail('ANCHOR_STORAGE_PROFILE');
-  if(value.storageProfile===COLD_SAFETY_PROFILE){if(!Object.hasOwn(value,'safetyCold'))fail('SAFETY_COLD_DESCRIPTOR');if(value.safetyCold!==null)validateColdDescriptor(value.safetyCold);}
+  if (value.format === INCREMENTAL_FORMAT ? !['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1',COLD_SAFETY_PROFILE,STORE_COLD_PROFILE].includes(value.storageProfile) : value.storageProfile !== undefined) fail('ANCHOR_STORAGE_PROFILE');
+  if(isColdSafetyProfile(value.storageProfile)){if(!Object.hasOwn(value,'safetyCold'))fail('SAFETY_COLD_DESCRIPTOR');if(value.safetyCold!==null)validateColdDescriptor(value.safetyCold);}
   else if(Object.hasOwn(value,'safetyCold'))fail('ANCHOR_STORAGE_PROFILE');
+  if(value.storageProfile===STORE_COLD_PROFILE){if(!Object.hasOwn(value,'storeCold'))fail('STORE_COLD_DESCRIPTOR');if(value.storeCold!==null){validateStoreColdDescriptor(value.storeCold);if(value.storeCold.schema!==(value.schemaVersion??1))fail('STORE_COLD_DESCRIPTOR');}}
+  else if(Object.hasOwn(value,'storeCold'))fail('ANCHOR_STORAGE_PROFILE');
   text(value.identity,128);
   for (const field of ['authorityId', 'vaultId', 'instanceId', 'storageDomain']) id(value[field]);
   if(value.legacyImport!==undefined&&(!record(value.legacyImport)||Object.keys(value.legacyImport).sort().join(',')!=='lineageId,migrationId'
@@ -100,6 +104,7 @@ export function identityOf(head: VaultHead): VaultIdentity {
   const { sequence: _sequence, digest: _digest, ...identity } = head; return identity;
 }
 export function canUpgradeStorage(old:VaultIdentity,profile:StorageProfile):boolean{
+  if(profile===STORE_COLD_PROFILE)return old.format===INCREMENTAL_FORMAT&&old.storageProfile===COLD_SAFETY_PROFILE;
   if(profile===COLD_SAFETY_PROFILE)return old.format===INCREMENTAL_FORMAT&&old.storageProfile==='blocks-br4-safety-br4-v1';
   if(old.format===ANCHORED_FORMAT)return true;
   return profile==='blocks-br4-safety-br4-v1'&&(old.storageProfile==='blocks-br4-v1'||old.storageProfile==='full-br4-v1');

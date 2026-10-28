@@ -25,14 +25,16 @@ import type {LegacyImportProof,LegacySourceFreeze} from './legacy-import-types.t
 import {chainLimit,MAX_REPLAY_BYTES} from './incremental-codec.ts';
 import {CAPACITY_DIRECTORY_ENTRY_LIMIT,freezeCapacity} from './capacity-types.ts';
 import type {GenerationCapacity,VaultCapacity} from './capacity-types.ts';
-import {COLD_SAFETY_PROFILE,canonicalSafetyJSON} from './safety-format.ts';
+import {COLD_SAFETY_PROFILE,isColdSafetyProfile,canonicalSafetyJSON} from './safety-format.ts';
 import type {HotSafetyEnvelope} from './safety-format.ts';
 import {SafetyLedger,allHotSafety,validateHotSnapshot} from './safety-ledger.ts';
 import {sealSafetySegment,assertColdClosure} from './safety-segment.ts';
+import {STORE_COLD_PROFILE,STORE_COLD_POLICY} from './store-cold-format.ts';
+import {StoreColdSegment,selectStoreCold,sealStoreSegment,assertStoreColdClosure} from './store-cold.ts';
 
 export type AnchoredConfig = { directory: string; vaultId: string; identity: string; storageDomain: string;
   authority: LocalSqliteAuthority; keys: KeySet; schemaVersion?: MemorySchema; storageProfile?: StorageProfile };
-export type AnchoredFault = 'safety-cold-written' | 'stage-written' | 'prepared' | 'checkpoint-published' | 'record-published' | 'finalized';
+export type AnchoredFault = 'store-cold-written' | 'safety-cold-written' | 'stage-written' | 'prepared' | 'checkpoint-published' | 'record-published' | 'finalized';
 type Options = { clock?: Clock; fault?: (point: AnchoredFault) => void; fanoutFault?: (point: FanoutFault) => void };
 export type RestoreRequest = { backupDirectory: string; targetDirectory: string; storageDomain: string;
   authority: LocalSqliteAuthority; keys: KeySet; maxCalls: number; operationId: string; fault?: (point: AnchoredFault) => void };
@@ -98,6 +100,7 @@ function capacityHead(head:VaultHead):VaultHead{
     keyEpoch:head.keyEpoch,directory:head.directory,storageDomain:head.storageDomain,sequence:head.sequence,digest:head.digest,
     ...(head.schemaVersion===undefined?{}:{schemaVersion:head.schemaVersion}),...(head.storageProfile===undefined?{}:{storageProfile:head.storageProfile}),
     ...(head.safetyCold===undefined?{}:{safetyCold:structuredClone(head.safetyCold)}),
+    ...(head.storeCold===undefined?{}:{storeCold:structuredClone(head.storeCold)}),
     ...(head.legacyImport===undefined?{}:{legacyImport:{lineageId:head.legacyImport.lineageId,migrationId:head.legacyImport.migrationId}})};
 }
 
@@ -129,9 +132,9 @@ function diskBytes(directory: string): number {
 }
 function stageBytes(identity: VaultIdentity, sequence: number, operationId: string, image: Uint8Array, safety: Safety,
   revocationHighWater: number, keys: KeySet, oldHead: VaultHead | null, parentHead: VaultHead | null,
-  maintenance?: PendingCommit['maintenance'], baseline:Baseline|null=null,legacyImport?:LegacyImportProof,hot?:HotSafetyEnvelope): Frozen {
+  maintenance?: PendingCommit['maintenance'], baseline:Baseline|null=null,legacyImport?:LegacyImportProof,hot?:HotSafetyEnvelope,storeCold?:StoreColdSegment): Frozen {
   if (image.length > MAX_IMAGE || sequence > MAX_COMMITS) fail('ANCHOR_LIMIT');
-  if(identity.format===INCREMENTAL_FORMAT)return freezeFrame(identity,sequence,operationId,image,safety,revocationHighWater,keys,oldHead,parentHead,baseline,maintenance,legacyImport,hot);
+  if(identity.format===INCREMENTAL_FORMAT)return freezeFrame(identity,sequence,operationId,image,safety,revocationHighWater,keys,oldHead,parentHead,baseline,maintenance,legacyImport,hot,storeCold);
   const state: VaultState = { version: 2, identity, sequence, image: Buffer.from(image).toString('base64'), safety,
     revocationHighWater, ingressKeyDigest: sha(keys.ingressKey) };
   const checkpoint = sealV2(state, 'checkpoint', identity, keys.storageDEK);
@@ -148,7 +151,7 @@ function writeStage(directory: string, operationId: string, bytes: Buffer, froze
   const path = join(directory, `stage-${operationId}.json`); writeNew(path, bytes); return path;
 }
 function publish(stage: FrozenStage|FrozenV3, fault?: (point: AnchoredFault) => void): void {
-  assertColdClosure(stage.head);
+  assertColdClosure(stage.head);assertStoreColdClosure(stage.head);
   if(stage.format===INCREMENTAL_FORMAT){
     if(sha(readBounded(join(stage.head.directory,stage.blob),stage.blobLength))!==stage.blobDigest)fail('ANCHOR_PUBLISH_CONFLICT');
     fault?.('checkpoint-published');const path=join(stage.head.directory,`record-${stage.head.sequence}.bin`),bytes=Buffer.from(stage.record,'base64');
@@ -166,14 +169,14 @@ function publish(stage: FrozenStage|FrozenV3, fault?: (point: AnchoredFault) => 
   }
 }
 function finalizeFrozen(tx:AuthorityTransaction,pending:PendingCommit):AnchorReceipt{
-  assertColdClosure(pending.newHead);return tx.finalize(pending);
+  assertColdClosure(pending.newHead);assertStoreColdClosure(pending.newHead);return tx.finalize(pending);
 }
-function disposeDecoded(decoded:Decoded|undefined):void{if(decoded){decoded.image.fill(0);if('ledger' in decoded)decoded.ledger.close();}}
+function disposeDecoded(decoded:Decoded|undefined):void{if(decoded){decoded.image.fill(0);if('ledger' in decoded){decoded.ledger.close();decoded.storeCold?.close();decoded.baseline.image.fill(0);}}}
 /** Every generation builder binds the new context before sealing the cold root. */
 function freezeGeneration(identity:VaultIdentity,operationId:string,image:Uint8Array,safety:Safety,highWater:number,keys:KeySet,parent:VaultHead|null,
-  source?:Decoded,archive=false,maintenance?:PendingCommit['maintenance'],legacyImport?:LegacyImportProof):{identity:VaultIdentity;frozen:Frozen;marker:Buffer;cold?:Buffer}{
-  let hot:HotSafetyEnvelope|undefined,cold:Buffer|undefined;
-  if(identity.storageProfile===COLD_SAFETY_PROFILE){
+  source?:Decoded,archive=false,maintenance?:PendingCommit['maintenance'],legacyImport?:LegacyImportProof,archiveStore=false):{identity:VaultIdentity;frozen:Frozen;marker:Buffer;cold?:Buffer;storeBytes?:Buffer}{
+  let hot:HotSafetyEnvelope|undefined,cold:Buffer|undefined,storeBytes:Buffer|undefined,storeSegment:StoreColdSegment|undefined;
+  if(isColdSafetyProfile(identity.storageProfile)){
     const ledger=source&&'ledger' in source?source.ledger:undefined;
     const partition=archive?(ledger??fail('SAFETY_COLD_PROFILE')).archivePartition():{hot:ledger?.hotEnvelope()??allHotSafety(safety),cold:ledger?.coldRows()??[]};
     hot=partition.hot;identity={...identity,safetyCold:null};
@@ -181,14 +184,23 @@ function freezeGeneration(identity:VaultIdentity,operationId:string,image:Uint8A
     validateHotSnapshot(safety,hot,identity);
     if(source&&canonicalSafetyJSON(source.state.safety)!==canonicalSafetyJSON(safety))fail('SAFETY_LOGICAL_MISMATCH');
   }
-  const encodedMarker=marker(identity),frozen=stageBytes(identity,1,operationId,image,safety,highWater,keys,null,parent,maintenance,null,legacyImport,hot);
-  if(encodedMarker.length+frozen.bytes.length*2+(frozen.blob?.length??0)+(cold?.length??0)>MAX_DISK)fail('ANCHOR_LIMIT');
-  return{identity,frozen,marker:encodedMarker,...(cold?{cold}:{})};
+  try{
+    if(identity.storageProfile===STORE_COLD_PROFILE){
+      const old=source&&'storeCold' in source?source.storeCold:undefined;identity={...identity,storeCold:null};
+      const plain=archiveStore?selectStoreCold(image,identity.schemaVersion??1,old):old?.plain();
+      try{if(plain){const sealed=sealStoreSegment(plain,identity,keys.storageDEK);identity.storeCold=sealed.descriptor;storeBytes=sealed.bytes;storeSegment=StoreColdSegment.open(storeBytes,identity,keys.storageDEK);}}finally{plain?.fill(0);}
+    }
+    const encodedMarker=marker(identity),frozen=stageBytes(identity,1,operationId,image,safety,highWater,keys,null,parent,maintenance,null,legacyImport,hot,storeSegment);
+    if(encodedMarker.length+frozen.bytes.length*2+(frozen.blob?.length??0)+(cold?.length??0)+(storeBytes?.length??0)>MAX_DISK)fail('ANCHOR_LIMIT');
+    if(identity.storageProfile===STORE_COLD_PROFILE)frozen.baseline?.image.fill(0);
+    return{identity,frozen,marker:encodedMarker,...(cold?{cold}:{}),...(storeBytes?{storeBytes}:{})};
+  }finally{storeSegment?.close();}
 }
 function writeGeneration(generation:ReturnType<typeof freezeGeneration>,operationId:string,fault?:Options['fault']):string{
   const {identity,frozen}=generation;createDirectory(identity.directory);writeNew(join(identity.directory,markerName(identity)),generation.marker);
   if(generation.cold){writeNew(join(identity.directory,identity.safetyCold!.file),generation.cold);fault?.('safety-cold-written');}
-  const stagePath=writeStage(identity.directory,operationId,frozen.bytes,frozen);assertColdClosure(identity);fault?.('stage-written');return stagePath;
+  if(generation.storeBytes){writeNew(join(identity.directory,identity.storeCold!.file),generation.storeBytes);fault?.('store-cold-written');}
+  const stagePath=writeStage(identity.directory,operationId,frozen.bytes,frozen);assertColdClosure(identity);assertStoreColdClosure(identity);fault?.('stage-written');return stagePath;
 }
 function readCurrent(head: VaultHead, keys: KeySet, maxCalls: number): Decoded {
   if (!same(readMarker(head.directory), identityOf(head))) fail('ANCHOR_IDENTITY');
@@ -209,12 +221,12 @@ function readBackup(directory: string, keys: KeySet, maxCalls: number): Decoded 
   if(receipt.format===INCREMENTAL_FORMAT){
     let candidate:any;try{candidate=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{fail('ANCHOR_BACKUP');}
     if(candidate?.format!==INCREMENTAL_FORMAT)fail('ANCHOR_BACKUP');
-    validateHead(candidate.head);const coldProfile=candidate.head.storageProfile===COLD_SAFETY_PROFILE;
+    validateHead(candidate.head);const coldProfile=isColdSafetyProfile(candidate.head.storageProfile),storeProfile=candidate.head.storageProfile===STORE_COLD_PROFILE;
     if(bytes.length>MANIFEST_LIMIT||Object.keys(candidate).sort().join(',')!=='files,format,head'||!Array.isArray(candidate.files)
-      ||candidate.files.length>(coldProfile?(candidate.head.safetyCold?31:30):32))fail('ANCHOR_BACKUP');
+      ||candidate.files.length>(storeProfile?28+Number(!!candidate.head.safetyCold)+Number(!!candidate.head.storeCold):coldProfile?(candidate.head.safetyCold?31:30):32))fail('ANCHOR_BACKUP');
     const files=new Map<string,{size:number;digest:string}>();let total=0;
     for(const file of candidate.files){if(!file||Object.keys(file).sort().join(',')!=='digest,name,size'||typeof file.name!=='string'
-      ||!(coldProfile?/^(blob-[a-f0-9]{64}|record-[1-9][0-9]*|safety-[a-f0-9]{64})\.bin$/:/^(blob-[a-f0-9]{64}|record-[1-9][0-9]*)\.bin$/).test(file.name)||files.has(file.name)||!Number.isSafeInteger(file.size)||file.size<1||! /^[a-f0-9]{64}$/.test(file.digest))fail('ANCHOR_BACKUP');
+      ||!(storeProfile?/^(blob-[a-f0-9]{64}|record-[1-9][0-9]*|safety-[a-f0-9]{64}|store-[a-f0-9]{64})\.bin$/:coldProfile?/^(blob-[a-f0-9]{64}|record-[1-9][0-9]*|safety-[a-f0-9]{64})\.bin$/:/^(blob-[a-f0-9]{64}|record-[1-9][0-9]*)\.bin$/).test(file.name)||files.has(file.name)||!Number.isSafeInteger(file.size)||file.size<1||! /^[a-f0-9]{64}$/.test(file.digest))fail('ANCHOR_BACKUP');
       total+=file.size;if(total>64*1024*1024)fail('ANCHOR_BACKUP');files.set(file.name,file);}
     decoded=reconstruct(candidate.head,(name,max)=>{const file=files.get(name);if(!file||file.size>max)fail('ANCHOR_BACKUP');const data=readBounded(join(path,name),file.size);
       if(data.length!==file.size||sha(data)!==file.digest)fail('ANCHOR_BACKUP');return data;},keys,maxCalls);
@@ -258,7 +270,7 @@ export class AnchoredVault {
           :{frames:1,files:2,encodedBytes:Buffer.byteLength(current.stage.checkpoint,'base64')+Buffer.byteLength(current.stage.record,'base64'),frameLimit:null,replayByteLimit:null},
         diskLimitBytes:MAX_DISK,otherGenerationsAndBackups:'unmeasured'};
       const state=current.state.safety,safety={ingressCount:state.ingress.length,ingressLimit:8192,unknownCount:state.ingress.filter(entry=>entry.state==='unknown').length,reserved:state.reserved,maxCalls:state.maxCalls,
-        ...(head.storageProfile===COLD_SAFETY_PROFILE&&'ledger' in current?{hotCount:current.ledger.hotCount,coldCount:current.ledger.coldCount,
+        ...(isColdSafetyProfile(head.storageProfile)&&'ledger' in current?{hotCount:current.ledger.hotCount,coldCount:current.ledger.coldCount,
           coldEncodedBytes:head.safetyCold?.cipherBytes??0,coldDecodedBytes:head.safetyCold?.plainBytes??0,coldDescriptor:structuredClone(head.safetyCold!)}:{})};
       const legacyAdmission=head.legacyImport?tx.legacy(head.legacyImport.lineageId)!.admission:'not-applicable';
       const blockers:('LEGACY_ADMISSION_REQUIRED'|'DIRECTORY_OVER_DISK_LIMIT'|'COMMIT_LIMIT_REACHED')[]=[];
@@ -279,6 +291,7 @@ export class AnchoredVault {
   #head: VaultHead | null = null;
   #baseline: Baseline | null = null;
   #ledger: SafetyLedger;
+  #storeCold:StoreColdSegment|undefined;
   #writer: DatabaseSync | undefined;
   #tx: AuthorityTransaction | undefined;
   #depth = 0;
@@ -293,13 +306,13 @@ export class AnchoredVault {
     this.#identity = creating ? { format: config.storageProfile?INCREMENTAL_FORMAT:ANCHORED_FORMAT, authorityId: config.authority.authorityId, vaultId: config.vaultId,
       identity: config.identity, instanceId: randomUUID(), ownerEpoch: 1, keyEpoch: config.keys.keyEpoch, directory, storageDomain: config.storageDomain,
       ...(config.schemaVersion === 2 ? { schemaVersion: 2 } : {}),...(config.storageProfile?{storageProfile:config.storageProfile}:{}),
-      ...(config.storageProfile===COLD_SAFETY_PROFILE?{safetyCold:null}:{}) } : readMarker(directory);
+      ...(isColdSafetyProfile(config.storageProfile)?{safetyCold:null}:{}),...(config.storageProfile===STORE_COLD_PROFILE?{storeCold:null}:{}) } : readMarker(directory);
     validateIdentity(this.#identity);
     if (this.#identity.authorityId !== config.authority.authorityId || this.#identity.vaultId !== config.vaultId
       || this.#identity.identity !== config.identity || this.#identity.keyEpoch !== config.keys.keyEpoch || this.#identity.storageDomain !== config.storageDomain
       || (this.#identity.schemaVersion ?? 1) !== (config.schemaVersion ?? 1)||this.#identity.storageProfile!==config.storageProfile) fail('ANCHOR_IDENTITY');
     this.#ledger = new SafetyLedger({ version: 1, identity: config.identity, maxCalls, reserved: 0, ingress: [], lastSourceRef: null, lastAcknowledgedDeliveryId: null, lastWall: 0 },
-      {...this.#identity,...(this.#identity.storageProfile===COLD_SAFETY_PROFILE?{safetyCold:null}:{})},maxCalls);
+      {...this.#identity,...(isColdSafetyProfile(this.#identity.storageProfile)?{safetyCold:null}:{})},maxCalls);
     let store: MemoryStore | undefined;
     this.restored = !creating;
     try {
@@ -325,7 +338,7 @@ export class AnchoredVault {
             tx.assertActive(this.#head); // Includes mandatory imported-lineage registry validation before boot or staging.
             const decoded = readCurrent(this.#head, this.#keys, maxCalls); image = decoded.image;this.#ledger.close();
             this.#ledger = 'ledger' in decoded?decoded.ledger:new SafetyLedger(decoded.state.safety,this.#identity,maxCalls);
-            if('baseline' in decoded)this.#baseline={...decoded.baseline,image:Buffer.from(decoded.image)};
+            if('baseline' in decoded){this.#baseline={...decoded.baseline,image:Buffer.from(decoded.baseline.image)};if(decoded.baseline.image!==decoded.image)decoded.baseline.image.fill(0);this.#storeCold=decoded.storeCold;}
           }
           this.#ledger.boot();
           this.#wallNow();
@@ -341,7 +354,7 @@ export class AnchoredVault {
       this.#store = store!;
     } catch (error) {
       this.#depth = 0; try { store?.close(); } catch {} try { this.#writer?.close(); } catch {}
-      this.#ledger.close();this.#baseline?.image.fill(0);this.#keys.storageDEK.fill(0); this.#keys.ingressKey.fill(0); throw error;
+      this.#ledger.close();this.#storeCold?.close();this.#baseline?.image.fill(0);this.#keys.storageDEK.fill(0); this.#keys.ingressKey.fill(0); throw error;
     }
   }
   static create(config: AnchoredConfig, maxCalls: number, options: Options = {}): AnchoredVault { return new AnchoredVault(config, maxCalls, options, true); }
@@ -350,7 +363,7 @@ export class AnchoredVault {
   #access<T>(body: () => T): T {
     this.#healthy(); if (this.#depth) fail('ANCHOR_ACCESS_BUSY');
     return this.#authority.transaction(tx => {
-      tx.assertActive(this.#head!);this.#ledger.assertColdClosure(); this.#depth = 1; this.#tx = tx;
+      tx.assertActive(this.#head!);this.#ledger.assertColdClosure();assertStoreColdClosure(this.#identity); this.#depth = 1; this.#tx = tx;
       try { return body(); } finally { this.#depth = 0; this.#tx = undefined; }
     });
   }
@@ -371,15 +384,15 @@ export class AnchoredVault {
   #commit(image: Uint8Array, highWater: number): void {
     if (!this.#depth || !this.#tx) fail('ANCHOR_TRANSACTION');
     try {
-      this.#ledger.assertColdClosure();this.#wallNow(); const operationId = randomUUID(), sequence = (this.#head?.sequence ?? 0) + 1;
+      this.#ledger.assertColdClosure();assertStoreColdClosure(this.#identity);this.#wallNow(); const operationId = randomUUID(), sequence = (this.#head?.sequence ?? 0) + 1;
       const frozen = stageBytes(this.#identity, sequence, operationId, image, this.#ledger.completeSafety(), highWater, this.#keys, this.#head, null,undefined,this.#baseline,undefined,
-        this.#identity.storageProfile===COLD_SAFETY_PROFILE?this.#ledger.hotEnvelope():undefined);
+        isColdSafetyProfile(this.#identity.storageProfile)?this.#ledger.hotEnvelope():undefined,this.#storeCold);
       const stagePath = writeStage(this.#identity.directory, operationId, frozen.bytes,frozen); this.#fault?.('stage-written');
       const pending: PendingCommit = { version: 2, kind: this.#head ? 'write' : 'create', operationId, requestDigest: sha(frozen.bytes),
         oldHead: this.#head, newHead: frozen.stage.head, stagePath, stageDigest: sha(frozen.bytes) };
       this.#tx.prepare(pending); this.#fault?.('prepared');
       publish(frozen.stage, this.#fault); finalizeFrozen(this.#tx,pending); this.#head = frozen.stage.head;
-      if(frozen.baseline){this.#baseline?.image.fill(0);this.#baseline={...frozen.baseline,image:Buffer.from(image)};}this.#fault?.('finalized');
+      if(frozen.baseline){this.#baseline?.image.fill(0);this.#baseline={...frozen.baseline,image:Buffer.from(frozen.baseline.image)};if(this.#identity.storageProfile===STORE_COLD_PROFILE)frozen.baseline.image.fill(0);}this.#fault?.('finalized');
     } catch (error) { this.#poisoned = true; if (error instanceof CoreError) throw error; fail('ANCHOR_WRITE_FAILED'); }
   }
   #save(): void {
@@ -436,7 +449,7 @@ export class AnchoredVault {
     return this.#access(() => ({ format: this.#identity.format, head: structuredClone(this.#head!), restored: this.restored,
       consumedRequests: this.#ledger.globals.reserved, unknownRequests: this.#ledger.completeSafety().ingress.filter(e => e.state === 'unknown').length,
       ingressCount: this.#ledger.count, lastSourceRef: structuredClone(this.#ledger.globals.lastSourceRef),
-      ...(this.#identity.storageProfile===COLD_SAFETY_PROFILE?{hotIngressCount:this.#ledger.hotCount,coldIngressCount:this.#ledger.coldCount}:{}),
+      ...(isColdSafetyProfile(this.#identity.storageProfile)?{hotIngressCount:this.#ledger.hotCount,coldIngressCount:this.#ledger.coldCount}:{}),
       lastAcknowledgedDeliveryId: this.#ledger.globals.lastAcknowledgedDeliveryId, manualResumeRequired: true, coverage: 'current-state' as const }));
   }
   exportBackup(target: string): BackupReceipt {
@@ -457,7 +470,7 @@ export class AnchoredVault {
   }
   close(): void {
     if (this.#depth) fail('ANCHOR_ACCESS_BUSY'); if (this.#closed) return; this.#closed = true;
-    try { this.store.close(); } finally { this.#writer?.close();this.#ledger.close(); this.#baseline?.image.fill(0);this.#keys.storageDEK.fill(0); this.#keys.ingressKey.fill(0); }
+    try { this.store.close(); } finally { this.#writer?.close();this.#ledger.close();this.#storeCold?.close(); this.#baseline?.image.fill(0);this.#keys.storageDEK.fill(0); this.#keys.ingressKey.fill(0); }
   }
 
   static verifyBackup(request: Pick<RestoreRequest, 'backupDirectory' | 'authority' | 'keys' | 'maxCalls'>): BackupReceipt {
@@ -495,7 +508,7 @@ export class AnchoredVault {
         if(tx.row(request.vaultId))fail('ANCHOR_ALREADY_REGISTERED');
         const identity:VaultIdentity={format:INCREMENTAL_FORMAT,authorityId:request.authority.authorityId,vaultId:request.vaultId,identity:request.identity,instanceId:randomUUID(),ownerEpoch:1,keyEpoch:1,
           directory:target,storageDomain:request.storageDomain,storageProfile:request.storageProfile,...(request.targetSchema?{schemaVersion:request.targetSchema}:{}),legacyImport:{lineageId:proof.lineageId,migrationId:proof.migrationId},
-          ...(request.storageProfile===COLD_SAFETY_PROFILE?{safetyCold:null}:{})};
+          ...(isColdSafetyProfile(request.storageProfile)?{safetyCold:null}:{}),...(request.storageProfile===STORE_COLD_PROFILE?{storeCold:null}:{})};
         if(request.targetSchema)migrated=migrateMemoryImage(captured.image,1,2,captured.safety.lastWall);
         for(const entry of captured.safety.ingress)if(['pending','ready','taken'].includes(entry.state))entry.state='unknown';captured.safety.lastAcknowledgedDeliveryId=null;
         const generation=freezeGeneration(identity,request.operationId,migrated??captured.image,captured.safety,captured.inspection.revocationHighWater,keys,null,undefined,false,undefined,proof),frozen=generation.frozen;
@@ -510,33 +523,37 @@ export class AnchoredVault {
   /** Explicit lossless RAM repack into a new generation; source retained. */
   static repackStore(request:CompactRequest):AnchorReceipt{return AnchoredVault.#rewriteCurrent(request,undefined,'lossless-repack-v1');}
   static archiveTerminalSafety(request:CompactRequest):AnchorReceipt{return AnchoredVault.#rewriteCurrent(request,undefined,undefined,true);}
+  static archiveStoreTerminals(request:CompactRequest):AnchorReceipt{return AnchoredVault.#rewriteCurrent(request,undefined,undefined,false,true);}
   /** Explicit v2 -> v3 or old v3 -> packed Safety profile transition. */
   static upgradeStorage(request:CompactRequest & {storageProfile:StorageProfile}):AnchorReceipt{
-    if(!['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1',COLD_SAFETY_PROFILE].includes(request.storageProfile))fail('ANCHOR_STORAGE_PROFILE');
+    if(!['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1',COLD_SAFETY_PROFILE,STORE_COLD_PROFILE].includes(request.storageProfile))fail('ANCHOR_STORAGE_PROFILE');
     return AnchoredVault.#rewriteCurrent(request,request.storageProfile);
   }
-  static #rewriteCurrent(request:CompactRequest,profile?:StorageProfile,imageTransform?:'lossless-repack-v1',archive=false):AnchorReceipt{
+  static #rewriteCurrent(request:CompactRequest,profile?:StorageProfile,imageTransform?:'lossless-repack-v1',archive=false,archiveStore=false):AnchorReceipt{
     id(request.vaultId);id(request.operationId);const keys=copyKeys(request.keys);
     const target=storagePath(request.targetDirectory,request.storageDomain,request.authority,false),kind=profile?'storage-upgrade':'compaction';
     try{return request.authority.transaction(tx=>{
-      const digest=(oldHead:VaultHead)=>sha(JSON.stringify(archive?{kind:'compaction',action:'archive-terminal-safety-v1',oldHead,target,storageDomain:request.storageDomain,
+      const digest=(oldHead:VaultHead)=>sha(JSON.stringify(archiveStore?{kind:'compaction',action:'archive-store-terminals-v1',oldHead,target,storageDomain:request.storageDomain,
+        profile:STORE_COLD_PROFILE,selectionPolicy:STORE_COLD_POLICY,maxCalls:request.maxCalls,keyEpoch:keys.keyEpoch,storageKeyDigest:sha(keys.storageDEK),ingressKeyDigest:sha(keys.ingressKey)}:archive?{kind:'compaction',action:'archive-terminal-safety-v1',oldHead,target,storageDomain:request.storageDomain,
         profile:COLD_SAFETY_PROFILE,selectionPolicy:'all-terminal-v1',maxCalls:request.maxCalls,keyEpoch:keys.keyEpoch,storageKeyDigest:sha(keys.storageDEK),ingressKeyDigest:sha(keys.ingressKey)}:
         {kind,oldHead,target,storageDomain:request.storageDomain,profile:profile??oldHead.storageProfile,
         maxCalls:request.maxCalls,keyEpoch:keys.keyEpoch,storageKeyDigest:sha(keys.storageDEK),ingressKeyDigest:sha(keys.ingressKey),...(imageTransform?{imageTransform}:{})}));
       const prior=tx.receipt(request.vaultId,request.operationId);if(prior){if(!prior.oldHead||prior.requestDigest!==digest(prior.oldHead))fail('ANCHOR_OPERATION_CONFLICT');return prior;}
       const row=tx.row(request.vaultId);if(!row?.head)fail('ANCHOR_UNREGISTERED');tx.assertActive(row.head);const oldHead=row.head;
       if(profile?!canUpgradeStorage(oldHead,profile):oldHead.format!==INCREMENTAL_FORMAT)fail('ANCHOR_STORAGE_PROFILE');
-      if(archive&&oldHead.storageProfile!==COLD_SAFETY_PROFILE)fail('ANCHOR_STORAGE_PROFILE');disjoint(oldHead.directory,target);
+      if(archive&&!isColdSafetyProfile(oldHead.storageProfile))fail('ANCHOR_STORAGE_PROFILE');disjoint(oldHead.directory,target);
+      if(archiveStore&&!isColdSafetyProfile(oldHead.storageProfile))fail('ANCHOR_STORAGE_PROFILE');
       const decoded=readCurrent(oldHead,keys,request.maxCalls);let repacked:Uint8Array|undefined;
       try{
         if(imageTransform){
           repacked=repackMemoryImage(decoded.image,oldHead.schemaVersion??1,decoded.state.revocationHighWater);
         }else validateImage(decoded.image,decoded.state.revocationHighWater,oldHead.schemaVersion??1);
-        const identity:VaultIdentity={...identityOf(oldHead),format:INCREMENTAL_FORMAT,storageProfile:profile??oldHead.storageProfile!,
+        const identity:VaultIdentity={...identityOf(oldHead),format:INCREMENTAL_FORMAT,storageProfile:archiveStore?STORE_COLD_PROFILE:profile??oldHead.storageProfile!,
           instanceId:randomUUID(),ownerEpoch:oldHead.ownerEpoch+1,directory:target,storageDomain:request.storageDomain};
-        const generation=freezeGeneration(identity,request.operationId,repacked??decoded.image,decoded.state.safety,decoded.state.revocationHighWater,keys,oldHead,decoded,archive),frozen=generation.frozen;
+        const generation=freezeGeneration(identity,request.operationId,repacked??decoded.image,decoded.state.safety,decoded.state.revocationHighWater,keys,oldHead,decoded,archive,undefined,undefined,archiveStore),frozen=generation.frozen;
         const stagePath=writeGeneration(generation,request.operationId,request.fault);
-        const pending:PendingCommit={version:2,kind,operationId:request.operationId,requestDigest:digest(oldHead),oldHead,newHead:frozen.stage.head,stagePath,stageDigest:sha(frozen.bytes)};
+        const transitionKind=archiveStore&&oldHead.storageProfile!==STORE_COLD_PROFILE?'storage-upgrade':kind;
+        const pending:PendingCommit={version:2,kind:transitionKind,operationId:request.operationId,requestDigest:digest(oldHead),oldHead,newHead:frozen.stage.head,stagePath,stageDigest:sha(frozen.bytes)};
         tx.prepare(pending);request.fault?.('prepared');publish(frozen.stage,request.fault);const receipt=finalizeFrozen(tx,pending);request.fault?.('finalized');return receipt;
       }finally{disposeDecoded(decoded);repacked?.fill(0);}
     });}finally{keys.storageDEK.fill(0);keys.ingressKey.fill(0);}
