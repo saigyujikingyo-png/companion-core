@@ -33,3 +33,8 @@
 [CorpusProduction/0.1](CORPUS-PRODUCTION.md)先提供128候选校准程序，合格数量与质量待测。现有 Codex/ChatGPT、Claude CLI/MCP ResearchMentor 只处理一般架构和运行 metadata，不读样本、不逐题评分/奖励/补课。独立 TeachingCoordinator 与教师服务须用途 ALLOW；当前 DS-first。GPT-OSS 跨模型对照仍是目标，但 Together 托管训练用途 UNKNOWN，Qwen/MiniMax分别待核。资源充足、人工重写或重复目标都不能洗去许可限制。
 
 这一整理不授予训练、管理员操作、数据再分发或重放旧run。旧实际及失败原件保持冻结。后续实际验收按精确源码/配置/权限/来源/用途与独立证据记录；总体目标不能被局部测试PASS替代。
+
+
+## 独立 QA 目标增补
+
+本页仍是已冻结 Production 的生成基线。2026-10-28 经可信交接的人类主体性补充另见 [QA 目标基线](AUDIT-TARGET-BASELINE.md)，不改本基线摘要或旧数据。[CorpusQualityAudit/0.1](CORPUS-QUALITY-AUDIT.md)另外绑定新目标，并按获准自有模型研究范围采用 DS coordinator 与 Together GPT-OSS 盲审；上文 Together UNKNOWN 是原 Production 切片的历史准入状态，不能替代新 QA 的精确用途 grant，也不因新 grant 追溯放开旧 run。
