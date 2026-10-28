@@ -10,8 +10,8 @@ import type { MemorySchema } from './memory-image.ts';
 import type { FanoutFault } from './fanout-types.ts';
 import type { SourceRef, Scope } from './contracts.ts';
 import { bindControl, bootControl, encodeControl, fenceControl, newControl } from './endogenous-durable.ts';
-import type { DurableEndogenousSession, EndogenousControl } from './endogenous-durable.ts';
-import type { EndogenousDecisionPort, EndogenousLimits, EndogenousOwner } from './endogenous-lifecycle.ts';
+import type { DurableEndogenousSession, EndogenousControl, DurableTextAcceptance } from './endogenous-durable.ts';
+import type { EndogenousDecisionPort, EndogenousLimits, EndogenousOwner, EndogenousProfile, EndogenousTextPort, EndogenousSettlement } from './endogenous-lifecycle.ts';
 import { MAX_COMMITS, MAX_DISK, MAX_IMAGE, sha, validateIdentityBudget } from './durable-codec.ts';
 import type { Safety, Terminal } from './durable-codec.ts';
 import { CoreError, fail, text } from './validation.ts';
@@ -412,19 +412,33 @@ export class AnchoredVault {
   #digest(value: unknown): string { return createHmac('sha256', this.#keys.ingressKey).update(JSON.stringify(value)).digest('hex'); }
   /** Explicit management authorization. Existing controls are never reset or replenished. */
   createEndogenousControl(scope: Scope, limits?: Partial<EndogenousLimits>): EndogenousControl {
+    return this.#createEndogenous(scope, limits, 'rest-noop-v1');
+  }
+  createEndogenousTextControl(scope: Scope, limits?: Partial<EndogenousLimits>): EndogenousControl {
+    return this.#createEndogenous(scope, limits, 'text-choice-v1');
+  }
+  #createEndogenous(scope: Scope, limits: Partial<EndogenousLimits> | undefined, profile: EndogenousProfile): EndogenousControl {
     return this.#access(() => {
       this.#tx!.assertAdmitted(this.#head!);
       if (this.#endogenousBootBlocked) fail(this.#endogenousBootBlocked);
       if (this.#withStore(() => this.store.endogenousControl()) !== null) fail('E1_CONTROL_EXISTS');
       const current = this.#withStore(() => this.store.scope(scope.id));
       if (!same(scope, current)) fail('E1_CONTROL_SCOPE');
-      const record = newControl(this.#identity, current, this.#wallNow(), limits);
+      const record = newControl(this.#identity, current, this.#wallNow(), limits, profile);
       this.#withStore(() => this.#writeEndogenous(null, encodeControl(record)));
       return structuredClone(record);
     });
   }
   /** One lane per live vault; opening never creates a missing record or starts a call. */
   openEndogenousControl(port: EndogenousDecisionPort): DurableEndogenousSession {
+    return this.#openEndogenous(port, 'rest-noop-v1');
+  }
+  openEndogenousTextControl(port: EndogenousTextPort, acceptText: DurableTextAcceptance, settled?: EndogenousSettlement): DurableEndogenousSession {
+    if (typeof acceptText !== 'function') fail('E1_INVALID_PORT');
+    return this.#openEndogenous(port, 'text-choice-v1', acceptText, settled);
+  }
+  #openEndogenous(port: EndogenousDecisionPort | EndogenousTextPort, profile: EndogenousProfile,
+    acceptText?: DurableTextAcceptance, settled?: EndogenousSettlement): DurableEndogenousSession {
     return this.#access(() => {
       this.#tx!.assertAdmitted(this.#head!);
       if (this.#endogenousBootBlocked) fail(this.#endogenousBootBlocked);
@@ -436,7 +450,7 @@ export class AnchoredVault {
         scope: id => this.#withStore(() => this.store.scope(id)), now: () => this.#wallNow(),
         assertCurrent: () => { this.#healthy(); this.#tx!.assertAdmitted(this.#head!); },
         poison: () => { this.#poisoned = true; },
-      }, this.#identity, port, this.#clock.monotonic);
+      }, this.#identity, port, this.#clock.monotonic, profile, acceptText, settled);
       this.#endogenousOwner = bound.owner;
       return bound.session;
     });
