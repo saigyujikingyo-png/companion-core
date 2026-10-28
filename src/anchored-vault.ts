@@ -8,7 +8,10 @@ import type { Clock } from './store.ts';
 import { inspectMemoryImage, inspectMemoryImageCapacity, maintainFanoutImage, migrateMemoryImage, repackMemoryImage } from './memory-image.ts';
 import type { MemorySchema } from './memory-image.ts';
 import type { FanoutFault } from './fanout-types.ts';
-import type { SourceRef } from './contracts.ts';
+import type { SourceRef, Scope } from './contracts.ts';
+import { bindControl, bootControl, encodeControl, fenceControl, newControl } from './endogenous-durable.ts';
+import type { DurableEndogenousSession, EndogenousControl } from './endogenous-durable.ts';
+import type { EndogenousDecisionPort, EndogenousLimits, EndogenousOwner } from './endogenous-lifecycle.ts';
 import { MAX_COMMITS, MAX_DISK, MAX_IMAGE, sha, validateIdentityBudget } from './durable-codec.ts';
 import type { Safety, Terminal } from './durable-codec.ts';
 import { CoreError, fail, text } from './validation.ts';
@@ -285,6 +288,10 @@ export class AnchoredVault {
   #storePermit = false;
   #closed = false;
   #poisoned = false;
+  #endogenousOwner: EndogenousOwner | undefined;
+  #writeEndogenous!: (expected: string | null, next: string) => void;
+  // A rejected extension is not a corrupt Store. This boot decision never becomes permission.
+  #endogenousBootBlocked: string | null = null;
   private constructor(config: AnchoredConfig, maxCalls: number, options: Options, creating: boolean) {
     id(config.vaultId); text(config.identity,128); validateIdentityBudget(config.identity, maxCalls);
     this.#authority = config.authority; this.#keys = copyKeys(config.keys); this.#fault = options.fault;
@@ -332,6 +339,20 @@ export class AnchoredVault {
           store = new MemoryStore(':memory:', { ...(image ? { image } : {}), clock: { wall: () => this.#wallNow(), monotonic: this.#clock.monotonic },
             schemaVersion: this.#identity.schemaVersion ?? 1, ...(options.fanoutFault ? { fanoutFault: options.fanoutFault } : {}),
             aroundAccess: body => this.#storeAccess(body), assertHealthy: () => this.#healthy(), onPoison: () => { this.#poisoned = true; },
+            endogenousBoot: (encoded, scope) => {
+              try { return bootControl(encoded, scope, this.#identity); }
+              catch (error) {
+                // Preserve the exact cell and let ordinary Store boot continue. Only expected
+                // extension-validation failures are isolated; SQL/AEAD/authority failures escape.
+                if (!(error instanceof CoreError) || !['E1_CONTROL_INVALID','E1_CONTROL_LIMIT','E1_CONTROL_IDENTITY',
+                  'E1_CONTROL_SCOPE','E1_INVALID_LIMITS','SCOPE_NOT_FOUND'].includes(error.code)) throw error;
+                this.#endogenousBootBlocked = error.code === 'SCOPE_NOT_FOUND' ? 'E1_CONTROL_SCOPE' : error.code;
+                return encoded;
+              }
+            },
+            endogenousMutation: (encoded, scope) => this.#endogenousBootBlocked ? encoded : fenceControl(encoded, scope),
+            onEndogenousInvalidated: () => this.#endogenousOwner?.invalidate(),
+            bindEndogenousWriter: write => { this.#writeEndogenous = write; },
             persist: (bytes, highWater) => this.#commit(bytes, highWater), assertCloseAllowed: () => { if (this.#depth) fail('ANCHOR_ACCESS_BUSY'); } });
           this.#store = store;
           if (image) validateImage(image, this.#withStore(() => store!.revocationHighWater()), this.#identity.schemaVersion ?? 1);
@@ -389,6 +410,37 @@ export class AnchoredVault {
     finally { image?.fill(0); }
   }
   #digest(value: unknown): string { return createHmac('sha256', this.#keys.ingressKey).update(JSON.stringify(value)).digest('hex'); }
+  /** Explicit management authorization. Existing controls are never reset or replenished. */
+  createEndogenousControl(scope: Scope, limits?: Partial<EndogenousLimits>): EndogenousControl {
+    return this.#access(() => {
+      this.#tx!.assertAdmitted(this.#head!);
+      if (this.#endogenousBootBlocked) fail(this.#endogenousBootBlocked);
+      if (this.#withStore(() => this.store.endogenousControl()) !== null) fail('E1_CONTROL_EXISTS');
+      const current = this.#withStore(() => this.store.scope(scope.id));
+      if (!same(scope, current)) fail('E1_CONTROL_SCOPE');
+      const record = newControl(this.#identity, current, this.#wallNow(), limits);
+      this.#withStore(() => this.#writeEndogenous(null, encodeControl(record)));
+      return structuredClone(record);
+    });
+  }
+  /** One lane per live vault; opening never creates a missing record or starts a call. */
+  openEndogenousControl(port: EndogenousDecisionPort): DurableEndogenousSession {
+    return this.#access(() => {
+      this.#tx!.assertAdmitted(this.#head!);
+      if (this.#endogenousBootBlocked) fail(this.#endogenousBootBlocked);
+      if (this.#endogenousOwner) fail('E1_SESSION_ACTIVE');
+      const bound = bindControl({
+        guard: body => this.#access(body),
+        read: () => this.#withStore(() => this.store.endogenousControl()),
+        write: (expected, next) => this.#withStore(() => this.#writeEndogenous(expected, next)),
+        scope: id => this.#withStore(() => this.store.scope(id)), now: () => this.#wallNow(),
+        assertCurrent: () => { this.#healthy(); this.#tx!.assertAdmitted(this.#head!); },
+        poison: () => { this.#poisoned = true; },
+      }, this.#identity, port, this.#clock.monotonic);
+      this.#endogenousOwner = bound.owner;
+      return bound.session;
+    });
+  }
   claim(requestId: string, fingerprint: string): void {
     this.#access(() => {
       this.#tx!.assertAdmitted(this.#head!);
@@ -456,7 +508,8 @@ export class AnchoredVault {
     });
   }
   close(): void {
-    if (this.#depth) fail('ANCHOR_ACCESS_BUSY'); if (this.#closed) return; this.#closed = true;
+    if (this.#depth) fail('ANCHOR_ACCESS_BUSY'); if (this.#closed) return;
+    this.#endogenousOwner?.close(); this.#closed = true;
     try { this.store.close(); } finally { this.#writer?.close();this.#ledger.close(); this.#baseline?.image.fill(0);this.#keys.storageDEK.fill(0); this.#keys.ingressKey.fill(0); }
   }
 

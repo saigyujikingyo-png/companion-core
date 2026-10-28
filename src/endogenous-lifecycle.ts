@@ -11,7 +11,7 @@ export type EndogenousRequest = Readonly<{
 export type EndogenousDecisionPort = (request: EndogenousRequest) => Promise<string>;
 export type EndogenousChoice = { version: 1; choice: 'REST' | 'NOOP'; nextWakeInMs?: number };
 export type EndogenousState = 'created' | 'deciding' | 'waiting' | 'resting' | 'paused' | 'closed' | 'exhausted' | 'faulted';
-type Code = 'PAUSED' | 'CLOSED' | 'TIMEOUT' | 'DURATION' | 'CAPACITY' | 'CLOCK' | 'PORT_THROW'
+type Code = 'JOURNAL' | 'PAUSED' | 'CLOSED' | 'TIMEOUT' | 'DURATION' | 'CAPACITY' | 'CLOCK' | 'PORT_THROW'
   | 'PORT_REJECT' | 'UNSUPPORTED_PROMISE' | 'INVALID_DECISION';
 export type EndogenousEntry = Readonly<{
   decisionId: string; session: number; sequence: number;
@@ -29,6 +29,13 @@ export interface EndogenousSession {
   pause(): void;
   close(): void;
   read(): EndogenousSnapshot;
+}
+/** Trusted synchronous checkpoint hooks. No hook may return before its commit finishes. */
+export interface EndogenousJournal {
+  withReservedDispatch(entry: EndogenousEntry, invoke: () => void): 'DISPATCHED' | 'STOPPED_UNRESERVED' | 'STOPPED_RESERVED';
+  terminal(entry: EndogenousEntry): void;
+  stop(entries: readonly EndogenousEntry[], state: EndogenousState): void;
+  observeActualSettled(entry: EndogenousEntry): void;
 }
 
 const RESULT_BYTES = 256;
@@ -64,7 +71,7 @@ function decision(input: unknown): EndogenousChoice {
  * not a session reset. No global registry, persistence, communication, or evidence is provided.
  */
 export class EndogenousOwner {
-  readonly #epoch = randomUUID();
+  readonly #epoch: string;
   readonly #limits: EndogenousLimits;
   readonly #clock: () => number;
   #last: number | null = null;
@@ -77,14 +84,25 @@ export class EndogenousOwner {
   #busy = false;
   #closed = false;
   #faulted = false;
+  readonly #journal: EndogenousJournal | undefined;
+  readonly #restored: boolean;
 
-  constructor(options: { limits?: Partial<EndogenousLimits>; clock?: () => number } = {}) {
+  constructor(options: { limits?: Partial<EndogenousLimits>; clock?: () => number; journal?: EndogenousJournal;
+    recovered?: { controlId: string; entries: readonly EndogenousEntry[]; session: number; remainingMs: number } } = {}) {
     const limits = { maxCalls: 16, maxDurationMs: 60_000, callTimeoutMs: 5_000, maxResultBytes: 4_096, ...options.limits };
     if (!integer(limits.maxCalls, 1, 64) || !integer(limits.maxDurationMs, 10, MAX_TIME_MS)
       || !integer(limits.callTimeoutMs, 1, 30_000) || limits.callTimeoutMs > limits.maxDurationMs
       || !integer(limits.maxResultBytes, RESULT_BYTES, 16_384)) fail('E1_INVALID_LIMITS');
     this.#limits = Object.freeze(limits);
     this.#clock = options.clock ?? (() => performance.now());
+    this.#journal = options.journal;
+    this.#epoch = options.recovered?.controlId ?? randomUUID();
+    this.#restored = options.recovered !== undefined;
+    if (options.recovered) {
+      this.#entries = options.recovered.entries.map(entry => ({ ...entry }));
+      this.#bindings = options.recovered.session - 1;
+      this.#expires = this.#clock() + options.recovered.remainingMs;
+    }
   }
 
   bind(port: EndogenousDecisionPort): EndogenousSession {
@@ -93,7 +111,7 @@ export class EndogenousOwner {
       if (this.#binding && this.#binding.state !== 'closed') fail('E1_SESSION_ACTIVE');
       if (typeof port !== 'function') fail('E1_INVALID_PORT');
       if (this.#bindings >= 1_024) fail('E1_BINDING_CAPACITY');
-      const binding: Binding = { id: ++this.#bindings, state: 'created', code: null, port, fence: {} };
+      const binding: Binding = { id: ++this.#bindings, state: this.#restored ? 'paused' : 'created', code: null, port, fence: {} };
       this.#binding = binding;
       return Object.freeze({
         start: () => this.#exclusive(() => this.#activate(binding, 'boot')),
@@ -111,6 +129,16 @@ export class EndogenousOwner {
       if (this.#binding) this.#stop(this.#binding, 'closed', 'CLOSED');
       else this.#clearTimer();
     });
+  }
+
+  /** Trusted authority revocation: local cancellation must not wait for persistence. */
+  invalidate(): void {
+    this.#exclusive(() => this.#journalFailed());
+  }
+  #journalFailed(): void {
+    this.#faulted = true;
+    if (this.#binding) this.#stop(this.#binding, 'faulted', 'JOURNAL', false);
+    else this.#clearTimer();
   }
 
   /** Detached metadata only. Reads do not advance time, schedule work or expose port content. */
@@ -137,7 +165,7 @@ export class EndogenousOwner {
   #unknown(raw: Raw, code: Code): void {
     if (raw.entry.outcome === 'PENDING') { raw.entry.outcome = 'UNKNOWN'; raw.entry.code = code; }
   }
-  #stop(binding: Binding, state: EndogenousState, code: Code): void {
+  #stop(binding: Binding, state: EndogenousState, code: Code, persist = true): void {
     this.#clearTimer();
     binding.fence = {};
     // Closed/faulted/exhausted sessions cannot be revived by pause.
@@ -146,6 +174,10 @@ export class EndogenousOwner {
     if (this.#raw?.binding === binding) {
       this.#unknown(this.#raw, code);
       this.#raw.controller.abort();
+    }
+    if (persist && this.#journal) {
+      try { this.#journal.stop(this.#entries, binding.state); }
+      catch { this.#journalFailed(); }
     }
   }
   #now(binding: Binding): number | null {
@@ -184,11 +216,36 @@ export class EndogenousOwner {
     this.#raw = raw;
     binding.state = 'deciding'; binding.code = null;
     this.#arm(binding, raw.deadline, 'deadline', now);
-    let promise: Promise<string>;
+    let promise!: Promise<string>, portThrew = false;
     try {
-      promise = binding.port(Object.freeze({ ownerEpoch: this.#epoch, decisionId: entry.decisionId,
-        sequence, session: binding.id, trigger, signal: raw.controller.signal }));
+      const invoke = () => {
+        try { promise = binding.port(Object.freeze({ ownerEpoch: this.#epoch, decisionId: entry.decisionId,
+          sequence, session: binding.id, trigger, signal: raw.controller.signal })); }
+        catch { portThrew = true; }
+      };
+      if (this.#journal) {
+        const dispatched = this.#journal.withReservedDispatch(entry, invoke);
+        if (dispatched !== 'DISPATCHED') {
+          // Only an explicit, durably stopped pre-reservation refusal can discard the RAM
+          // preview. This is not a refund; uncertain writes retain their conservative slot.
+          if (dispatched === 'STOPPED_UNRESERVED') { this.#entries.pop(); this.#raw = null; }
+          this.#journalFailed(); return;
+        }
+      } else invoke();
     } catch {
+      this.#journalFailed();
+      // A failure after invoke must still observe supported late rejections; the owner is fenced.
+      try {
+        if (isPromise(promise) && Object.getPrototypeOf(promise) === Promise.prototype
+          && !Object.hasOwn(promise, 'constructor') && !Object.hasOwn(promise, 'then'))
+          void nativeThen.call(promise, () => this.#settled(raw, false, undefined), () => this.#settled(raw, false, undefined));
+      } catch { /* Unsupported port objects retain their permit. */ }
+      return;
+    }
+    if (portThrew) {
+      // A durable port may have started external work before throwing. Without a native
+      // Promise there is no actual-settlement witness, so retain the durable permit.
+      if (this.#journal) { this.#unknown(raw, 'PORT_THROW'); this.#stop(binding, 'paused', 'PORT_THROW'); return; }
       this.#raw = null; this.#unknown(raw, 'PORT_THROW'); this.#stop(binding, 'paused', 'PORT_THROW'); return;
     }
     try {
@@ -206,18 +263,22 @@ export class EndogenousOwner {
   #settled(raw: Raw, ok: boolean, value: unknown): void {
     this.#exclusive(() => {
       if (this.#raw !== raw) return;
-      this.#raw = null; // Only an actual native settlement releases this slot.
+      try { this.#journal?.observeActualSettled(raw.entry); } catch { this.#journalFailed(); return; }
       const binding = raw.binding;
       if (raw.entry.outcome !== 'PENDING' || this.#binding !== binding || binding.fence !== raw.fence
-        || binding.state !== 'deciding' || this.#closed || this.#faulted) return;
+        || binding.state !== 'deciding' || this.#closed || this.#faulted) { this.#raw = null; return; }
       this.#clearTimer();
       const now = this.#now(binding);
+      // Keep the raw entry reachable through #now so its stop checkpoint includes UNKNOWN.
+      this.#raw = null; // Only an actual native settlement releases this slot.
       if (now === null) { this.#unknown(raw, binding.code ?? 'CLOCK'); return; }
       if (now >= raw.deadline) { this.#unknown(raw, 'TIMEOUT'); this.#stop(binding, 'paused', 'TIMEOUT'); return; }
       if (!ok) { this.#unknown(raw, 'PORT_REJECT'); this.#stop(binding, 'paused', 'PORT_REJECT'); return; }
       let choice: EndogenousChoice;
       try { choice = decision(value); }
       catch { this.#unknown(raw, 'INVALID_DECISION'); this.#stop(binding, 'paused', 'INVALID_DECISION'); return; }
+      try { this.#journal?.terminal({ ...raw.entry, outcome: choice.choice }); }
+      catch { this.#unknown(raw, 'JOURNAL'); this.#journalFailed(); return; }
       raw.entry.outcome = choice.choice;
       if (!this.#capacity()) { this.#stop(binding, 'exhausted', 'CAPACITY'); return; }
       binding.state = choice.nextWakeInMs === undefined ? 'resting' : 'waiting';
