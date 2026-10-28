@@ -4,6 +4,8 @@ import type { Safety } from './durable-codec.ts';
 import { validateSafetyState } from './anchored-codec.ts';
 import type { VaultIdentity } from './anchored-codec.ts';
 import { fail } from './validation.ts';
+import {canonicalSafetyJSON,validateHotEnvelope} from './safety-format.ts';
+import type {HotSafetyEnvelope,HotSafetyCarrier} from './safety-format.ts';
 
 export const MAX_SAFETY_BYTES=4*1024*1024;
 export const PACKED_SAFETY_PROFILE='blocks-br4-safety-br4-v1' as const;
@@ -56,5 +58,37 @@ export function decodeSafetyCarrier(value:SafetyCarrier,identity:VaultIdentity,m
     let safety:Safety;
     try{safety=JSON.parse(new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(raw));}catch{fail('SAFETY_CARRIER_DECODE');}
     validateSafetyState(safety,identity,maxCalls);return safety;
+  }finally{raw?.fill(0);encoded?.fill(0);}
+}
+
+/** P4 wire is deliberately independent of the complete-Safety P3 carrier. */
+export function encodeHotSafetyCarrier(hot:HotSafetyEnvelope):HotSafetyCarrier{
+  validateHotEnvelope(hot);const raw=Buffer.from(canonicalSafetyJSON(hot));let packed:Buffer|undefined;
+  try{
+    if(raw.length>MAX_SAFETY_BYTES)fail('SAFETY_HOT_LIMIT');
+    const common={version:1 as const,decodedBytes:raw.length,digest:sha(raw)};
+    const inline:HotSafetyCarrier={...common,codec:'raw',data:JSON.parse(raw.toString('utf8'))};
+    packed=brotliCompressSync(raw,{params:{[constants.BROTLI_PARAM_QUALITY]:4}});
+    const compressed:HotSafetyCarrier={...common,codec:'br4',data:packed.toString('base64')};
+    const result=Buffer.byteLength(JSON.stringify(compressed))<Buffer.byteLength(JSON.stringify(inline))?compressed:inline;
+    validateHotSafetyCarrier(result);return result;
+  }finally{raw.fill(0);packed?.fill(0);}
+}
+export function validateHotSafetyCarrier(value:unknown):asserts value is HotSafetyCarrier{
+  validateSafetyCarrier(value);
+  if(value.codec==='raw')validateHotEnvelope(value.data);
+}
+export function decodeHotSafetyCarrier(value:HotSafetyCarrier):HotSafetyEnvelope{
+  validateHotSafetyCarrier(value);let raw:Buffer|undefined,encoded:Buffer|undefined;
+  try{
+    if(value.codec==='raw')raw=Buffer.from(canonicalSafetyJSON(value.data));
+    else{
+      encoded=Buffer.from(value.data as string,'base64');if(encoded.toString('base64')!==value.data)fail('SAFETY_HOT_DECODE');
+      try{const result=brotliDecompressSync(encoded,{maxOutputLength:value.decodedBytes,info:true}) as unknown as {buffer:Buffer;engine:{bytesWritten:number}};
+        raw=result.buffer;if(result.engine.bytesWritten!==encoded.length)fail('SAFETY_HOT_DECODE');}catch{fail('SAFETY_HOT_DECODE');}
+    }
+    if(raw.length!==value.decodedBytes||sha(raw)!==value.digest)fail('SAFETY_HOT_DECODE');
+    let hot:HotSafetyEnvelope;try{hot=JSON.parse(new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(raw));}catch{fail('SAFETY_HOT_DECODE');}
+    validateHotEnvelope(hot);if(canonicalSafetyJSON(hot)!==raw.toString('utf8'))fail('SAFETY_HOT_DECODE');return hot;
   }finally{raw?.fill(0);encoded?.fill(0);}
 }

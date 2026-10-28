@@ -1,12 +1,12 @@
-# IF10 长期精确账本容量路线
+# 长期精确账本容量路线
 
-2026-10-27。**DESIGN_ONLY / NOT_IMPLEMENTED / NOT_BENCHMARKED**。Root整合两位独立Astra max的方案及反证；[IF9](CAPACITY-REPACK.md)仍是当前实现边界。设计对象是精确运行控制记录，与[允许有损的内在痕迹](ADR-MEMORY-TOOL-BOUNDARY.md)分开，不通过删除幂等、UNKNOWN、撤销或提高现有上限取得容量收益。
+2026-10-28状态：Safety不可变终态单冷段已形成[IF10本机实现](SAFETY-COLD-SEGMENT.md)，以[冻结合同](IF10-SAFETY-COLD-SEGMENT-PLAN.md)和[分层证据](AEMC-INFRA-EVIDENCE-IF10.md)为准；独立1098/1098与strict TS通过，当前未提交、无IF10 CI。Store整图冷迁和authority永久索引路由仍为DESIGN_ONLY / NOT_IMPLEMENTED。下方拟定合同与接受出口保留2026-10-27方案形成时态，不替代最终实现合同。设计对象是精确运行控制记录，与[允许有损的内在痕迹](ADR-MEMORY-TOOL-BOUNDARY.md)分开，不通过删除幂等、UNKNOWN、撤销或提高现有上限取得容量收益。
 
 ## 取舍和先后
 
 | 路线 | 决定与原因 |
 | --- | --- |
-| Safety不可变终态单冷段 | 下一实施候选；查找与终态边界集中，能减少每次提交重复携带的已终结历史 |
+| Safety不可变终态单冷段 | IF10本机候选已实现；查找与终态边界集中。减少热载荷不保证总收益，三组负结果和一个有条件应用写入收益均保留 |
 | Store tombstone/整图冷迁 | 后续独立合同；ingress返回节点当前revision/status，job/result、依赖、outbox和consumer仍引用节点，不能只搬一个表 |
 | authority跨代永久索引路由 | 后续可信根协议；receipts及legacy唯一索引跨vault，复制一个新库并不缩小精确索引，须完整查询、切换和故障闭包 |
 
