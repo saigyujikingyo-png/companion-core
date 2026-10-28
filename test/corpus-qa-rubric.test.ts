@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { canonical,id,list,shape,stop,text,unique } from '../src/wf1-json.ts';
+import { auditBody,FACTORY_BASELINE,FACTORY_BASELINE_DIGEST,QA,QA_PROFILE_DIGEST,QA_RUBRIC_CONTRACT,QA_RUBRIC_CONTRACT_DIGEST,QA_RUBRIC_PROTOCOL,QA_TARGET_BASELINE,QA_TARGET_BASELINE_DIGEST,validateAuditRubric } from '../src/corpus-qa-types.ts';
+import { openQualityAudit } from '../src/corpus-qa-store.ts';
+import { runQualityAudit } from '../src/corpus-qa-runner.ts';
+import type { QaTransport } from '../src/corpus-qa-runner.ts';
+import { qaFixture,qaMock } from './corpus-qa-fixture.ts';
+
+const valid=()=>({version:'CorpusQualityRubric/0.1',instructions:'synthetic',criteria:[{id:'a',criterion:'synthetic'}]});
+// The original f1 acceptance predicate, retained here as an independent regression oracle.
+function legacy(input:unknown){const r=shape(input,['version','instructions','criteria']);if(r.version!=='CorpusQualityRubric/0.1')stop('CQA_RUBRIC');text(r.instructions,2048);const criteria=list(r.criteria,12,1).map(value=>{const c=shape(value,['id','criterion']);id(c.id);text(c.criterion,512);return c;});unique(criteria.map(c=>String(c.id)));return r;}
+const accepts=(fn:(value:unknown)=>unknown,value:unknown)=>{try{fn(value);return true;}catch{return false;}};
+
+test('QA rubric shared protocol and validator preserve f1 UTF8/ASCII/closed-shape acceptance',()=>{
+  const cases:{value:unknown;accepted:boolean}[]=[{value:valid(),accepted:true}];
+  for(const [field,max] of [['instructions',2048],['criterion',512]] as const){for(const bytes of [max,max+1]){const value=valid(),multibyte='中'.repeat(Math.floor(bytes/3))+'x'.repeat(bytes%3);assert.equal(Buffer.byteLength(multibyte),bytes);if(field==='instructions')value.instructions=multibyte;else value.criteria[0]!.criterion=multibyte;cases.push({value,accepted:bytes===max});}}
+  for(const count of [0,12,13])cases.push({value:{...valid(),criteria:Array.from({length:count},(_,i)=>({id:'c'+i,criterion:'synthetic'}))},accepted:count===12});
+  for(const identifier of ['a'.repeat(96),'a'.repeat(97),'中文','bad space','-bad','A_.:9'])cases.push({value:{...valid(),criteria:[{id:identifier,criterion:'synthetic'}]},accepted:identifier.length===96||identifier==='A_.:9'});
+  cases.push({value:{...valid(),criteria:[{id:'same',criterion:'a'},{id:'same',criterion:'b'}]},accepted:false},{value:{...valid(),extra:true},accepted:false},{value:{version:'CorpusQualityRubric/0.1',criteria:[]},accepted:false},{value:{...valid(),version:'wrong'},accepted:false},{value:{...valid(),criteria:[{id:'a',criterion:'x',extra:true}]},accepted:false});
+  for(const malformed of ['','nul\0text','\ud800']){cases.push({value:{...valid(),instructions:malformed},accepted:false},{value:{...valid(),criteria:[{id:'a',criterion:malformed}]},accepted:false});}
+  for(const c of cases){assert.equal(accepts(legacy,c.value),c.accepted);assert.equal(accepts(validateAuditRubric,c.value),c.accepted);}
+  assert.ok(Object.isFrozen(QA_RUBRIC_CONTRACT));assert.ok(Object.isFrozen(QA_RUBRIC_CONTRACT.keys));assert.ok(Object.isFrozen(QA_RUBRIC_CONTRACT.itemKeys));
+  const wire=JSON.parse(auditBody('rubric',0,{factoryBaseline:FACTORY_BASELINE,baselineDigest:FACTORY_BASELINE_DIGEST,auditTargetBaseline:QA_TARGET_BASELINE,auditTargetBaselineDigest:QA_TARGET_BASELINE_DIGEST,currentApprovedObjective:'synthetic objective'}));
+  assert.ok(wire.messages[0].content.endsWith(QA_RUBRIC_PROTOCOL));for(const limit of [2048,512,96,12])assert.ok(QA_RUBRIC_PROTOCOL.includes(String(limit)));assert.ok(QA_RUBRIC_PROTOCOL.includes('decoded UTF-8'));assert.ok(QA_RUBRIC_PROTOCOL.includes(QA_RUBRIC_CONTRACT.idPattern));assert.ok(QA_RUBRIC_PROTOCOL.includes(QA_RUBRIC_CONTRACT_DIGEST));assert.equal(QA.rubricContractDigest,QA_RUBRIC_CONTRACT_DIGEST);assert.notEqual(QA_PROFILE_DIGEST,'68e28a598ac3f07af29fd07a25e72455c9efa545f494622883d2348648dc1475');
+});
+
+for(const [label,raw,expected] of [['parse','{','CQA_RUBRIC_JSON_PARSE_WF1_JSON'],['validate',canonical({...valid(),instructions:'中'.repeat(683)}),'CQA_RUBRIC_VALIDATE_WF1_TEXT']] as const){
+  test('QA rubric '+label+' error persists safe stage, fences review and does not retry on cold resume',async()=>{const f=await qaFixture(4),m=qaMock(f);try{const transport:QaTransport=async request=>{const result=await m.transport(request);return request.operation==='rubric'?{...result,finalRef:request.output.put('native-final',raw)}:result;};const s=await runQualityAudit(f.spec,{store:f.store,source:f.source,selection:f.selection,objective:f.objective,transport});assert.equal(s.status,'FENCED');assert.ok(s.failureCodes[expected]);assert.equal(s.counts.PENDING,4);assert.equal(s.calls.review,0);assert.equal(m.sends,1);assert.equal(f.store.snapshot()!.code,expected);f.store.close();const cold=openQualityAudit({...f.storeOptions,mode:'resume'});try{const summary=await runQualityAudit(f.spec,{store:cold,source:f.source,selection:f.selection,objective:f.objective,transport:async()=>{throw Error('must not send');}});assert.equal(summary.status,'FENCED');assert.equal(summary.calls.total,1);assert.ok(summary.failureCodes[expected]);}finally{cold.close();}}finally{f.store.close();f.source.close();}});
+}
+
+for(const [stage,expected] of [['read','CQA_RUBRIC_FINAL_READ_UNKNOWN'],['put','CQA_RUBRIC_ARTIFACT_PUT_UNKNOWN'],['commit','CQA_RUBRIC_COMMIT_UNKNOWN'],['uncertain','CQA_COMMIT_UNKNOWN']] as const){
+  test('QA rubric '+stage+' failure cannot be mislabeled model format or leak exception text',async()=>{const f=await qaFixture(4),m=qaMock(f),port=f.store.port.bind(f.store),put=f.store.put.bind(f.store),apply=f.store.apply.bind(f.store);try{if(stage==='read')f.store.port=bucket=>{const p=port(bucket);return {...p,read:ref=>{if(ref.kind==='native-final')stop('WF1_SEALED_UNAVAILABLE');return p.read(ref);}};};else if(stage==='put')f.store.put=(bucket,kind,bytes)=>{if(kind==='corpus-qa-rubric')stop('WF1_PATH');return put(bucket,kind,bytes);};else f.store.apply=(kind,data)=>{if(kind==='RUBRIC'){if(stage==='uncertain')stop('CQA_COMMIT_UNKNOWN');throw Error('SYNTHETIC_PRIVATE_EXCEPTION_MUST_NOT_ESCAPE');}return apply(kind,data);};const summary=await runQualityAudit(f.spec,{store:f.store,source:f.source,selection:f.selection,objective:f.objective,transport:m.transport});assert.equal(summary.status,'FENCED');assert.ok(summary.failureCodes[expected]);assert.equal(summary.calls.review,0);assert.equal(summary.counts.PENDING,4);assert.equal(f.store.snapshot()!.code,expected);assert.ok(!canonical(summary).includes('SYNTHETIC_PRIVATE_EXCEPTION'));assert.ok(!Object.keys(summary.failureCodes).some(code=>code.includes('_VALIDATE_')||code.includes('_JSON_PARSE_')));}finally{f.store.port=port;f.store.put=put;f.store.apply=apply;f.store.close();f.source.close();}});
+}
