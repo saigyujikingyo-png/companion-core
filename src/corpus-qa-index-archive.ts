@@ -9,12 +9,13 @@ import { assembleScopedIndexes } from './corpus-qa-index.ts';
 import type { ScopedDedupIndex } from './corpus-qa-index.ts';
 import type { AuditSelection,AuditSource,AuditSpec } from './corpus-qa-types.ts';
 import type { ScopedRef } from './corpus-production-types.ts';
-import { legacyJson,legacyRef,legacySelection,legacySpec,QA_LEGACY_F1,QA_LEGACY_SCHEMA } from './corpus-qa-legacy-f1.ts';
+import { legacyJson,legacyRef,legacySelection,legacySpec,QA_LEGACY_F1,QA_LEGACY_F2,QA_LEGACY_SCHEMA } from './corpus-qa-legacy-f1.ts';
 
 export const QA_INDEX_ARCHIVE_SCOPE='QA_INDEX_MANIFEST_SELECTION_METADATA_ONLY';
 export const QA_INDEX_ARCHIVE_PROFILE_DIGEST=hash(canonical({version:'QaIndexArchive/0.1',legacy:QA_LEGACY_F1,schema:QA_LEGACY_SCHEMA,scope:QA_INDEX_ARCHIVE_SCOPE,maxInputs:8,maxRows:192,chunkRows:32,terminal:['INDEX','MANIFEST']}));
+export const QA_INDEX_ARCHIVE_F2_PROFILE_DIGEST=hash(canonical({version:'QaIndexArchive/0.1',legacy:QA_LEGACY_F2,schema:QA_LEGACY_SCHEMA,scope:QA_INDEX_ARCHIVE_SCOPE,maxInputs:8,maxRows:192,chunkRows:32,terminal:['INDEX','MANIFEST']}));
 export type QaIndexArchiveDescriptor={
-  version:'QaIndexArchiveDescriptor/0.1';legacyProfile:'QA_F1';readerBuildDigest:string;archiveProfileDigest:string;
+  version:'QaIndexArchiveDescriptor/0.1';legacyProfile:'QA_F1'|'QA_F2';readerBuildDigest:string;archiveProfileDigest:string;
   spec:AuditSpec;specDigest:string;source:AuditSource;
   ledgerRawDigest:string;authorityRawDigest:string;authorityRevision:number;authorityStatus:'ACTIVE'|'PAUSED'|'REVOKED';
   committedHead:string;committedSequence:number;coldReceiptRawDigest:string;indexDigest:string;
@@ -22,7 +23,7 @@ export type QaIndexArchiveDescriptor={
 };
 export type QaIndexReadGrant={version:'QaIndexReadGrant/0.1';grantId:string;revision:number;descriptorDigest:string;purposeDigest:string;status:'ACTIVE'|'REVOKED';readAllowed:boolean;retainAllowed:boolean;validFrom:number;expiresAt:number;scope:typeof QA_INDEX_ARCHIVE_SCOPE};
 export type QaIndexArchiveAdmission={grant:QaIndexReadGrant;sourceJobId:string;sourcePurposeDigest:string;parentGrantIds:string[];sourceAllowed:boolean;retainAllowed:boolean};
-export type VerifiedQaIndexView={version:'VerifiedQaIndexView/0.1';descriptor:QaIndexArchiveDescriptor;descriptorDigest:string;index:ScopedDedupIndex;selection:AuditSelection;eligibleRows:{caseId:string;verdictRef:ScopedRef}[]};
+export type VerifiedQaIndexView={version:'VerifiedQaIndexView/0.1';descriptor:QaIndexArchiveDescriptor;descriptorDigest:string;index:ScopedDedupIndex;selection:AuditSelection;eligibleRows:{caseId:string;verdictRef:ScopedRef}[];rubric:{ref:ScopedRef|null;cipherDigest:string|null;rubricContentDigest:'UNKNOWN_NOT_INDEXED'}};
 export type QualityIndexArchive={check:()=>void;readVerifiedView:()=>VerifiedQaIndexView;close:()=>void};
 export type QaIndexArchiveOptions={approvedTrainingRoot:string;runtimeRoot:string;authorityPath:string;key:Uint8Array;descriptor:QaIndexArchiveDescriptor;descriptorDigest:string;readerBuildDigest:string;admission:()=>QaIndexArchiveAdmission;now?:()=>number};
 
@@ -42,8 +43,9 @@ function same(a:unknown,b:unknown){if(canonical(a)!==canonical(b))stop('CQA_ARCH
 function descriptor(input:unknown,expected:string,readerBuildDigest:string):QaIndexArchiveDescriptor {
   const d=shape(copyJson(input),['version','legacyProfile','readerBuildDigest','archiveProfileDigest','spec','specDigest','source','ledgerRawDigest','authorityRawDigest','authorityRevision','authorityStatus','committedHead','committedSequence','coldReceiptRawDigest','indexDigest','indexRef','manifestRef','selectionRef']);
   digest(expected);digest(readerBuildDigest);
-  if(hash(canonical(d))!==expected||d.version!=='QaIndexArchiveDescriptor/0.1'||d.legacyProfile!=='QA_F1'||d.archiveProfileDigest!==QA_INDEX_ARCHIVE_PROFILE_DIGEST||d.readerBuildDigest!==readerBuildDigest)stop('CQA_ARCHIVE_DESCRIPTOR');
-  const spec=legacySpec(d.spec);if(hash(canonical(spec))!==d.specDigest)stop('CQA_ARCHIVE_BINDING');
+  const profile=oneOf(d.legacyProfile,['QA_F1','QA_F2']);
+  if(hash(canonical(d))!==expected||d.version!=='QaIndexArchiveDescriptor/0.1'||d.archiveProfileDigest!==(profile==='QA_F1'?QA_INDEX_ARCHIVE_PROFILE_DIGEST:QA_INDEX_ARCHIVE_F2_PROFILE_DIGEST)||d.readerBuildDigest!==readerBuildDigest)stop('CQA_ARCHIVE_DESCRIPTOR');
+  const spec=legacySpec(d.spec,profile);if(hash(canonical(spec))!==d.specDigest)stop('CQA_ARCHIVE_BINDING');
   for(const k of ['ledgerRawDigest','authorityRawDigest','committedHead','coldReceiptRawDigest','indexDigest'])digest(d[k]);integer(d.authorityRevision,spec.authorityRevision);oneOf(d.authorityStatus,['ACTIVE','PAUSED','REVOKED']);integer(d.committedSequence,3,2048);
   const s=shape(d.source,['jobId','specDigest','buildDigest','profileDigest','committedHead','ledgerFileDigest','authorityFileDigest','exportRef','exportDigest','registryDigest','purposeDigest','tokenizerProfileDigest','parentGrantIds']);id(s.jobId);for(const [k,v]of Object.entries(s))if(!['jobId','exportRef','parentGrantIds'].includes(k))digest(v);list(s.parentGrantIds,32).forEach(id);legacyRef(s.exportRef);
   refKind(d.indexRef,'corpus-qa-dedup-index');refKind(d.manifestRef,'corpus-qa-selection-manifest');refKind(d.selectionRef,'corpus-qa-selection');return d as QaIndexArchiveDescriptor;
@@ -56,8 +58,9 @@ export function openQualityIndexArchive(input:QaIndexArchiveOptions):QualityInde
   let key:Buffer|undefined,closed=false,lastTime=0,grantIdentity:string|undefined;
   const close=()=>{closed=true;key?.fill(0);key=undefined;};
   const admission=()=>{
-    if(closed)stop('CQA_ARCHIVE_CLOSED');const now=integer(o.now?.()??Date.now());
-    const a=shape(copyJson(o.admission()),['grant','sourceJobId','sourcePurposeDigest','parentGrantIds','sourceAllowed','retainAllowed']);
+    if(closed)stop('CQA_ARCHIVE_CLOSED');
+    const a=shape(copyJson(o.admission()),['grant','sourceJobId','sourcePurposeDigest','parentGrantIds','sourceAllowed','retainAllowed']),now=integer(o.now?.()??Date.now());
+    if(closed)stop('CQA_ARCHIVE_CLOSED');
     const g=shape(a.grant,['version','grantId','revision','descriptorDigest','purposeDigest','status','readAllowed','retainAllowed','validFrom','expiresAt','scope']);
     id(g.grantId);integer(g.revision,1);integer(g.validFrom);integer(g.expiresAt,Number(g.validFrom)+1);
     if(g.version!=='QaIndexReadGrant/0.1'||g.descriptorDigest!==o.descriptorDigest||g.purposeDigest!==d.spec.purposeDigest||g.status!=='ACTIVE'||g.readAllowed!==true||g.retainAllowed!==true||g.scope!==QA_INDEX_ARCHIVE_SCOPE||now<lastTime||now<Number(g.validFrom)||now>=Number(g.expiresAt)||a.sourceJobId!==d.source.jobId||a.sourcePurposeDigest!==d.source.purposeDigest||a.sourceAllowed!==true||a.retainAllowed!==true)stop('CQA_ARCHIVE_ADMISSION');
@@ -119,7 +122,8 @@ export function openQualityIndexArchive(input:QaIndexArchiveOptions):QualityInde
       for(const [i,e]of selection.entries.entries()){const row=index.entries[i]!;same({sourceJobId:d.source.jobId,unitId:e.unit.unitId,poolId:e.unit.poolId,familyId:e.unit.familyId,split:e.unit.split,rowRef:e.sourceRowRef,rowDigest:e.rowDigest},{sourceJobId:row.sourceJobId,unitId:row.unitId,poolId:row.poolId,familyId:row.familyId,split:row.split,rowRef:row.rowRef,rowDigest:row.rowDigest});}
       const eligibleRows=list(m.rows,192).map(v=>{const r=shape(v,['caseId','verdictRef']);id(r.caseId);const ref=legacyRef(r.verdictRef);if(ref.ref.kind!=='corpus-qa-verdict'||!/^attempt-\d+$/.test(ref.bucket))stop('CQA_ARCHIVE_MANIFEST');return {caseId:String(r.caseId),verdictRef:ref};});
       const eligible=new Set(assembly.rows.filter(r=>r.eligibleForNextExport).map(r=>r.unitId));same(eligibleRows.map(r=>r.caseId),selection.entries.filter(e=>eligible.has(e.unit.unitId)).map(e=>e.caseId));
-      check();return {version:'VerifiedQaIndexView/0.1',descriptor:structuredClone(d),descriptorDigest:o.descriptorDigest,index,selection,eligibleRows};
+      const rubricRef=m.rubricRef===null?null:legacyRef(m.rubricRef);
+      check();return {version:'VerifiedQaIndexView/0.1',descriptor:structuredClone(d),descriptorDigest:o.descriptorDigest,index,selection,eligibleRows,rubric:{ref:rubricRef,cipherDigest:rubricRef?.ref.digest??null,rubricContentDigest:'UNKNOWN_NOT_INDEXED'}};
     }catch(error){close();throw error;}finally{db?.close();}
   };
   const reader=Object.freeze({check,readVerifiedView,close});capabilities.set(reader,Object.freeze({check,read:readVerifiedView,runtimeRoot:o.runtimeRoot}));return reader;

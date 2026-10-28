@@ -10,6 +10,12 @@ export const QA_LEGACY_F1=Object.freeze({
   auditTargetBaselineDigest:'c91efe1677d0875258c11366b3ce2f743188e8abbfef5f57d53b17e0c7a455cf',
   studentTargetDigest:'8640154a795e1ecfdcec0a8e335b1bdc20b2d051352a907d32ab29a6e3965e84'
 });
+// Separately reviewed F2 writer: output contract and safe failure-code changes
+// only. Storage, source, targets, tokenizer and crypto retain the F1 wire rules.
+export const QA_LEGACY_F2=Object.freeze({...QA_LEGACY_F1,
+  buildDigest:'6f3fdad98aeeb67c9daddb7c05f5b972d7ce0c1f437939e9850967542bd8ba1c',
+  profileDigest:'a782b492ab39749bf6cf627d824d2a8d89a4d1627fb8bf204d30e0fba810699f'
+});
 export const QA_LEGACY_SCHEMA=Object.freeze([
   'CREATE TABLE events(sequence INTEGER PRIMARY KEY, previous TEXT NOT NULL, ref TEXT NOT NULL, digest TEXT NOT NULL)',
   'CREATE TABLE metadata(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)',
@@ -22,9 +28,10 @@ export function legacyRef(input:unknown):ScopedRef {
   if(!/^(meta|event-\d+|attempt-\d+|shard-\d+|tokens-\d+)$/.test(text(s.bucket,64))||typeof r.id!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(r.id)||r.partition!=='train')stop('CQA_ARCHIVE_REF');
   id(r.kind);integer(r.bytes,28,262172);digest(r.digest);return s as unknown as ScopedRef;
 }
-export function legacySpec(input:unknown):AuditSpec {
+export function legacySpec(input:unknown,profile:'QA_F1'|'QA_F2'='QA_F1'):AuditSpec {
   const s=shape(copyJson(input),['version','auditId','buildDigest','profileDigest','selectionDigest','populationDigest','readGrantDigest','purposeDigest','objectiveDigest','baselineDigest','auditTargetBaselineDigest','studentTargetDigest','storageBindingDigest','authorityRevision','runtimeId','createdAt','expiresAt','rowCount','coordinator','reviewer','prices']);
-  if(s.version!=='CorpusQualityAudit/0.1'||Object.entries(QA_LEGACY_F1).some(([k,v])=>s[k]!==v))stop('CQA_ARCHIVE_PROFILE');
+  const frozen=profile==='QA_F1'?QA_LEGACY_F1:profile==='QA_F2'?QA_LEGACY_F2:stop('CQA_ARCHIVE_PROFILE');
+  if(s.version!=='CorpusQualityAudit/0.1'||Object.entries(frozen).some(([k,v])=>s[k]!==v))stop('CQA_ARCHIVE_PROFILE');
   for(const k of ['selectionDigest','populationDigest','readGrantDigest','purposeDigest','objectiveDigest','storageBindingDigest'])digest(s[k]);
   id(s.auditId);id(s.runtimeId);integer(s.authorityRevision,1);integer(s.createdAt);integer(s.expiresAt,Number(s.createdAt)+1,Number(s.createdAt)+86400000);integer(s.rowCount,1,192);
   for(const [field,provider,model,service] of [['coordinator','deepseek','deepseek-flash','deepseek-official-api'],['reviewer','together','openai/gpt-oss-120b','together-serverless-api']]){
