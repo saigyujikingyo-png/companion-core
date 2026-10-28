@@ -5,8 +5,8 @@ import { TeacherProvider } from './wf1-provider.ts';
 import { MODELS } from './wf1-types.ts';
 import type { ArtifactRef,Provider,ProviderResult } from './wf1-types.ts';
 import type { ArtifactPort } from './wf1-storage.ts';
-import { completion,coordinatorSlots,planProjection,parsePilotJson,pilotBinding,pilotBody,reservation,TEACHER_PILOT,TEACHER_PILOT_DIGEST,validateCandidate,validatePilotSpec,validatePlan,validateRegistry,validateReview } from './corpus-teacher-types.ts';
-import type { PilotAttempt,PilotCandidate,PilotManifest,PilotOperation,PilotPlan,PilotProvenance,PilotRegistry,PilotRow,PilotSpec,PilotState,UnitState,UnitStatus } from './corpus-teacher-types.ts';
+import { completion,coordinatorSlots,planProjection,providerUnit,parsePilotJson,pilotBinding,pilotBody,reservation,TEACHER_PILOT,TEACHER_PILOT_DIGEST,validateCandidate,validatePilotSpec,validatePlan,validateRegistry,validateReview } from './corpus-teacher-types.ts';
+import type { PilotAttempt,PilotCandidate,PilotManifest,PilotOperation,PilotPlan,PilotProvenance,PilotRegistry,PilotRow,PilotSpec,PilotState,PilotUnit,UnitState,UnitStatus } from './corpus-teacher-types.ts';
 import type { TeacherPilotStore } from './corpus-teacher-store.ts';
 
 export type PilotTransport=(request:{provider:Provider;operation:PilotOperation;ordinal:number|null;body:string;output:ArtifactPort;signal:AbortSignal;authorizeSend:<T>(send:()=>T)=>T})=>Promise<ProviderResult>;
@@ -21,6 +21,16 @@ function read(port:ArtifactPort,ref:ArtifactRef,kind:string){artifactRef(ref);if
 function provenance(attempt:PilotAttempt):PilotProvenance {const r=attempt.result;if(!r||r.outcome!=='COMPLETED'||r.finishReason!=='stop'||r.requestedModel!==MODELS[attempt.provider]||r.returnedModel!==MODELS[attempt.provider]||!r.usage||r.usage.input>attempt.inputReserved||r.usage.completion>attempt.completionReserved)stop('CPQ_INTEGRITY');return {provider:attempt.provider,requestedModel:r.requestedModel,returnedModel:r.returnedModel,revision:null,protocol:'CorpusTeacherPilot/0.1',effort:attempt.provider==='together'?'medium':'high',finishReason:'stop',usage:r.usage,usageSource:'PROVIDER_REPORTED'};}
 const attemptId=(op:PilotOperation,i:number|null)=>op+(i===null?'':':'+i);
 function contentDigest(candidate:PilotCandidate){return hash(canonical({prompt:candidate.prompt,response:candidate.response}));}
+/** Read-only compatibility with bd6afb9 requests. Legacy host metadata must exactly
+ * match the validated frozen registry; this path never returns a dispatch body. */
+function storedUnitRequestMatches(body:string,op:'candidate'|'review',ordinal:number,unit:PilotUnit,candidate:PilotCandidate|null=null,candidateDigest:string|null=null):boolean {
+  const data=op==='candidate'?{unit:providerUnit(unit)}:{unit:providerUnit(unit),candidate,candidateDigest};
+  const current=pilotBody(op,ordinal,data);if(body===current)return true;
+  if(Buffer.byteLength(body)>TEACHER_PILOT.requestBytes)return false;
+  const envelope=JSON.parse(current),payload=JSON.parse(envelope.messages[1].content);
+  payload.data.unit=unit;envelope.messages[1].content=canonical(payload);
+  return body===canonical(envelope);
+}
 function rowManifest(spec:PilotSpec,planRef:ArtifactRef,rows:PilotRow[],rowRefs:ArtifactRef[],previous:ArtifactRef|null,sequence:number,shardRef:ArtifactRef):PilotManifest {
   return {version:'CorpusTeacherManifest/0.1',runId:spec.runId,sequence,previous,profileDigest:spec.profileDigest,buildDigest:spec.buildDigest,registryDigest:spec.registryDigest,studentTargetDigest:spec.studentTargetDigest,planRef,rowRefs,shardRef,logicalRowsDigest:hash(rows.map(r=>canonical(r)+'\n').join('')),rows:rows.length,splitCounts:{train:rows.filter(r=>r.unit.split==='train').length,dev:rows.filter(r=>r.unit.split==='dev').length},reusedQualified:0,generatedNew:rows.length,evidenceClass:'MODEL_REVIEWED',trainingReady:false,trainingJobPolicy:'NOT_AUTHORIZED',studentInputTokens:null,studentLossTokens:null,tokenizerProfileDigest:null,measurementStatus:'NOT_MEASURED'};
 }
@@ -35,8 +45,8 @@ export function verifyTeacherPilot(store:TeacherPilotStore):PilotState {
   for(const a of state.attempts){if(seen.has(a.id)||a.id!==attemptId(a.operation,a.ordinal)||a.provider!==(a.operation==='review'?'deepseek':'together')||a.profileDigest!==TEACHER_PILOT_DIGEST||a.inputReserved!==TEACHER_PILOT.inputReserve||a.completionReserved!==completion(a.operation)||a.reservedMicroUsd!==reservation(state.spec,a.operation))stop('CPQ_INTEGRITY');seen.add(a.id);a.provider==='together'?together++:deepseek++;
     const body=read(store.output,a.requestRef,'corpus-teacher-request');if(hash(body)!==a.bodyHash)stop('CPQ_INTEGRITY');
     // The transport validator is also applied on cold read; a stored binding cannot drift.
-    const expectedData=a.operation==='plan'?{currentApprovedObjective:read(store.output,state.objectiveRef,'corpus-teacher-objective'),slots:coordinatorSlots(registry)}:a.operation==='candidate'?{unit:plan?.units[a.ordinal!]}:null;
-    if(expectedData&&body!==pilotBody(a.operation,a.ordinal,expectedData))stop('CPQ_INTEGRITY');
+    if(a.operation==='plan'&&body!==pilotBody('plan',null,{currentApprovedObjective:read(store.output,state.objectiveRef,'corpus-teacher-objective'),slots:coordinatorSlots(registry)}))stop('CPQ_INTEGRITY');
+    if(a.operation==='candidate'&&(!plan||!storedUnitRequestMatches(body,'candidate',a.ordinal!,plan.units[a.ordinal!]!)))stop('CPQ_INTEGRITY');
     if(a.result){for(const ref of [a.result.rawRef,a.result.reasoningRef,a.result.finalRef])if(ref){artifactRef(ref);(ref.partition==='train'?store.output:store.custody).read(ref);}}
   }
   if(together>7||deepseek>6||state.units.length!==(plan?6:0))stop('CPQ_INTEGRITY');
@@ -47,7 +57,7 @@ export function verifyTeacherPilot(store:TeacherPilotStore):PilotState {
     let candidate:PilotCandidate|null=null;
     if(u.candidateRef){candidate=validateCandidate(read(store.output,u.candidateRef,'corpus-teacher-candidate'),plan!.units[i]!);if(contentDigest(candidate)!==u.candidateDigest)stop('CPQ_INTEGRITY');const generated=state.attempts.find(a=>a.id===attemptId('candidate',i));if(!generated?.result?.finalRef||canonical(validateCandidate(store.output.read(generated.result.finalRef).toString('utf8'),plan!.units[i]!))!==canonical(candidate))stop('CPQ_INTEGRITY');}
     const reviewAttempt=state.attempts.find(a=>a.id===attemptId('review',i));
-    if(reviewAttempt&&(!candidate||read(store.output,reviewAttempt.requestRef,'corpus-teacher-request')!==pilotBody('review',i,{unit:plan!.units[i],candidate,candidateDigest:u.candidateDigest})))stop('CPQ_INTEGRITY');
+    if(reviewAttempt&&(!candidate||!storedUnitRequestMatches(read(store.output,reviewAttempt.requestRef,'corpus-teacher-request'),'review',i,plan!.units[i]!,candidate,u.candidateDigest)))stop('CPQ_INTEGRITY');
     if(u.reviewRef){const review=validateReview(read(store.output,u.reviewRef,'corpus-teacher-review'),plan!.units[i]!,u.candidateDigest!);if(!reviewAttempt?.result?.finalRef||canonical(validateReview(store.output.read(reviewAttempt.result.finalRef).toString('utf8'),plan!.units[i]!,u.candidateDigest!))!==canonical(review))stop('CPQ_INTEGRITY');}
     if(u.status==='ACCEPTED'){
       if(!candidate||!u.rowRef||!u.reviewRef||!state.planRef||bodies.has(u.candidateDigest!))stop('CPQ_INTEGRITY');bodies.add(u.candidateDigest!);
@@ -130,7 +140,7 @@ export async function runTeacherPilot(specInput:unknown,ports:PilotRunPorts){
     try{
       const unit=plan.units[i]!,u=shadow.units[i]!;
       const candidate=op==='review'?validateCandidate(read(store.output,u.candidateRef!,'corpus-teacher-candidate'),unit):null;
-      const a=await submit(op,i,op==='candidate'?{unit}:{unit,candidate,candidateDigest:u.candidateDigest},op==='candidate'?u.queuedAtMs:u.reviewQueuedAtMs!);
+      const task=providerUnit(unit),a=await submit(op,i,op==='candidate'?{unit:task}:{unit:task,candidate,candidateDigest:u.candidateDigest},op==='candidate'?u.queuedAtMs:u.reviewQueuedAtMs!);
       if(shadow.units[i]!.status==='SUBMIT_UNKNOWN')return;
       if(fence){quarantine(i,'CPQ_LATE_AFTER_FENCE');return;}
       if(a.result?.outcome!=='COMPLETED'||!a.result.finalRef){quarantine(i,'CPQ_OUTPUT');return;}
