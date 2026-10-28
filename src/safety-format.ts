@@ -4,6 +4,7 @@ import type {Safety} from './durable-codec.ts';
 import {fail} from './validation.ts';
 
 export const COLD_SAFETY_PROFILE='blocks-br4-safety-cold-v1' as const;
+export const isColdSafetyProfile=(profile:unknown):boolean=>profile===COLD_SAFETY_PROFILE||profile==='blocks-br4-safety-store-cold-v1';
 export const MAX_COLD_PLAIN=8*1024*1024,MAX_COLD_CIPHER=MAX_COLD_PLAIN+28,MAX_COMPLETE_SAFETY=4*1024*1024;
 export type SafetyEntry=Safety['ingress'][number];
 export type OrderedSafetyEntry={ordinal:number;entry:SafetyEntry};

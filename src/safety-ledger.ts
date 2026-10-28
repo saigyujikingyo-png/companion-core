@@ -4,7 +4,7 @@ import {validateSafetyState} from './anchored-codec.ts';
 import type {VaultIdentity} from './anchored-codec.ts';
 import {fail} from './validation.ts';
 import {SafetySegment,assertColdClosure} from './safety-segment.ts';
-import {COLD_SAFETY_PROFILE,MAX_COMPLETE_SAFETY,canonicalSafetyJSON,terminalEligible,validateHotEnvelope} from './safety-format.ts';
+import {COLD_SAFETY_PROFILE,isColdSafetyProfile,MAX_COMPLETE_SAFETY,canonicalSafetyJSON,terminalEligible,validateHotEnvelope} from './safety-format.ts';
 import type {HotSafetyEnvelope,OrderedSafetyEntry,SafetyEntry} from './safety-format.ts';
 
 export function allHotSafety(safety:Safety):HotSafetyEnvelope{
@@ -12,7 +12,7 @@ export function allHotSafety(safety:Safety):HotSafetyEnvelope{
 }
 export function completeHotSafety(hot:HotSafetyEnvelope,cold:OrderedSafetyEntry[],identity:VaultIdentity,maxCalls:number):Safety{
   validateHotEnvelope(hot);validateIdentityBudget(identity.identity,maxCalls);
-  if(identity.storageProfile!==COLD_SAFETY_PROFILE||(identity.safetyCold===null?cold.length!==0:cold.length!==identity.safetyCold?.entryCount))fail('SAFETY_COLD_ROWS');
+  if(!isColdSafetyProfile(identity.storageProfile)||(identity.safetyCold===null?cold.length!==0:cold.length!==identity.safetyCold?.entryCount))fail('SAFETY_COLD_ROWS');
   const rows=[...hot.ingress,...cold].sort((a,b)=>a.ordinal-b.ordinal);
   if(rows.length>8192||rows.some((row,i)=>row.ordinal!==i)||cold.some(row=>!terminalEligible(row.entry)))fail('SAFETY_HOT_ORDINAL');
   const safety={...hot.globals,ingress:rows.map(row=>row.entry)};
@@ -34,7 +34,7 @@ export class SafetyLedger{
   constructor(safety:Safety,identity:VaultIdentity,maxCalls:number,hot?:HotSafetyEnvelope,cold?:SafetySegment){
     validateIdentityBudget(identity.identity,maxCalls);validateSafetyState(safety,identity,maxCalls);
     this.#identity=identity;this.#maxCalls=maxCalls;this.#cold=cold;
-    this.#hot=hot??allHotSafety(safety);this.#legacy=identity.storageProfile===COLD_SAFETY_PROFILE?undefined:safety;
+    this.#hot=hot??allHotSafety(safety);this.#legacy=isColdSafetyProfile(identity.storageProfile)?undefined:safety;
     if(!this.#legacy&&canonicalSafetyJSON(this.completeSafety())!==canonicalSafetyJSON(safety))fail('SAFETY_LOGICAL_MISMATCH');
     if(this.#legacy&&cold)fail('SAFETY_COLD_PROFILE');
   }

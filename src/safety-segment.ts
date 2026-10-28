@@ -5,7 +5,7 @@ import {readBounded} from './anchored-codec.ts';
 import type {VaultIdentity} from './anchored-codec.ts';
 import {sha} from './durable-codec.ts';
 import {fail} from './validation.ts';
-import {COLD_SAFETY_PROFILE,MAX_COLD_PLAIN,canonicalSafetyJSON,terminalEligible,validateColdDescriptor} from './safety-format.ts';
+import {COLD_SAFETY_PROFILE,isColdSafetyProfile,MAX_COLD_PLAIN,canonicalSafetyJSON,terminalEligible,validateColdDescriptor} from './safety-format.ts';
 import type {OrderedSafetyEntry,SafetyColdDescriptor} from './safety-format.ts';
 
 export const SAFETY_SQL="CREATE TABLE entries (request_key TEXT PRIMARY KEY, ordinal INTEGER NOT NULL UNIQUE, delivery_id TEXT UNIQUE, entry_json TEXT NOT NULL) STRICT, WITHOUT ROWID";
@@ -69,10 +69,10 @@ function assertDatabase(db:DatabaseSync):OrderedSafetyEntry[]{
 export function coldAAD(identity:VaultIdentity):Buffer{
   return Buffer.from(JSON.stringify(['companion-anchored-vault-v3','safety-cold-v1',{
     authorityId:identity.authorityId,vaultId:identity.vaultId,identity:identity.identity,instanceId:identity.instanceId,ownerEpoch:identity.ownerEpoch,keyEpoch:identity.keyEpoch,
-    directory:identity.directory,storageDomain:identity.storageDomain,schemaVersion:identity.schemaVersion??1,storageProfile:COLD_SAFETY_PROFILE,legacyImport:identity.legacyImport??null}]));
+    directory:identity.directory,storageDomain:identity.storageDomain,schemaVersion:identity.schemaVersion??1,storageProfile:identity.storageProfile,legacyImport:identity.legacyImport??null}]));
 }
 export function sealSafetySegment(rows:OrderedSafetyEntry[],identity:VaultIdentity,key:Uint8Array):{descriptor:SafetyColdDescriptor;bytes:Buffer}{
-  if(identity.storageProfile!==COLD_SAFETY_PROFILE)fail('SAFETY_COLD_PROFILE');validateRows(rows);
+  if(!isColdSafetyProfile(identity.storageProfile))fail('SAFETY_COLD_PROFILE');validateRows(rows);
   const db=ram();let plain:Uint8Array|undefined;
   try{
     db.exec(`PRAGMA page_size=4096; PRAGMA application_id=${APP_ID}; PRAGMA user_version=1; ${SAFETY_SQL}; BEGIN`);
@@ -95,7 +95,7 @@ export class SafetySegment{
   #db:DatabaseSync;#closed=false;readonly descriptor:SafetyColdDescriptor;
   private constructor(db:DatabaseSync,descriptor:SafetyColdDescriptor){this.#db=db;this.descriptor=structuredClone(descriptor);}
   static open(bytes:Uint8Array,identity:VaultIdentity,key:Uint8Array):SafetySegment{
-    const d=identity.safetyCold;if(identity.storageProfile!==COLD_SAFETY_PROFILE||!d)fail('SAFETY_COLD_PROFILE');validateColdDescriptor(d);
+    const d=identity.safetyCold;if(!isColdSafetyProfile(identity.storageProfile)||!d)fail('SAFETY_COLD_PROFILE');validateColdDescriptor(d);
     if(bytes.length!==d.cipherBytes||sha(bytes)!==d.cipherDigest)fail('SAFETY_COLD_CIPHER');
     let plain:Buffer|undefined,db:DatabaseSync|undefined;
     try{
@@ -120,7 +120,7 @@ export class SafetySegment{
   close():void{if(!this.#closed){this.#closed=true;this.#db.close();}}
 }
 export function assertColdClosure(identity:VaultIdentity,reader:(name:string,maximum:number)=>Buffer=(name,max)=>readBounded(join(identity.directory,name),max)):void{
-  if(identity.storageProfile!==COLD_SAFETY_PROFILE)return;
+  if(!isColdSafetyProfile(identity.storageProfile))return;
   const d=identity.safetyCold;if(d===null)return;validateColdDescriptor(d);
   const bytes=reader(d.file,d.cipherBytes);if(bytes.length!==d.cipherBytes||sha(bytes)!==d.cipherDigest)fail('SAFETY_COLD_CIPHER');
 }
