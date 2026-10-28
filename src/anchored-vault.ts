@@ -433,12 +433,12 @@ export class AnchoredVault {
   openEndogenousControl(port: EndogenousDecisionPort): DurableEndogenousSession {
     return this.#openEndogenous(port, 'rest-noop-v1');
   }
-  openEndogenousTextControl(port: EndogenousTextPort, acceptText: DurableTextAcceptance, settled?: EndogenousSettlement): DurableEndogenousSession {
+  openEndogenousTextControl(port: EndogenousTextPort, acceptText: DurableTextAcceptance, settled?: EndogenousSettlement, expectedScope?: Scope): DurableEndogenousSession {
     if (typeof acceptText !== 'function') fail('E1_INVALID_PORT');
-    return this.#openEndogenous(port, 'text-choice-v1', acceptText, settled);
+    return this.#openEndogenous(port, 'text-choice-v1', acceptText, settled, expectedScope);
   }
   #openEndogenous(port: EndogenousDecisionPort | EndogenousTextPort, profile: EndogenousProfile,
-    acceptText?: DurableTextAcceptance, settled?: EndogenousSettlement): DurableEndogenousSession {
+    acceptText?: DurableTextAcceptance, settled?: EndogenousSettlement, expectedScope?: Scope): DurableEndogenousSession {
     return this.#access(() => {
       this.#tx!.assertAdmitted(this.#head!);
       if (this.#endogenousBootBlocked) fail(this.#endogenousBootBlocked);
@@ -450,7 +450,7 @@ export class AnchoredVault {
         scope: id => this.#withStore(() => this.store.scope(id)), now: () => this.#wallNow(),
         assertCurrent: () => { this.#healthy(); this.#tx!.assertAdmitted(this.#head!); },
         poison: () => { this.#poisoned = true; },
-      }, this.#identity, port, this.#clock.monotonic, profile, acceptText, settled);
+      }, this.#identity, port, this.#clock.monotonic, profile, acceptText, settled, expectedScope);
       this.#endogenousOwner = bound.owner;
       return bound.session;
     });
