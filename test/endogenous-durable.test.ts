@@ -17,7 +17,8 @@ import { DurableMemory } from '../src/durable-memory.ts';
 import { readAuthority, seal, sha } from '../src/durable-codec.ts';
 import { directoryReader, reconstruct } from '../src/incremental-storage.ts';
 import { ENDOGENOUS_CONTROL_KEY, parseControl, encodeControl, bootControl } from '../src/endogenous-durable.ts';
-import { fingerprintMemoryDatabase, repackMemoryImage } from '../src/memory-image.ts';
+import { configureRepackRuntime, fingerprintMemoryDatabase, repackMemoryImage } from '../src/memory-image.ts';
+import { CoreError } from '../src/validation.ts';
 
 const who = { tenantId: 'synthetic', subjectId: 'subject', personaId: 'synthetic', relationshipId: 'synthetic' };
 const answer = '{"version":1,"choice":"REST"}';
@@ -214,10 +215,26 @@ test('schema migration, restore/rekey and lossless repack retain the fixed metad
   const image = f.v.store.snapshot(), scratch = new DatabaseSync(':memory:'); scratch.deserialize(image);
   scratch.exec('CREATE TABLE disposable(value BLOB); INSERT INTO disposable VALUES (zeroblob(524288)); DROP TABLE disposable');
   const bloated = scratch.serialize(); scratch.close();
-  const repacked = repackMemoryImage(bloated, 1); bloated.fill(0);
-  const db = new DatabaseSync(':memory:'); db.deserialize(repacked);
-  assert.equal(db.prepare('SELECT value FROM meta WHERE key=?').get(ENDOGENOUS_CONTROL_KEY)!.value, f.v.store.endogenousControl());
-  assert.ok(fingerprintMemoryDatabase(db, 1)); db.close(); image.fill(0); repacked.fill(0);
+  const runtimeRefusal = (error: unknown) => error instanceof CoreError && error.code === 'REPACK_RUNTIME' && error.message === 'REPACK_RUNTIME';
+  const probe = new DatabaseSync(':memory:'); let repackSupported = true;
+  try { configureRepackRuntime(probe); }
+  catch (error) { if (!runtimeRefusal(error)) throw error; repackSupported = false; }
+  finally { probe.close(); }
+  t.diagnostic(`repack capability: ${repackSupported ? 'SUPPORTED' : 'UNSUPPORTED_REAL_REFUSAL'}`);
+  if (repackSupported) {
+    const repacked = repackMemoryImage(bloated, 1);
+    const db = new DatabaseSync(':memory:'); db.deserialize(repacked);
+    assert.equal(db.prepare('SELECT value FROM meta WHERE key=?').get(ENDOGENOUS_CONTROL_KEY)!.value, f.v.store.endogenousControl());
+    assert.ok(fingerprintMemoryDatabase(db, 1)); db.close(); repacked.fill(0);
+  } else {
+    const before = sha(bloated), exec = DatabaseSync.prototype.exec; let vacuumCalls = 0;
+    DatabaseSync.prototype.exec = function (sql: string) { if (/\bVACUUM\b/i.test(sql)) vacuumCalls++; return exec.call(this, sql); };
+    try { assert.throws(() => repackMemoryImage(bloated, 1), runtimeRefusal); }
+    finally { DatabaseSync.prototype.exec = exec; }
+    assert.equal(vacuumCalls, 0, 'unsupported runtime must not execute VACUUM');
+    assert.equal(sha(bloated), before, 'runtime refusal must preserve the source image');
+  }
+  image.fill(0); bloated.fill(0);
   const backup = join(f.root, 'backup'); f.v.exportBackup(backup); f.v.close();
   const target = join(f.root, 'schema2');
   AnchoredVault.migrateBackup({ backupDirectory: backup, targetDirectory: target, storageDomain: f.config.storageDomain,

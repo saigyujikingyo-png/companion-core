@@ -101,3 +101,4 @@ E1b 的作者验证入口是 `test/endogenous-durable.test.ts`，加原64项 RAM
 实际 Astra max 独立复核关闭正常期限拒绝误 poison 普通 Core 的唯一 P2，无剩余可复现 P1/P2。最终 strict TypeScript exit0，E1b26加原RAM64合计90/90专项通过；既有139项持久化闭包结果复用，未重复运行。冻结五个执行文件及本文件的最终完整测试1242/1242通过，失败／取消／跳过／todo均0，169826.5383ms，执行和文档绑定前后不变。提交自然 CI 尚待结果。
 
 本验收仅是合成数据下的有界持久控制、停机恢复和普通 Core 隔离证据。已消费额度与 UNKNOWN/held 不退款、不因重开或新ID恢复许可；正常期限拒绝仅停止E1，真实或不确定的持久化失败仍使 vault fail closed。真实模型自主选择、Host接线、外部 exactly-once、训练及主观体验均不在本验收范围内。
+E1b CI历史分层补充：上述完整1242/1242属于候选 `89ad9b7`。其首次自然CI在浮动Node24.21.0上因新测试无条件调用物理repack而触发既有 `REPACK_RUNTIME` 拒绝，暴露的是测试对实际能力的假定。随后仅测试增加实际runtime能力分支：supported保留原metadata检查，unsupported要求精确拒绝、零VACUUM且源字节不变，后半migration/rekey仍无条件执行；生产门和所有产品src字节均保持不变。独立原max仅审该test delta后无P1/P2；strictTS exit0和原生26/26专项通过，unsupported分支仍待新head自然CI。没有为test-only适配重复whole。首个sandbox TEMP路径失败仅保留TOOL_OUTPUT_ONLY事实，原沙箱日志不可恢复，不冒称已有原生日志；原CI失败及旧完整测试证据保留。
