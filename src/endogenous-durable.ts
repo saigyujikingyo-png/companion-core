@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EndogenousOwner } from './endogenous-lifecycle.ts';
-import type { EndogenousDecisionPort, EndogenousEntry, EndogenousLimits, EndogenousSession } from './endogenous-lifecycle.ts';
+import type { EndogenousDecisionPort, EndogenousEntry, EndogenousLimits, EndogenousSession, EndogenousProfile,
+  EndogenousTextPort, AcceptedEndogenousText, EndogenousSettlement } from './endogenous-lifecycle.ts';
 import type { Scope } from './contracts.ts';
 import { fail } from './validation.ts';
 
@@ -10,11 +11,14 @@ type Stop = 'PAUSED' | 'RUNNING' | 'CLOSED' | 'EXHAUSTED' | 'FAULTED' | 'RECONCI
 export type EndogenousControl = {
   version: 1; revision: number; authorityId: string; vaultId: string; identity: string;
   scopeId: string; generation: number; consentRevision: number; runtimeEpoch: number;
-  controlId: string; profile: 'rest-noop-v1'; limits: EndogenousLimits;
+  controlId: string; profile: EndogenousProfile; limits: EndogenousLimits;
   expiresAt: number; runFence: number; stop: Stop; permitHeld: boolean; entries: EndogenousEntry[];
 };
 export type EndogenousIdentity = Pick<EndogenousControl, 'authorityId' | 'vaultId' | 'identity'>;
 export type DurableEndogenousSession = EndogenousSession & { readControl(): EndogenousControl };
+/** Ephemeral local capability; neither text nor the validator is serialized. */
+export type DurableAcceptedEndogenousText = AcceptedEndogenousText & Readonly<{ validateDelivery(): true }>;
+export type DurableTextAcceptance = (accepted: DurableAcceptedEndogenousText) => unknown;
 const safe = (n: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): n is number =>
   typeof n === 'number' && Number.isSafeInteger(n) && n >= min && n <= max;
 const keys = (value: unknown, expected: string): value is Record<string, unknown> =>
@@ -35,7 +39,7 @@ export function parseControl(encoded: string): EndogenousControl {
   let r: any;
   try { r = JSON.parse(encoded); } catch { fail('E1_CONTROL_INVALID'); }
   if (!keys(r, 'version,revision,authorityId,vaultId,identity,scopeId,generation,consentRevision,runtimeEpoch,controlId,profile,limits,expiresAt,runFence,stop,permitHeld,entries')
-    || r.version !== 1 || r.profile !== 'rest-noop-v1' || !safe(r.revision, 1) || !safe(r.generation)
+    || r.version !== 1 || !['rest-noop-v1','text-choice-v1'].includes(r.profile as string) || !safe(r.revision, 1) || !safe(r.generation)
     || !safe(r.consentRevision) || !safe(r.runtimeEpoch) || !safe(r.expiresAt, 1) || !safe(r.runFence, 0, 1024)
     || typeof r.permitHeld !== 'boolean' || !['PAUSED','RUNNING','CLOSED','EXHAUSTED','FAULTED','RECONCILE_REQUIRED','FENCED'].includes(r.stop as string)
     || !Array.isArray(r.entries) || r.entries.length > 64) fail('E1_CONTROL_INVALID');
@@ -50,8 +54,8 @@ export function parseControl(encoded: string): EndogenousControl {
   for (const [i, e] of r.entries.entries()) {
     if (!keys(e, 'decisionId,session,sequence,outcome,code') || e.decisionId !== `${r.controlId}:${i + 1}`
       || e.sequence !== i + 1 || !safe(e.session, 1, r.runFence as number)
-      || !['PENDING','UNKNOWN','REST','NOOP'].includes(e.outcome as string) || !codes.includes(e.code as any)
-      || ((e.outcome === 'PENDING' || e.outcome === 'REST' || e.outcome === 'NOOP') && e.code !== null)
+      || !['PENDING','UNKNOWN','REST','NOOP',...(r.profile === 'text-choice-v1' ? ['TEXT'] : [])].includes(e.outcome as string) || !codes.includes(e.code as any)
+      || ((e.outcome === 'PENDING' || e.outcome === 'REST' || e.outcome === 'NOOP' || e.outcome === 'TEXT') && e.code !== null)
       || (e.outcome === 'UNKNOWN' && e.code === null) || (e.outcome === 'PENDING' && i !== r.entries.length - 1)) fail('E1_CONTROL_INVALID');
   }
   if (r.permitHeld && !r.entries.length) fail('E1_CONTROL_INVALID');
@@ -85,11 +89,11 @@ export function fenceControl(encoded: string, scope: (id: string) => Scope): str
   unknown(r); r.stop = 'FENCED'; r.revision++;
   return encodeControl(r);
 }
-export function newControl(identity: EndogenousIdentity, scope: Scope, now: number, limits?: Partial<EndogenousLimits>): EndogenousControl {
+export function newControl(identity: EndogenousIdentity, scope: Scope, now: number, limits?: Partial<EndogenousLimits>, profile: EndogenousProfile = 'rest-noop-v1'): EndogenousControl {
   const bounded = controlLimits(limits);
   return parseControl(encodeControl({ version: 1, revision: 1, authorityId: identity.authorityId, vaultId: identity.vaultId,
     identity: identity.identity, scopeId: scope.id, generation: scope.generation,
-    consentRevision: scope.consentRevision, runtimeEpoch: scope.runtimeEpoch, controlId: randomUUID(), profile: 'rest-noop-v1',
+    consentRevision: scope.consentRevision, runtimeEpoch: scope.runtimeEpoch, controlId: randomUUID(), profile,
     limits: bounded, expiresAt: now + bounded.maxDurationMs, runFence: 0, stop: 'PAUSED', permitHeld: false, entries: [] }));
 }
 
@@ -103,10 +107,12 @@ export type ControlAccess = {
   assertCurrent(): void;
   poison(): void;
 };
-export function bindControl(access: ControlAccess, identity: EndogenousIdentity, port: EndogenousDecisionPort,
-  monotonic: () => number): { session: DurableEndogenousSession; owner: EndogenousOwner } {
+export function bindControl(access: ControlAccess, identity: EndogenousIdentity, port: EndogenousDecisionPort | EndogenousTextPort,
+  monotonic: () => number, profile: EndogenousProfile = 'rest-noop-v1', acceptText?: DurableTextAcceptance,
+  settled?: EndogenousSettlement): { session: DurableEndogenousSession; owner: EndogenousOwner } {
   let encoded = access.read() ?? fail('E1_CONTROL_MISSING'), record = parseControl(encoded);
   assertControlIdentity(record, identity);
+  if (record.profile !== profile) fail('E1_CONTROL_PROFILE');
   if (!scopeMatches(record, access.scope(record.scopeId))) fail('E1_CONTROL_SCOPE');
   if (record.permitHeld || record.stop === 'RECONCILE_REQUIRED') fail('E1_RECONCILE_REQUIRED');
   if (['FENCED','FAULTED','EXHAUSTED'].includes(record.stop)) fail('E1_CONTROL_STOPPED');
@@ -117,6 +123,14 @@ export function bindControl(access: ControlAccess, identity: EndogenousIdentity,
   // A private sentinel distinguishes our normal deadline refusal from any failed persistence
   // callback (including one that happens to throw an identically named external error).
   const expired = new Error('E1_CONTROL_EXPIRED');
+  let lastMonotonic = monotonic();
+  const checkDeadline = (deadline: number | undefined) => {
+    if (deadline === undefined) return;
+    const now = monotonic();
+    if (!Number.isFinite(now) || now < lastMonotonic || now < 0) fail('E1_CLOCK');
+    lastMonotonic = now;
+    if (now >= deadline) throw expired;
+  };
   const validate = (scopeRequired = true, live = false) => {
     access.assertCurrent();
     const actual = access.read();
@@ -149,7 +163,20 @@ export function bindControl(access: ControlAccess, identity: EndogenousIdentity,
       throw error;
     }
   };
-  const owner = new EndogenousOwner({ limits: record.limits, clock: monotonic,
+  const owner = new EndogenousOwner({ limits: record.limits, clock: monotonic, profile,
+    ...(settled ? { settled } : {}),
+    ...(acceptText ? { acceptText: (accepted: AcceptedEndogenousText) => acceptText(Object.freeze({ ...accepted,
+      validateDelivery: (): true => {
+        accepted.validateAcceptance();
+        return access.guard(() => {
+        // Read-only acceptance proof. Expired/revoked delivery is not uncertain storage.
+        validate(true, true); checkDeadline(accepted.deadlineMonotonicMs);
+        const entry = record.entries[accepted.sequence - 1];
+        if (entry?.decisionId !== accepted.decisionId || entry.outcome !== 'TEXT' || entry.session !== sessionNumber) fail('E2_STALE');
+        accepted.validateAcceptance();
+        return true;
+        });
+      } })) } : {}),
     recovered: { controlId: record.controlId, entries: record.entries, session: sessionNumber,
       remainingMs: Math.max(0, record.expiresAt - access.now()) }, journal: {
       withReservedDispatch(entry, invoke) {
@@ -178,14 +205,17 @@ export function bindControl(access: ControlAccess, identity: EndogenousIdentity,
           record.permitHeld = false; save();
         });
       },
-      terminal(entry) {
+      validateCurrent(deadline) {
+        guarded(() => { validate(true, true); checkDeadline(deadline); });
+      },
+      terminal(entry, deadline) {
         guarded(() => {
-          validate(true, true);
+          validate(true, true); checkDeadline(deadline);
           const current = record.entries.at(-1);
           if (!current || current.decisionId !== entry.decisionId || current.outcome !== 'PENDING' || record.permitHeld
             || record.stop !== 'RUNNING') fail('E1_CONTROL_TERMINAL');
           record.entries[record.entries.length - 1] = { ...entry }; save();
-          try { validate(true, true); }
+          try { validate(true, true); checkDeadline(deadline); }
           catch (error) {
             // The result is not accepted until this hook returns. If its commit used the
             // remaining time, the durable stop must retain UNKNOWN, not an accepted result.
@@ -205,7 +235,7 @@ export function bindControl(access: ControlAccess, identity: EndogenousIdentity,
         });
       },
     } });
-  const bound = owner.bind(port);
+  const bound = profile === 'text-choice-v1' ? owner.bindText(port as EndogenousTextPort) : owner.bind(port as EndogenousDecisionPort);
   return { owner, session: Object.freeze({ ...bound, readControl: () => access.guard(() => {
     validate(false); return structuredClone(record);
   }) }) };

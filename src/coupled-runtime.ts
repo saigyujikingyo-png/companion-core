@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Epoch, MemoryRecord, Proposal, RunTicket, SourceRef } from './contracts.ts';
+import type { Epoch, MemoryRecord, Proposal, RunTicket, Scope, SourceRef } from './contracts.ts';
 import { BackgroundState } from './background-state.ts';
 import type { BackgroundView, ShadowIntent } from './background-state.ts';
 import { MemoryStore } from './store.ts';
@@ -7,20 +7,30 @@ import { abortError, bounded, timeoutMs } from './runtime.ts';
 import { CoreError, fail, text } from './validation.ts';
 import { InteractionResources, interactionResponse, validatePrior } from './interaction.ts';
 import type { BackendMode, InteractionProvider, Prior, PriorAdapter, RecallAudit } from './interaction.ts';
-import type { DurableMemory } from './durable-memory.ts';
 import { CompanionWindowPolicy } from './presence-policy.ts';
-import type { CompanionPermissionSource } from './presence-policy.ts';
+import type { CompanionPermissionSource, CompanionWindow } from './presence-policy.ts';
+
+/** Only the authority operations this coordinator actually uses. */
+export interface CoupledDurableAuthority {
+  readonly status: { lastSourceRef: SourceRef | null };
+  claim(id: string, fingerprint: string): void;
+  terminal(id: string, state: 'failed' | 'ready' | 'taken' | 'acknowledged', deliveryId?: string | null): void;
+  source(ref: SourceRef): void;
+  consumeFeedback(deliveryId: string): void;
+}
+export type TextCommunicationPermission = Readonly<{ epoch: number; window: CompanionWindow | null }>;
 
 export type UserInteraction = { sessionId: string; id: string; selectedText: string; recallQuery?: string;
   feedback?: { deliveryId: string; outcome: 'engaged' | 'declined' | 'neutral' } };
-export type LocalDelivery = { sessionId: string; deliveryId: string; requestId: string; kind: 'user' | 'proactive';
+export type LocalDelivery = { sessionId: string; deliveryId: string; requestId: string; kind: 'user' | 'proactive' | 'endogenous';
   text: string; sourceRefs: SourceRef[]; recall: RecallAudit[]; appraisalStatus: 'applied' | 'not-applied';
   memoryRef: null; memoryCandidate: Proposal | null; backend: BackendMode; expiresAtMonotonicMs: number };
 export type InteractionResult = { sessionId: string; requestId: string; deliveryId: string;
   status: 'ready' | 'taken' | 'acknowledged'; recall: RecallAudit[]; appraisalStatus: LocalDelivery['appraisalStatus'] };
 type PendingInput = { hash: string; result?: InteractionResult; failed: boolean; query:string };
 type DeliveryEntry = { value: LocalDelivery; generation: number; contextRevision: number;
-  status: 'ready' | 'taken' | 'acknowledged' | 'cancelled'; feedbackId: string | null; schedulerVersion:number|null; permissionId:string|null; permissionEpoch:number };
+  status: 'ready' | 'taken' | 'acknowledged' | 'cancelled'; feedbackId: string | null; schedulerVersion:number|null; permissionId:string|null; permissionEpoch:number;
+  endogenous?: { permission: TextCommunicationPermission; validate: () => true } };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const refKey = (ref: SourceRef) => `${ref.id}:${ref.revision}`;
 // Process-lifetime ownership is outside sessions/resources. A retired worker is
@@ -56,7 +66,9 @@ export class CoupledSession {
   readonly #store: MemoryStore; readonly #ticket: RunTicket; readonly #clock: () => number;
   readonly #provider: InteractionProvider; readonly #resources: InteractionResources;
   readonly #duration: number; readonly #maxEntries: number;
-  readonly #durable: DurableMemory | undefined;
+  readonly #durable: CoupledDurableAuthority | undefined;
+  readonly #textWindow = new CompanionWindowPolicy();
+  #textPermissionEpoch = 0;
   #lastSourceRef: SourceRef | null = null; #lastAcknowledgedDeliveryId: string | null = null;
   #lastMemoryRef: SourceRef | null = null;
   #state: BackgroundState; #backend: BackendMode; #adapter: PriorAdapter | undefined;
@@ -73,7 +85,7 @@ export class CoupledSession {
   #scheduler: { recallQuery:string; onReady:(result:InteractionResult) => void; onError:(code:string) => void;
     refreshContext:() => {quiet:boolean;available:boolean;ttlMs:number} } | undefined;
   constructor(store: MemoryStore, epoch: Epoch, options: { provider: InteractionProvider; resources: InteractionResources;
-    backend?: BackendMode; priorAdapter?: PriorAdapter; clock?: () => number; timeoutMs?: number; maxEntries?: number; durable?: DurableMemory; enableProactive?:boolean }) {
+    backend?: BackendMode; priorAdapter?: PriorAdapter; clock?: () => number; timeoutMs?: number; maxEntries?: number; durable?: CoupledDurableAuthority; enableProactive?:boolean }) {
     this.#enableProactive=options.enableProactive===true;
     this.#durable = options.durable;
     this.#store = store; this.#ticket = Object.freeze({...store.beginRun(epoch)}); store.validateRun(this.#ticket);
@@ -101,7 +113,9 @@ export class CoupledSession {
     if (!Number.isFinite(now) || now < this.#last || now > Number.MAX_SAFE_INTEGER) { this.#invalidate(); fail('SESSION_CLOCK_INVALID'); }
     this.#last = now; return now;
   }
-  #cancel(): void {
+  #cancel(revokeTextWindow = true): void {
+    if (revokeTextWindow) this.#textWindow.clear();
+    this.#textPermissionEpoch++;
     this.#generation++; this.#pending?.abort(); this.#adapterNeedsReset = true;
     if (this.#timer !== undefined) clearTimeout(this.#timer); this.#timer = undefined;
     for (const delivery of this.#deliveries.values()) delivery.status = 'cancelled';
@@ -142,9 +156,9 @@ export class CoupledSession {
     const now = this.#now(); this.#store.validateRun(this.#ticket);
     // An expired availability lease cannot be revived around an in-flight action.
     const expired = this.#host.available && now >= this.#host.expiresAt;
-    if (expired || context.quiet !== this.#host.quiet || context.available !== this.#host.available) { this.#contextRevision++; this.#cancel(); }
+    if (expired || context.quiet !== this.#host.quiet || context.available !== this.#host.available) { this.#contextRevision++; this.#cancel(context.quiet); }
     this.#host = {quiet:context.quiet,available:context.available,expiresAt:now+context.ttlMs};
-    if(context.quiet)this.#window.clear();
+    if(context.quiet){this.#window.clear();this.clearEndogenousTextWindow();}
     this.#syncContext(now); this.#arm();
   }
   resume(): void {
@@ -182,6 +196,7 @@ export class CoupledSession {
     lastAcknowledgedDeliveryId:this.#lastAcknowledgedDeliveryId,requestAudit:this.#resources.lastRequestAudit}; }
   validateFeedback(deliveryId: string): void {
     const entry = this.#delivery(deliveryId);
+    if (entry.endogenous) fail('E2_FEEDBACK_UNSUPPORTED');
     if (entry.status !== 'acknowledged') fail('FEEDBACK_REQUIRES_DELIVERED_RECEIPT');
     if (entry.feedbackId !== null) fail('DELIVERY_FEEDBACK_ALREADY_CONSUMED');
   }
@@ -196,6 +211,56 @@ export class CoupledSession {
   }
   clearCompanionWindow():void {this.#window.clear();this.#permissionEpoch++;this.#proactiveSuppressed=true;
     this.#cancelProactive();if(!this.#invalid)this.#syncContext(this.#now());}
+  /** Explicit TEXT-only permission; does not imply observed presence or arm any scheduler. */
+  grantEndogenousTextWindow(id: string, durationMs: number, source: CompanionPermissionSource): void {
+    const now = this.#guard(false, true);
+    this.#textWindow.grant(id, durationMs, source, now); this.#textPermissionEpoch++;
+  }
+  clearEndogenousTextWindow(): void {
+    this.#textWindow.clear(); this.#textPermissionEpoch++;
+    for (const entry of this.#deliveries.values()) if (entry.endogenous) entry.status = 'cancelled';
+  }
+  /** Pure local snapshot: safe during the synchronous Vault reservation callback. */
+  captureEndogenousTextPermission(): TextCommunicationPermission {
+    return Object.freeze({ epoch: this.#textPermissionEpoch, window: this.#textWindow.current(this.#now()) });
+  }
+  #validateTextPermission(permission: TextCommunicationPermission, now: number): void {
+    const current = this.#textWindow.current(now);
+    if (permission.epoch !== this.#textPermissionEpoch || !permission.window || !current
+      || current.id !== permission.window.id || current.generation !== permission.window.generation
+      || now >= permission.window.expiresAt) fail('E2_COMMUNICATION_DENIED');
+  }
+  /** Trusted local acceptance only. Never creates an Event, Proposal, appraisal or new model call. */
+  prepareEndogenousText(input: { decisionId: string; text: string; scope: Scope; deadlineMonotonicMs: number;
+    permission: TextCommunicationPermission; validate: () => true }): InteractionResult {
+    this.#guard(false, true); text(input.decisionId, 128); text(input.text, 160);
+    if (Buffer.byteLength(input.text, 'utf8') > 160 || typeof input.validate !== 'function') fail('E2_TEXT_INVALID');
+    const key = `endogenous:${input.decisionId}`;
+    if (this.#intents.has(key)) fail('INTENT_ALREADY_CONSUMED');
+    if (this.#intents.size >= this.#maxEntries || this.#deliveries.size >= this.#maxEntries) fail('SESSION_CAPACITY_REACHED');
+    this.#intents.add(key); // Refused text cannot acquire a new communication window later.
+    const valid = (): number => {
+      const now = this.#guard();
+      if (input.scope.id !== this.#ticket.id || input.scope.generation !== this.#ticket.generation
+        || input.scope.consentRevision !== this.#ticket.consentRevision || input.scope.runtimeEpoch !== this.#ticket.runtimeEpoch
+        || !Number.isFinite(input.deadlineMonotonicMs) || now >= input.deadlineMonotonicMs) fail('E2_STALE');
+      this.#validateTextPermission(input.permission, now);
+      if (input.validate() !== true) fail('E2_STALE');
+      return now;
+    };
+    valid();
+    const deliveryId = randomUUID(), expiresAt = Math.min(input.deadlineMonotonicMs, input.permission.window!.expiresAt);
+    const delivery: LocalDelivery = { sessionId: this.sessionId, deliveryId, requestId: input.decisionId, kind: 'endogenous',
+      text: input.text, sourceRefs: [], recall: [], appraisalStatus: 'not-applied', memoryRef: null, memoryCandidate: null,
+      backend: this.#backend, expiresAtMonotonicMs: expiresAt };
+    this.#durable?.terminal(input.decisionId, 'ready', deliveryId);
+    valid(); // A slow ready commit cannot renew the original call/window deadline.
+    valid();
+    this.#deliveries.set(deliveryId, { value: delivery, generation: this.#generation, contextRevision: this.#contextRevision,
+      status: 'ready', feedbackId: null, schedulerVersion: null, permissionId: input.permission.window!.id, permissionEpoch: this.#permissionEpoch,
+      endogenous: { permission: input.permission, validate: input.validate } });
+    return { sessionId: this.sessionId, requestId: input.decisionId, deliveryId, status: 'ready', recall: [], appraisalStatus: 'not-applied' };
+  }
   #cancelProactive():void {
     this.stopScheduler();if(this.#pendingKind==='proactive')this.#pending?.abort();
     for(const entry of this.#deliveries.values())if(entry.value.kind==='proactive')entry.status='cancelled';
@@ -232,6 +297,7 @@ export class CoupledSession {
       let feedback: DeliveryEntry | undefined;
       if (input.feedback) {
         feedback = this.#delivery(input.feedback.deliveryId);
+        if (feedback.endogenous) fail('E2_FEEDBACK_UNSUPPORTED');
         if (feedback.status !== 'acknowledged') fail('FEEDBACK_REQUIRES_DELIVERED_RECEIPT');
         if (feedback.feedbackId !== null) fail('DELIVERY_FEEDBACK_ALREADY_CONSUMED');
       }
@@ -351,11 +417,15 @@ export class CoupledSession {
     finally { if (this.#pending === controller) { this.#pending = null;this.#pendingKind=null; this.#pendingSchedulerVersion = null;this.#idleWaiter?.(); } }
   }
   #delivery(id: string): DeliveryEntry {
-    const entry = this.#deliveries.get(id),now = this.#guard(true,false,entry?.value.kind==='proactive');
+    const entry = this.#deliveries.get(id),now = this.#guard(!entry?.endogenous,false,entry?.value.kind==='proactive');
     if (!entry || entry.status === 'cancelled' || entry.generation !== this.#generation || entry.contextRevision !== this.#contextRevision)
       fail('DELIVERY_STALE');
     // Delivered receipts remain usable for feedback; undelivered payloads expire.
     if (entry.status !== 'acknowledged' && now >= entry.value.expiresAtMonotonicMs) { entry.status = 'cancelled'; fail('DELIVERY_EXPIRED'); }
+    if (entry.endogenous) {
+      this.#validateTextPermission(entry.endogenous.permission, now);
+      if (now >= entry.value.expiresAtMonotonicMs || entry.endogenous.validate() !== true) fail('E2_STALE');
+    }
     this.#validateRefs(entry.value.sourceRefs); return entry;
   }
   takeDelivery(id: string): LocalDelivery {
@@ -364,11 +434,12 @@ export class CoupledSession {
     this.#delivery(id); // Slow synchronous fsync cannot extend the original TTL.
     entry.status = 'taken'; return structuredClone(entry.value);
   }
-  acknowledgeDelivery(id: string): {deliveryId:string;status:'acknowledged'|'duplicate'} {
+  acknowledgeDelivery(id: string, onCommitted?: () => void): {deliveryId:string;status:'acknowledged'|'duplicate'} {
     const entry = this.#delivery(id);
     if (entry.status === 'acknowledged') return {deliveryId:id,status:'duplicate'};
     if (entry.status !== 'taken') fail('DELIVERY_NOT_TAKEN');
     this.#durable?.terminal(entry.value.requestId,'acknowledged',id);
+    onCommitted?.();
     this.#delivery(id);
     entry.status = 'acknowledged'; this.#lastAcknowledgedDeliveryId=id;
     if(entry.value.kind==='user'&&entry.permissionEpoch===this.#permissionEpoch){

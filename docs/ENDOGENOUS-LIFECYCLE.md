@@ -53,7 +53,7 @@ node --max-old-space-size=128 scripts/endogenous-smoke.ts
 
 smoke 是独立真实 Node 进程、真实 referenced timer 和固定合成端口：无外部输入 boot → REST → 自行 wake → NOOP → 预算停止 → `beforeExit` 校验 → 正常退出。只打印最小技术 metadata；不运行 Harness、真实模型、工具、声音、数据库、用户数据或训练。它证明调度与退出，不证明模型行为质量或表达送达。
 
-E1b 的持久控制入口见下节；外部端口的 exactly-once、跨进程未决调用消解和真实宿主生命周期接线仍未提供。E2：真实模型决策、驱动／目标／反思、表达／工具执行、选择质量和隐私披露尚未提供；B Hybrid 的 memory-proposal、C 语音通道均没有在此接通。没有训练或意识／主观体验证明。作者专项、独立审查、whole 和提交 CI 分别验收；本文件不预报后续层通过。
+E1b 的持久控制入口见下节；外部端口的 exactly-once、跨进程未决调用消解仍未提供。下方 E2 文本切片增加显式文本 profile 与受信 Anchored Host 装配；真实模型选择质量、驱动／目标／反思、工具执行和生产部署仍未验收。B Hybrid 的 memory-proposal、C 语音通道没有混入决策端口。没有训练或意识／主观体验证明。作者专项、独立审查、whole 和提交 CI 分别验收；本文件不预报后续层通过。
 
 E1a 历史本机验证（2026-10-28）：作者最终专项64/64、strict TypeScript exit0、独立实际 Astra max 审查无剩余可复现 P1/P2；上述零输入真实 Node/timer 合成 smoke 正常退出。冻结执行源码的最终完整测试1216/1216通过，失败／取消／跳过／todo均0，155064.4691ms；四文件绑定在 whole 前后未变。该历史本机回执记录时提交自然 CI 尚待结果。这些证据只覆盖有界进程内合成调度与退出，不代表真实模型自主选择、跨重启连续性或 Host 集成；不替代下方 E1b 候选的独立验收。
 
@@ -104,3 +104,41 @@ E1b 的作者验证入口是 `test/endogenous-durable.test.ts`，加原64项 RAM
 E1b CI历史分层补充：上述完整1242/1242属于候选 `89ad9b7`。其首次自然CI在浮动Node24.21.0上因新测试无条件调用物理repack而触发既有 `REPACK_RUNTIME` 拒绝，暴露的是测试对实际能力的假定。随后仅测试增加实际runtime能力分支：supported保留原metadata检查，unsupported要求精确拒绝、零VACUUM且源字节不变，后半migration/rekey仍无条件执行；生产门和所有产品src字节均保持不变。独立原max仅审该test delta后无P1/P2；strictTS exit0和原生26/26专项通过，unsupported分支仍待新head自然CI。没有为test-only适配重复whole。首个sandbox TEMP路径失败仅保留TOOL_OUTPUT_ONLY事实，原沙箱日志不可恢复，不冒称已有原生日志；原CI失败及旧完整测试证据保留。
 
 后续浮动Node24.22.1自然CI已以实际 `UNSUPPORTED_REAL_REFUSAL` 分支通过原combined及后半migration/rekey。其后macOS正向legacy fixture因 `/var` 别名祖先被原路径门拒绝；仅两行测试修订以 `realpathSync.native` 规范新建fixture根，原symlink/path/runtime拒绝门和所有产品src不变。原max两行差量审查关闭，当前strictTS0／原生26通过；macOS通过与否只由此新head自然CI验收，旧失败保留，未重跑whole。
+
+## E2：显式短文本选择与受信 Anchored Host
+
+`createEndogenousTextControl(scope, limits)` 显式创建 `text-choice-v1`；`openEndogenousTextControl(port, acceptText, settled?)` 绑定同一 Vault 的单 owner。旧创建／打开方法仍只接受 `rest-noop-v1`，不会转换旧记录、换 ID 或清额度。新 profile 复用原控制键、版本、256-byte 每调用预扣、16KiB 总记录上界和最多64条消费；仅新增不含正文的 `TEXT` 终态。
+
+新 profile 同时接受原 REST/NOOP，另允许唯一闭合文本形式：
+
+```json
+{"version":1,"choice":"TEXT","text":"一条短文本。"}
+```
+
+正文最多160 UTF-8 bytes，整个 JSON 仍最多256 bytes；TEXT 不接受 `nextWakeInMs`、Proposal、Evidence 或其他字段。正文仅保留在有界 RAM delivery 中。端口收到只读 `deadlineMonotonicMs` 和同步 `validateCurrent()`；期限在最初 dispatch 时算定，后续微任务与慢持久化均不能延长它。只有原 raw 实际 settle、严格解析、同步持久 terminal 成功并复核 wall／原 monotonic deadline 后，才调用一次受信同步 acceptance hook。仅 literal `true` 表示 hook 接受；普通 Promise 拒绝被消费，不等待、不把异步值视为许可。拒绝／异常不退款、不重试、不污染正常 Core。
+
+`src/endogenous-text.ts` 构造独立 `endogenous-text-choice` 任务，通过共享 `RawTextPort.generate()` 获得覆盖 fetch、body 读取及 cancel cleanup 的 native Promise。它先退出 Vault 同步 guard，再检查当前权限并调用端口；发包前再次检查原期限。不能用 Hybrid `propose()`、HTTP interaction 或 DSH command 的提前超时 Promise 代替 raw settlement。普通 native Promise 无法证明远端已停止；违反 raw 合同的同步 throw／不可观察返回值保守保持 held。HybridProfile/digest 只是声明身份，`DECLARATION_ONLY / NOT_AUTHENTICATED`，不证明实际加载资产；文本不使用 memory-proposal wire，也不创建第二个 Hybrid 调度或账本。
+
+`src/anchored-text-host.ts` 提供真实可调用的进程内装配：
+
+```ts
+vault.createEndogenousTextControl(scope, limits); // 单独的显式管理授权，仅首次
+const host = new AnchoredTextHost({ vault, scope, raw, profile, resources, clock });
+// clock 必须与这个 Vault 的 monotonic clock 相同；resources/raw 由宿主长期持有。
+host.grantCommunicationWindow('fresh-permission-id', 10_000, 'trusted-stdio');
+host.resume(); // 内部运行许可；不伪造人在场或人类输入
+// onReady/read().lastReady 仅返回 delivery metadata。
+const delivery = host.takeDelivery(deliveryId);
+// 受信原生消费者实际完成后才调用：
+host.acknowledgeNativeCompletion(deliveryId);
+```
+
+Host 在离开 dispatch guard 后用原 `decisionId` 调用既有 Safety `claim/reserve`，每次慢写后复核原期限。准备、take 和 ACK 继续写既有 `ready/taken/acknowledged`，并在写后重新核 scope/runtime、窗口和期限。REST/NOOP 或未投递 TEXT 的 Safety `failed` 在已预扣时保守归 `unknown`；这表示未完成投递，和 E1 已知 REST/NOOP/TEXT 选择是不同事实。已真实完成的 native ACK 若提交后才越期，持久 acknowledged 事实不可逆，接口仍拒绝、不续期、不重放。没有为清账制造 ready 或 ACK。
+
+TEXT 通信窗口使用独立 RAM `CompanionWindowPolicy`，不修改旧 human-ACK grant 门、不修改 observed presence、不唤醒旧主动交流 scheduler。dispatch 捕获原 window id/generation、权限 epoch（或无窗口）及原到期；新 grant 不复活旧文本。没有窗口仍可决策，结果不投递。`clearCommunicationWindow()` 表示 off/quiet；pause/reset/close 撤销窗口与待投递文本，close 是明确断连。共享 CoupledSession 收到显式 `quiet:true` 时也总撤销 TEXT 窗口，包括旧 quiet 已为 true 的情况；仅 availability 变化会使旧请求／delivery 失效，但保留尚有效的独立窗口供未来请求使用。available=false 本身不是断连。
+
+模型输出不经过 `submit()`，不创建人类 Event/Evidence、memory Proposal、appraisal、反馈或奖励。Coupled 新 prepare 入口只接收受信的已接受文本，take/ACK 使用独立的 durable TEXT 证明和原期限，不误用只适用于 deciding 的 dispatch validator。最后一次配额的成功 TEXT 可以在原许可内完成一次投递；显式 pause/close 仍撤销它。崩溃／重开不恢复正文、通信窗口或原 monotonic deadline，普通重开默认 paused；未决 UNKNOWN/held 不退款、不通过新 owner/ID 清除。仅原同进程实际 settle 观察者可清 held。
+
+交付证明还必须通过本次接受的 RAM seal：同步 hook 活动期间可用于 prepare，只有 hook 返回 literal `true` 后才继续有效；false、throw、Promise/thenable 返回立即撤销。显式 pause/close、fault 和重绑定也撤销已保存证明，不能只凭历史 TEXT 条目恢复许可。自动 CAPACITY 停止保留已接受末次文本的原到期许可；之后显式 close 会关闭 RAM owner、停止 timer 并撤销证明，持久控制若已 EXHAUSTED 则保留该不可逆停止态，重开仍拒绝，不改变消费或 held。`onReady` 元数据通知在 E1 settlement 临界区退出后的微任务中发出，先复核同一 ready、原窗口／期限与交付证明；已撤销的排队通知直接丢弃。通知可以同步调用 Host pause/close，普通异步回调拒绝被消费，不等待、不续期，也不改变 raw settlement。
+
+作者入口 `test/endogenous-text.test.ts` 使用 P4/schema2 的真实新建文件 Vault、固定合成时钟、受控故障和真实 localhost HTTP：无输入/无窗口、明确窗口、慢 claim/reserve/terminal/ready/taken/ACK、取消后 cleanup 挂起、purge/consent/runtime fencing、晚 settle、正常及未决重开、旧 profile 拒绝 TEXT。合成 native consumer 完成后 ACK 只验证接口组合，不是 DSH 部署或真实模型选择质量。当前 DSH stdio 仍使用旧 M2，本切片没有迁移该生产入口，也没有运行真实模型、音频、训练或正式质量实验。独立审查、whole 与跨平台 CI 仍需按新候选验收。
