@@ -109,10 +109,11 @@ export type ControlAccess = {
 };
 export function bindControl(access: ControlAccess, identity: EndogenousIdentity, port: EndogenousDecisionPort | EndogenousTextPort,
   monotonic: () => number, profile: EndogenousProfile = 'rest-noop-v1', acceptText?: DurableTextAcceptance,
-  settled?: EndogenousSettlement): { session: DurableEndogenousSession; owner: EndogenousOwner } {
+  settled?: EndogenousSettlement, expectedScope?: Scope): { session: DurableEndogenousSession; owner: EndogenousOwner } {
   let encoded = access.read() ?? fail('E1_CONTROL_MISSING'), record = parseControl(encoded);
   assertControlIdentity(record, identity);
   if (record.profile !== profile) fail('E1_CONTROL_PROFILE');
+  if (expectedScope && !scopeMatches(record, expectedScope)) fail('E1_CONTROL_SCOPE');
   if (!scopeMatches(record, access.scope(record.scopeId))) fail('E1_CONTROL_SCOPE');
   if (record.permitHeld || record.stop === 'RECONCILE_REQUIRED') fail('E1_RECONCILE_REQUIRED');
   if (['FENCED','FAULTED','EXHAUSTED'].includes(record.stop)) fail('E1_CONTROL_STOPPED');

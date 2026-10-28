@@ -61,7 +61,7 @@ export class AnchoredTextHost {
         try { void Promise.resolve(options.onReady?.(structuredClone(ready))).catch(() => {}); } catch { /* Ready remains locally available. */ }
       });
       return true;
-    }, entry => { if (this.#offered?.decisionId === entry.decisionId && !this.#offered.ready) this.#failUnfinished(); });
+    }, entry => { if (this.#offered?.decisionId === entry.decisionId && !this.#offered.ready) this.#failUnfinished(); }, scope);
   }
   #failUnfinished(): void {
     const attempt = this.#offered;

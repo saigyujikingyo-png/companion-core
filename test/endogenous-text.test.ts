@@ -329,4 +329,24 @@ for (const action of ['false', 'promise', 'throw', 'pause', 'close', 'true', 'la
   });
 }
 
+test('Host scope must match durable control before owner/fence consumption; valid owner can still deliver', async t => {
+  const f = fixture(t, 1), other = f.vault.store.ensureScope({ ...who, relationshipId: 'other-current-scope' });
+  const current = f.vault.store.scope(f.scope.id), encoded = f.vault.store.endogenousControl(), head = f.vault.head;
+  let calls = 0;
+  const raw: RawTextPort = { generate: async input => { assert.equal(input.validateBeforeSend(), true); calls++; return response; } };
+  const resources = () => new InteractionResources(new RequestBudget({ total: 16, hourly: 16, daily: 16 }, f.clock.monotonic));
+  for (const scope of [other, { ...current, generation: current.generation + 1 },
+    { ...current, consentRevision: current.consentRevision + 1 }, { ...current, runtimeEpoch: current.runtimeEpoch + 1 }]) {
+    assert.throws(() => new AnchoredTextHost({ vault: f.vault, scope, raw, profile, resources: resources(), clock: f.clock.monotonic }), { code: 'E1_CONTROL_SCOPE' });
+    assert.equal(f.vault.store.endogenousControl(), encoded); assert.deepEqual(f.vault.head, head);
+    assert.equal(record(f).runFence, f.control.runFence); assert.equal(record(f).entries.length, 0);
+    assert.equal(f.vault.reserved, 0); assert.equal(f.vault.status.unknownRequests, 0); assert.equal(calls, 0);
+  }
+  const h = f.host(raw); h.grantCommunicationWindow('original', 10_000, 'trusted-stdio'); h.resume(); await tick();
+  const ready = h.read().lastReady!; assert.ok(ready); assert.equal(calls, 1);
+  assert.equal(h.takeDelivery(ready.deliveryId).text, '合成短文本。'); await tick();
+  assert.equal(h.acknowledgeNativeCompletion(ready.deliveryId).status, 'acknowledged');
+  assert.equal(f.vault.reserved, 1); noHumanWrites(f);
+});
+
 after(() => console.log(JSON.stringify({ evidence: 'E2_TEXT_SYNTHETIC', maxRssKiB: process.resourceUsage().maxRSS, realModels: 0, deployment: 'NOT_RUN' })));
