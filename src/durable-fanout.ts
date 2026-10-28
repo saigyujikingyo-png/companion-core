@@ -143,9 +143,9 @@ export class DurableFanout {
     const asOf=this.#ctx().asOf;
     const rows=this.#all(`SELECT id,scope_id,type,revision,generation,consent_revision,status,created_at,valid_from,valid_to,
       json_extract(body,'$.mode') AS mode,json_extract(body,'$.speakerRole') AS speaker_role,json_extract(body,'$.occurredAt') AS occurred_at
-      FROM nodes WHERE scope_id=? ORDER BY id LIMIT ?`,scope.id,L.scopeNodes+1);
+      FROM nodes WHERE scope_id=? AND generation=? ORDER BY id LIMIT ?`,scope.id,scope.generation,L.scopeNodes+1);
     const edges=this.#all(`SELECT d.child_id,d.parent_id,d.parent_revision FROM dependencies d JOIN nodes n ON n.id=d.child_id
-      WHERE n.scope_id=? ORDER BY d.child_id,d.parent_id LIMIT ?`,scope.id,L.scopeEdges+1);
+      WHERE n.scope_id=? AND n.generation=? ORDER BY d.child_id,d.parent_id LIMIT ?`,scope.id,scope.generation,L.scopeEdges+1);
     if(rows.length>L.scopeNodes||edges.length>L.scopeEdges)fail('FANOUT_BASELINE_LIMIT');
     const nodes=new Map(rows.map(row=>[row.id as string,row])),parents=new Map<string,Array<{id:string;revision:number}>>();
     for(const edge of edges){const list=parents.get(edge.child_id as string)??[];list.push({id:edge.parent_id as string,revision:edge.parent_revision as number});parents.set(edge.child_id as string,list);}
