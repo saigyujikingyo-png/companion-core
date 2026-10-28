@@ -2,8 +2,10 @@ import { brotliCompressSync, brotliDecompressSync, constants } from 'node:zlib';
 import { MAX_IMAGE, record, sha } from './durable-codec.ts';
 import { fail } from './validation.ts';
 import type { StorageProfile } from './anchored-codec.ts';
+import {COLD_SAFETY_PROFILE} from './safety-format.ts';
 
 export const BLOCK_SIZE = 4096, MAX_CHAIN = 16, MAX_REPLAY_BYTES = 64 * 1024 * 1024;
+export const chainLimit=(profile:StorageProfile|undefined):number=>profile===COLD_SAFETY_PROFILE?15:MAX_CHAIN;
 export const MAX_PATCH = MAX_IMAGE + Math.ceil(MAX_IMAGE / BLOCK_SIZE) * 8;
 export type BlockEncoding = { mode: 'base' | 'replace' | 'xor'; codec: 'raw' | 'br4'; rawLength: number;
   targetLength: number; targetHash: string; baseHash: string | null; blockSize: 4096 };
@@ -27,7 +29,7 @@ function patches(image: Uint8Array, previous: Uint8Array, xor: boolean): Buffer 
 /** Exact serialized bytes, including partial final blocks. No SQL or FTS replay. */
 export function encodeBlocks(image: Uint8Array, previous: Uint8Array | null, profile: StorageProfile, allowDelta = true): EncodedBlocks {
   if (!(image instanceof Uint8Array) || image.length > MAX_IMAGE || (previous && previous.length > MAX_IMAGE)
-    || !['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1'].includes(profile)) fail('INCREMENTAL_LIMIT');
+    || !['blocks-br4-v1','full-br4-v1','blocks-br4-safety-br4-v1',COLD_SAFETY_PROFILE].includes(profile)) fail('INCREMENTAL_LIMIT');
   const full = compressed(Buffer.from(image));
   let best: EncodedBlocks = { descriptor: { mode:'base', codec:full.codec, rawLength:image.length,
     targetLength:image.length,targetHash:sha(image),baseHash:null,blockSize:BLOCK_SIZE },payload:full.payload };

@@ -2,7 +2,7 @@
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
 
-[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF8已合并。[IF8回执rollover](docs/RECEIPT-ROLLOVER.md)经独立1004/1004与TS、独立审查及精确head14/14跨平台CI后，由[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596e`，合并后7/7 CI通过。[IF9](docs/CAPACITY-REPACK.md)在独立树实现Store RAM镜像无损压实及显式Safety packed profile，作者24/24、关联204/204与TS0，两路独立审查及独立1028/1028与TS通过，221执行文件0漂移；LOCAL_VERIFIED / UNCOMMITTED，无IF9 CI。详见[当前证据](docs/AEMC-INFRA-EVIDENCE-IF9.md)。[长期容量](docs/LONG-TERM-CAPACITY-DESIGN.md)、[内在痕迹/工具原件/精确控制三域](docs/ADR-MEMORY-TOOL-BOUNDARY.md)及[I17](docs/BAYESIAN-RECONSTRUCTION-DESIGN.md)仍为设计路线。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
+[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF8已合并；IF8由[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596e`，合并后7/7 CI通过。[IF9](docs/CAPACITY-REPACK.md)的[PR #5](https://github.com/saigyujikingyo-png/companion-core/pull/5)在 `beed926` 完成独立审查及14/14跨平台CI，仍OPEN / DRAFT，未合并；浮动Node按实际SQLite能力验证拒绝，未放宽生产repack门。[IF10 Safety终态冷段](docs/SAFETY-COLD-SEGMENT.md)已实现，独立本机1098/1098与strict TS通过，228执行文件无漂移；当前为未提交候选，无IF10 CI，最终审查分层见[当前证据](docs/AEMC-INFRA-EVIDENCE-IF10.md)。[长期容量](docs/LONG-TERM-CAPACITY-DESIGN.md)中的Store整图与authority永久索引路由、[内在痕迹/工具原件/精确控制三域](docs/ADR-MEMORY-TOOL-BOUNDARY.md)及[I17](docs/BAYESIAN-RECONSTRUCTION-DESIGN.md)仍有设计缺口。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
 
 [IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；[IF5/IF6 本机组合证据](docs/AEMC-INFRA-EVIDENCE-IF6.md)保留874/874及成本测量，后续提交与合并结果以 IF7 证据为准。本批未启动训练。
 

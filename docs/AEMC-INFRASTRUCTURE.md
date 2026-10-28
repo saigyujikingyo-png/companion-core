@@ -1,12 +1,13 @@
-# AEMC 训练前基础设施总矩阵 / IF9
+# AEMC 训练前基础设施总矩阵 / IF10
 
-[当前开发状态](AEMC-DEVELOPMENT-STATUS.md)汇总18项目标。IF0–IF8已合并；IF8经独立1004/1004与TS、独立审查和head14/14 CI后由[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596e`，合并后7/7 CI通过。[IF9](CAPACITY-REPACK.md)在独立树实现Store镜像物理压实与显式Safety载体，作者24/24、关联204/204与TS0、两路独立源码审查通过，独立1028/1028与TS通过、221执行文件0漂移；LOCAL_VERIFIED / UNCOMMITTED，无IF9 CI。详见[当前证据](AEMC-INFRA-EVIDENCE-IF9.md)。IF9推进I01/I03；[三域决议](ADR-MEMORY-TOOL-BOUNDARY.md)与[长期容量设计](LONG-TERM-CAPACITY-DESIGN.md)不关闭其余目标。I06质量实验未启动，本轮未部署或训练。
+[当前开发状态](AEMC-DEVELOPMENT-STATUS.md)汇总18项目标。IF0–IF8已合并；IF8的[PR #4](https://github.com/saigyujikingyo-png/companion-core/pull/4)合并为 `ffa596e`，合并后7/7 CI通过。[IF9 PR #5](https://github.com/saigyujikingyo-png/companion-core/pull/5)在 `beed926` 完成独立审查及14/14跨平台CI，仍OPEN / DRAFT、未合并。[IF10](SAFETY-COLD-SEGMENT.md)实现Safety终态冷段，两位独立Astra max审查无剩余P1/P2；Sol独立本机1098/1098与strict TS通过，228执行文件无漂移。IF10为未提交候选，无IF10 CI，详见[当前证据](AEMC-INFRA-EVIDENCE-IF10.md)。IF9/IF10推进I01/I03；[三域决议](ADR-MEMORY-TOOL-BOUNDARY.md)与[长期容量设计](LONG-TERM-CAPACITY-DESIGN.md)不关闭其余目标。I06质量实验未启动，本轮未部署或训练。
 
-日期：2026-10-27。总状态：**IN_PROGRESS / TRAINING_NOT_ADMITTED**。本文件是完整范围的实施台账。[IF0](AEMC-INFRA-EVIDENCE-IF0.md)、[IF1](AEMC-INFRA-EVIDENCE-IF1.md)、[IF2](AEMC-INFRA-EVIDENCE-IF2.md)保留原快照证据；新 [增量存储/压实](INCREMENTAL-STORAGE.md)与[旧M2导入](LEGACY-M2-IMPORT.md)落实当前本机子集。任何切片都不替代全部目标。
+日期：2026-10-28。总状态：**IN_PROGRESS / TRAINING_NOT_ADMITTED**。本文件是完整范围的实施台账。[IF0](AEMC-INFRA-EVIDENCE-IF0.md)、[IF1](AEMC-INFRA-EVIDENCE-IF1.md)、[IF2](AEMC-INFRA-EVIDENCE-IF2.md)保留原快照证据；新 [增量存储/压实](INCREMENTAL-STORAGE.md)与[旧M2导入](LEGACY-M2-IMPORT.md)落实当前本机子集。任何切片都不替代全部目标。
 
 ## 来源与证据
 
-- [当前IF9与IF8发布证据](AEMC-INFRA-EVIDENCE-IF9.md)：PR #4在精确head14/14 CI及独立审查后合并，merge7/7 CI通过；IF9基于该merge冻结221执行文件。历史[IF8候选](AEMC-INFRA-EVIDENCE-IF8.md)219文件/1004项与[IF7候选](AEMC-INFRA-EVIDENCE-IF7.md)原136文件/893项、WF2整合162文件/984项分别保留，不相加或倒写历史时态。
+- [当前IF10及IF9发布状态](AEMC-INFRA-EVIDENCE-IF10.md)：IF9精确head14/14 CI与审查通过，PR仍草稿；IF10本机1098/1098、TS及两位独立审查通过，源绑定和成本阴性分列，无IF10 CI。
+- [历史IF9候选与IF8发布证据](AEMC-INFRA-EVIDENCE-IF9.md)：PR #4在精确head14/14 CI及独立审查后合并，merge7/7 CI通过；IF9基于该merge冻结221执行文件。历史[IF8候选](AEMC-INFRA-EVIDENCE-IF8.md)219文件/1004项与[IF7候选](AEMC-INFRA-EVIDENCE-IF7.md)原136文件/893项、WF2整合162文件/984项分别保留，不相加或倒写历史时态。
 - [IF5/IF6 历史组合证据](AEMC-INFRA-EVIDENCE-IF6.md)：874/874、typecheck、两位独立终审与固定协议成本测量通过；相对完整br4的hot逻辑新增字节分别减少47.40%/49.08%/49.64%。原134源码文件冻结及当时尚未执行CI的状态保留；不把旧成本测量当IF7的新测量。
 - [IF3/IF4 历史组合证据](AEMC-INFRA-EVIDENCE-IF4.md)：822/822 whole、typecheck、两位独立终审和最终三 arm 成本测量通过。相对同 codec 完整快照，各工作负载减少47.38%/49.14%/49.58% hot逻辑文件增量；保留源文件，未做GC。该本机合成接受不关闭矩阵其余缺口。
 - 开工基线：`d23921f5abc5be10f15883a1a5289af842299b3f`。manual worktree 分支：`codex/aemc-infrastructure-20261027`；已核 top-level、clean 初态及 log-5。它不是 app-managed worktree。
@@ -21,9 +22,9 @@
 | ID / 训练前目标 | 冻结基线中已有的实现或证据 | 当前缺口与实施状态 | 版本化合同 / 验收出口 |
 |---|---|---|---|
 | I00 来源、身份、当前同意与撤销权威 | Store scope/generation/consent/runtime、来源 DAG、撤销级联；SP0A 当前来源复核；WF0 仅声明 lint | 跨设备认证、真实使用权证明、全局家族 registry 未完成；已有局部实现 | AuthorityContext/0.1、SourceUseDecision/0.1；跨租户/ABA/时钟/过期/缺祖先拒绝；角色不替代权限 |
-| I01 十年存储与可恢复运维 | exact外锚/PREPARED；[v3](INCREMENTAL-STORAGE.md)块差分/有界链；[IF6](AUTHORITY-CAPACITY.md)容量门；[IF7](CAPACITY-INSPECTION.md)分层观测；[IF8](RECEIPT-ROLLOVER.md)回执rollover；[IF9](CAPACITY-REPACK.md)Store物理压实/Safety packed载体 | **本机有界子集已实现**；16MiB image/256MiB代际/4096 commits/Safety8192、authority64MiB读界/22369621B默认新写界/128段仍在；serialize仍整库，永久索引/冷段路由/GC/物理authority切换/十年资格未完成 | 保留迁移前旧加密源、receipt/幂等键、UNKNOWN及撤销；内在痕迹有损不适用控制面；检查非写许可，旧无预算pending仍unresolved；完整成本/RPO/RTO另测 |
+| I01 十年存储与可恢复运维 | exact外锚/PREPARED；[v3](INCREMENTAL-STORAGE.md)块差分/有界链；[IF6](AUTHORITY-CAPACITY.md)容量门；[IF7](CAPACITY-INSPECTION.md)分层观测；[IF8](RECEIPT-ROLLOVER.md)回执rollover；[IF9](CAPACITY-REPACK.md)Store物理压实/Safety packed载体；[IF10](SAFETY-COLD-SEGMENT.md)不可变终态冷段与完整恢复闭包 | **本机有界子集已实现**；16MiB image/256MiB代际/4096 commits/Safety8192、authority64MiB读界/22369621B默认新写界/128段仍在；serialize仍整库，authority永久索引路由/Store整图冷迁/GC/物理authority切换/十年资格未完成 | 保留迁移前旧加密源、receipt/幂等键、UNKNOWN及撤销；内在痕迹有损不适用控制面；检查非写许可，旧无预算pending仍unresolved；完整成本/RPO/RTO另测 |
 | I02 密钥托管、迁移与回滚 | 独立DEK/稳定ingress、recipient rewrap、current-state rekey、anchored源fencing；[旧M2导入](LEGACY-M2-IMPORT.md)含schema3来源唯一槽与实际准入门 | **本机协议已实现**；production/远程/硬件custody与真实跨机托管未完成；authority须独立防回滚，旧M2副本不受fence | 旧native ID/额度/反馈/撤销保持；新DEK不同，legacyKey保留作HMAC；receipt明确非latest/非legacy fencing，不称历史crypto-erasure |
-| I03 独有文件格式与压缩的总收益 | Scene JSON、TJ0/Q0阴性保留；v3块增量+Brotli4与同codec full/v2 raw对照；IF7分层占用、IF8回执段/page复用、IF9镜像碎片压实和Safety完整载体计量 | **存储协议子集已采用**；内在痕迹按类型/任务失真编码见[三域决议](ADR-MEMORY-TOOL-BOUNDARY.md)，尚未实现；不是新通用codec或认知质量成果，长期成本仍开放 | CodecProfile/0.1、CostQualityTrial/0.1；完整carrier/索引/字典/decoder/backup计费；空Safety可能变大，结构压力与合法API历史分列；freelist非磁盘回收 |
+| I03 独有文件格式与压缩的总收益 | Scene JSON、TJ0/Q0阴性保留；v3块增量+Brotli4与同codec full/v2 raw对照；IF7分层占用、IF8回执段/page复用、IF9镜像碎片压实和Safety完整载体计量；IF10完整冷段维护/后续写入/备份四组观察 | **存储协议子集已采用**；内在痕迹按类型/任务失真编码见[三域决议](ADR-MEMORY-TOOL-BOUNDARY.md)，尚未实现；不是新通用codec或认知质量成果，长期成本仍开放 | CodecProfile/0.1、CostQualityTrial/0.1；完整carrier/索引/字典/decoder/backup计费；空Safety可能变大；IF10三组负收益、一个有条件应用写入收益且备份变大；结构压力与合法API历史分列；freelist非磁盘回收 |
 | I04 稳定概念地址与跨模型映射 | Scene 固定catalog、精确概念/profile引用与opaque residual声明 | **DESIGN_ONLY**：概念registry冲突/版本/别名/撤销、模型特征对齐、重嵌入与不可映射项；当前不能换模型直接复用latent | ConceptRevision/0.1、FeatureBinding/0.1；模型/encoder/layer/basis/adapter/calibration全pin；冲突、漂移、弃用、失配拒绝 |
 | I05 durable多消费者 | [schema2](DURABLE-FANOUT.md)编号迁移、双metadata投影/checkpoint、TTL/retention与v3持久化；[IF5](DURABLE-RETRIEVAL.md)完整consumer选集已接bind/refresh/query/resolve | **有界持久metadata及本地检索接线已实现**；无历史逐revision日志、外部索引持久协议、向量/完整scene引擎或生产宿主接线；RAM重建成本仍在 | 单guard当前metadata/body/祖先一致读，consumer完整进度与能力失效，超AR0预算全拒绝；TTL写被capacity/pending拒绝时无stale结果；C04完整目标仍开放 |
 | I06 BM25/向量/PPR及多跳质量 | AR0有界当前memory召回/同版RAM投影；不是AR1实验 | **NOT_STARTED**：冻结query/家族/时间切分、真实embedding、BM25、PPR、mean与sampled seeds质量/总成本对照 | RetrievalEvaluation/0.1；Recall@k/nDCG/证据覆盖/虚假边/置信校准、p50/p95/RAM；删除一致性独立硬门 |
@@ -45,7 +46,7 @@
 flowchart TD
   A[I00 来源 同意 撤销 身份] --> B[I01 I02 存储 密钥 备份 外锚]
   B --> C[I05 durable fanout 与一致快照]
-  B --> R[IF7观测 IF8回执 IF9镜像与Safety压实]
+  B --> R[IF7观测 IF8回执 IF9压实 IF10终态冷段]
   C --> D[I04 I07 概念 资产 多模态]
   C --> E[I06 检索质量与成本]
   B --> F[I09 状态与关系恢复]
