@@ -1,6 +1,7 @@
 import type {VaultHead} from './anchored-codec.ts';
 import type {FANOUT_LIMITS} from './fanout-types.ts';
 import type {SafetyColdDescriptor} from './safety-format.ts';
+import type {Counts} from './authority-cold-format.ts';
 
 export type FrozenData<T> = T extends object ? {readonly [K in keyof T]:FrozenData<T[K]>} : T;
 /** Only call on newly assembled metadata, never caller-owned objects or buffers. */
@@ -13,7 +14,7 @@ export function freezeCapacity<T>(value:T):FrozenData<T>{
 }
 export const CAPACITY_DIRECTORY_ENTRY_LIMIT=16384;
 export type AuthorityCapacity=FrozenData<{
-  version:1;schemaVersion:2|3|4;
+  version:1;schemaVersion:2|3|4|5;
   database:{fileBytes:number;pageSize:number;pageCount:number;pageBytes:number;freelistPages:number};
   sidecars:{journalBytes:number;walBytes:number;shmBytes:number;totalBytes:number};
   totalFileBytes:number;
@@ -26,6 +27,9 @@ export type AuthorityCapacity=FrozenData<{
     limits:{receipts:number;decodedBytes:number;encodedBytes:number;segments:number};
   };
   legacyRegistry:{applicable:false;count:null}|{applicable:true;count:number};
+  coldRouting?:{epoch:number;slot:number|null;hot:Counts;cold:Counts;currentBytes:number;retainedBytes:number;retiredBytes:number;stagingBytes:number;otherSlotBytes:number;occupiedSlots:number;files:number;
+    slots:{slot:number;intentBytes:number;payloadBytes:number}[];limits:{slotReserveBytes:number;workspaceBytes:number;sharedBytes:number;payloadBytes:number;slots:number};
+    workspacePeakBytes:number;usedPages:number;blockers:Array<'SLOTS_FULL'>};
   blockers:Array<'GLOBAL_PENDING'|'CURRENT_EXTENT_OVER_WRITE_LIMIT'>;
 }>;
 export type MemoryImageCapacity=FrozenData<{
