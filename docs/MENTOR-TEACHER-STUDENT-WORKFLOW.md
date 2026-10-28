@@ -1,5 +1,7 @@
 # 导师管理与独立教学协调：Student 工作流 v2
 
+2026-10-28 新供料实现见 [CorpusProduction/0.1](CORPUS-PRODUCTION.md)；共同人格/目标以 [FACTORY-BASELINE](FACTORY-BASELINE.md)为入口。现行独立 TeachingCoordinator、教师均按精确用途准入，ResearchMentor职责仍按本文v2，不把样本评分改名为一般架构。
+
 2026-10-26。**DESIGN_ONLY / STUDENT_LLM_TRAINING_NOT_RUN / QUALITY_NOT_EVALUATED**。本修订替代此前摘要的导师职责定义；旧冻结文件保留。本文只含一般架构和公开来源，不含账户状态、余额、私人路径、真实对话或训练原件。
 
 ## 职责与材料权限
