@@ -8,6 +8,10 @@ The older `/0.1` profile, synthetic qualification and stored event bytes remain
 unchanged. Frozen jobs still require their matching source/build closure; this is
 not a migration or a way to relabel earlier synthetic output.
 
+The subsequent [S4 trusted host](TEACHING-CYCLE-HOST.md) adds the explicit native
+worker/controller and fixed-authority finalization/recovery seam. Its configuration,
+synthetic and actual-run acceptance are separate from this S3 implementation.
+
 ## Real-plan admission
 
 `TeachingCurriculumPlan/0.2` freezes `REAL_MENTOR_PLAN`, the ordered child production

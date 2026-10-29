@@ -13,6 +13,7 @@ import type { QaIndexArchiveDescriptor,QualityIndexArchive } from './corpus-qa-i
 import { assembleCycleIndexes } from './corpus-qa-index.ts';
 import type { ScopedDedupIndex } from './corpus-qa-index.ts';
 import type { ScopedRef } from './corpus-production-types.ts';
+import type { ProductionStore } from './corpus-production-store.ts';
 import { CorpusResourceScheduler } from './corpus-resource-scheduler.ts';
 import type { TeachingCycleStore } from './teaching-cycle-store.ts';
 import { cycleActiveChildren,cycleAuditId,validateCurriculumPlan } from './teaching-cycle-types.ts';
@@ -28,6 +29,7 @@ export type CycleProductionPorts=ProductionRunPorts & {runtimeRoot:string;author
 export type TeachingCyclePorts={store:TeachingCycleStore;plan:CurriculumPlan;owner:CycleOwner;signal?:AbortSignal;
   checkChildMetadata:(child:ChildState)=>void;
   openProduction:(child:ChildState)=>Promise<CycleProductionPorts>;
+  finalizeProductionSource?:(child:ChildState,production:CycleProductionPorts)=>Promise<ProductionStore>;
   openAudit:(child:ChildState,selection:AuditSelection)=>Promise<QaRunPorts>;
   archiveAudit:(child:ChildState,qa:QaRunPorts)=>Promise<QualityIndexArchive>;
   openIndex:(child:ChildState,descriptor:QaIndexArchiveDescriptor)=>QualityIndexArchive};
@@ -82,17 +84,26 @@ export async function runTeachingCycle(ports:TeachingCyclePorts){
       try{check();let child=childNow(id);if(child.stage==='PENDING'){stage(store,child,'PRODUCTION');child=childNow(id);}
         if(child.stage==='PRODUCTION'||child.stage==='TOKENS'){
           production=await ports.openProduction(child);check();const spec=production.store.spec;if(spec.version!=='CorpusProduction/0.2'||hash(canonical(spec))!==child.productionSpecDigest||spec.unitCount!==child.plannedUnits||plan.version==='TeachingCurriculumPlan/0.2'&&spec.objectiveDigest!==plan.approvedObjectiveDigest)stop('TC_CHILD_BINDING');
+          if(production.store.mode==='inspect'&&(store.spec.version!=='TeachingCycle/0.2'||child.stage!=='TOKENS'||production.store.check(false).status!=='REVOKED'))stop('TC_FINALIZED_SOURCE');
           if(child.stage==='PRODUCTION'){const execution=scheduler.execution(id,()=>production!.store.check());const result=await runCorpusProduction(spec,{...production,...(signal?{signal}:{}),execution});check();if(result.status!=='COMPLETED')stop('TC_PRODUCTION_FENCED');verifyProduction(production.store);stage(store,child,'TOKENS');child=childNow(id);}
-          check();measureProductionTokens(production.store,production.tokenizer.profile,production.tokenizer.pythonPath);check();exportProduction(production.store);verifyProductionExport(production.store);
+          check();
+          if(production.store.mode==='inspect'){
+            if(store.spec.version!=='TeachingCycle/0.2'||child.stage!=='TOKENS'||production.store.check(false).status!=='REVOKED'||verifyProduction(production.store).status!=='COMPLETED')stop('TC_FINALIZED_SOURCE');
+            verifyProductionExport(production.store);
+          }else{
+            measureProductionTokens(production.store,production.tokenizer.profile,production.tokenizer.pythonPath);check();exportProduction(production.store);verifyProductionExport(production.store);
+            if(ports.finalizeProductionSource){const head=production.store.check(false).head;production.store=await ports.finalizeProductionSource(child,production);check();if(production.store.mode!=='inspect'||production.store.check(false).status!=='REVOKED'||production.store.check(false).head!==head||canonical(production.store.spec)!==canonical(spec)||verifyProduction(production.store).status!=='COMPLETED')stop('TC_FINALIZED_SOURCE');verifyProductionExport(production.store);}
+          }
           const selection=prepareQualitySelection({store:production.store,sourceRuntimeRoot:production.runtimeRoot,sourceAuthorityPath:production.authorityPath,seed:hash(canonical({cycle:store.spec.cycleId,child:id})),authorize:()=>{check();production!.authorizeSelection();}}),selectionRef=saveSelection(store,selection,child,ports.checkChildMetadata);
           let productionAccountingRef=child.productionAccountingRef;
           if(store.spec.version==='TeachingCycle/0.2'){const accounting=deriveChildAccounting(id,verifyProduction(production.store),{committedHead:selection.source.committedHead,ledgerDigest:selection.source.ledgerFileDigest},bucket=>production!.store.port(bucket));childMetadata(ports.checkChildMetadata,child);productionAccountingRef=store.put('meta','teaching-child-accounting',canonical(accounting));}
           production.store.close();production=undefined;stage(store,child,'QA',{selectionRef,...(productionAccountingRef?{productionAccountingRef}:{})});child=childNow(id);
         }
         if(child.stage==='QA'||child.stage==='INDEX'){
-          if(!qa)qa=await ports.openAudit(child,loadSelection(store,child.selectionRef!,child,ports.checkChildMetadata));check();if(qa.store.spec.version!=='CorpusQualityAudit/0.2'||qa.store.spec.auditId!==cycleAuditId(store.spec.cycleId,id)||plan.version==='TeachingCurriculumPlan/0.2'&&qa.store.spec.objectiveDigest!==plan.approvedObjectiveDigest)stop('TC_CHILD_POLICY');const auditDigest=hash(canonical(qa.store.spec));if(child.auditSpecDigest===null){store.apply('BIND_AUDIT',{childId:id,specDigest:auditDigest});child=childNow(id);}same(auditDigest,child.auditSpecDigest);same(hash(canonical(qa.selection)),qa.store.spec.selectionDigest);
+          if(!qa)qa=await ports.openAudit(child,loadSelection(store,child.selectionRef!,child,ports.checkChildMetadata));check();if(qa.store.mode==='inspect'&&(store.spec.version!=='TeachingCycle/0.2'||child.stage!=='INDEX'||qa.store.check(false).status!=='REVOKED'))stop('TC_FINALIZED_AUDIT');if(qa.store.spec.version!=='CorpusQualityAudit/0.2'||qa.store.spec.auditId!==cycleAuditId(store.spec.cycleId,id)||plan.version==='TeachingCurriculumPlan/0.2'&&qa.store.spec.objectiveDigest!==plan.approvedObjectiveDigest)stop('TC_CHILD_POLICY');const auditDigest=hash(canonical(qa.store.spec));if(child.auditSpecDigest===null){store.apply('BIND_AUDIT',{childId:id,specDigest:auditDigest});child=childNow(id);}same(auditDigest,child.auditSpecDigest);same(hash(canonical(qa.selection)),qa.store.spec.selectionDigest);
           if(child.stage==='QA'){const execution=scheduler.execution(id,()=>{qa!.store.check();qa!.source.check();}),result=await runQualityAudit(qa.store.spec,{...qa,...(signal?{signal}:{}),execution});check();if(result.status!=='COMPLETED')stop('TC_QA_FENCED');verifyQualityAudit(qa.store,qa.source);stage(store,child,'INDEX');child=childNow(id);}
-          exportQualityAudit(qa.store,qa.source);const verified=verifyQualityAudit(qa.store,qa.source),index=readQualityIndex(qa.store,verified.state.indexRef!),accounting=store.spec.version==='TeachingCycle/0.2'?deriveChildAccounting(id,verified.state,{committedHead:'0'.repeat(64),ledgerDigest:'0'.repeat(64)},bucket=>qa!.store.port(bucket)):null,reader=await ports.archiveAudit(child,qa);check();
+          if(qa.store.mode==='inspect'){if(store.spec.version!=='TeachingCycle/0.2'||child.stage!=='INDEX'||qa.store.check(false).status!=='REVOKED')stop('TC_FINALIZED_AUDIT');}else exportQualityAudit(qa.store,qa.source);
+          const verified=verifyQualityAudit(qa.store,qa.source);if(verified.state.status!=='COMPLETED'||!verified.state.indexRef||!verified.state.manifestRef)stop('TC_FINALIZED_AUDIT');const index=readQualityIndex(qa.store,verified.state.indexRef),accounting=store.spec.version==='TeachingCycle/0.2'?deriveChildAccounting(id,verified.state,{committedHead:'0'.repeat(64),ledgerDigest:'0'.repeat(64)},bucket=>qa!.store.port(bucket)):null,reader=await ports.archiveAudit(child,qa);check();
           try{const cap=archiveCapability(reader);cap.check();const view=cap.read();if(view.descriptor.legacyProfile!=='QA_POLICY_V2')stop('TC_INDEX_PROFILE');same(view.index,index);same(view.descriptor.specDigest,child.auditSpecDigest);same(view.descriptor.source,qa.selection.source);same(view.descriptor.indexRef,verified.state.indexRef);same(view.descriptor.manifestRef,verified.state.manifestRef);
             childMetadata(ports.checkChildMetadata,child);const indexRef=store.put('index-'+store.snapshot()!.children.findIndex(c=>c.childId===id),'teaching-full-index',canonical(index));childMetadata(ports.checkChildMetadata,child);const descriptorRef=store.put('meta','teaching-index-descriptor',canonical(view.descriptor));let qaAccountingRef:ScopedRef|undefined;if(accounting){childMetadata(ports.checkChildMetadata,child);qaAccountingRef=store.put('meta','teaching-child-accounting',canonical({...accounting,committedHead:view.descriptor.committedHead,ledgerDigest:view.descriptor.ledgerRawDigest}));}digest(view.descriptor.indexDigest);stage(store,child,'COMPLETE',{indexRef,descriptorRef,indexDigest:view.descriptor.indexDigest,...(qaAccountingRef?{qaAccountingRef}:{})});
           }finally{reader.close();}
