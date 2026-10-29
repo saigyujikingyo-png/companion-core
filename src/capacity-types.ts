@@ -22,7 +22,7 @@ export type RetainedRootsCapacity=FrozenData<{
   version:1;entryLimit:number;entriesObserved:number;observedBytes:number;roots:RetainedRootObservation[];
 }>;
 export type AuthorityCapacity=FrozenData<{
-  version:1;schemaVersion:2|3|4|5;
+  version:1;schemaVersion:2|3|4|5|6;
   database:{fileBytes:number;pageSize:number;pageCount:number;pageBytes:number;freelistPages:number};
   sidecars:{journalBytes:number;walBytes:number;shmBytes:number;totalBytes:number};
   totalFileBytes:number;
@@ -38,7 +38,8 @@ export type AuthorityCapacity=FrozenData<{
   coldRouting?:{epoch:number;slot:number|null;hot:Counts;cold:Counts;currentBytes:number;retainedBytes:number;retiredBytes:number;stagingBytes:number;otherSlotBytes:number;occupiedSlots:number;files:number;
     slots:{slot:number;intentBytes:number;payloadBytes:number}[];limits:{slotReserveBytes:number;workspaceBytes:number;sharedBytes:number;payloadBytes:number;slots:number};
     workspacePeakBytes:number;usedPages:number;blockers:Array<'SLOTS_FULL'>};
-  blockers:Array<'GLOBAL_PENDING'|'CURRENT_EXTENT_OVER_WRITE_LIMIT'>;
+  shardedColdRouting?:{generation:number;manifestDigest:string;currentBytes:number;retainedBytes:number;obligationBytes:number;missingObligationBytes:number;files:number;reservedFiles:number;usedPages:number;hot:Counts;cold:Counts;pending:null|{operationId:string;activeAttempt:number};workspacePeakBytes:number;limits:{retainedBytes:number;files:number;partBytes:number;parts:2;workspaceBytes:number;sharedBytes:number;generation:number}};
+  blockers:Array<'GLOBAL_PENDING'|'CURRENT_EXTENT_OVER_WRITE_LIMIT'|'PUBLICATION_PENDING'>;
 }>;
 export type MemoryImageCapacity=FrozenData<{
   schema:1|2;bytes:number;limitBytes:number;revocationHighWater:number;
