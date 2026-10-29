@@ -4,7 +4,7 @@ import {isProxy} from 'node:util/types';
 import {id} from './anchored-codec.ts';
 import {sha} from './durable-codec.ts';
 import {fail} from './validation.ts';
-import {closed,json,emptyCounts,ROW_KEYS,ROW_COLUMNS,COLD_TABLE,sqlRows,hashRows,validateDescriptor,validateMoved,validateRequest,validateReceipt} from './authority-cold-format.ts';
+import {closed,json,emptyCounts,ROW_KEYS,ROW_COLUMNS,COLD_TABLE,sqlRows,hashRows,validateDescriptor,validateMoved,validateRequest,validateReceipt,ReceiptKeyReader} from './authority-cold-format.ts';
 import type {Counts,Moved,RawRow,Workspace,Release,Descriptor,ColdRequest,ColdReceipt} from './authority-cold-format.ts';
 
 export const SHARD_LIMITS=Object.freeze({part:1048576,current:2097152,intent:8192,manifest:8192,reservation:8192,request:1024,receipt:8192,retained:16777216,files:32,epoch:14,attempts:2,closure:2170880});
@@ -99,6 +99,7 @@ export class ShardDatabase{
  }
  validate(checked=false):void{if(!checked)layout(this.#db,this.#w);const integrity=this.#db.prepare('PRAGMA integrity_check').all();if(integrity.length!==1||integrity[0]!.integrity_check!=='ok')fail('ANCHOR_COLD_INTEGRITY');const c=emptyCounts();for(const k of ['R','S','L','M'] as const)for(const r of this.rows(k)){number(r.epoch,1,this.meta.toEpoch);if(partition(r)!==this.meta.partition)fail('ANCHOR_SHARD_PARTITION');c[{R:'receipts',S:'segments',L:'legacy',M:'operations'}[k] as keyof Counts]++;}if(json(c,1024)!==json(this.meta.counts,1024))fail('ANCHOR_COLD_COUNTS');}
  rows(kind:Exclude<RawRow['kind'],'V'>,index?:number,value?:string,secondary?:string):Generator<RawRow>{if(this.#closed)fail('ANCHOR_COLD_CLOSED');return sqlRows(this.#db,kind,COLD_TABLE[kind],true,this.#w,index===undefined?'':`WHERE ${ROW_COLUMNS[kind][index]}=?${secondary===undefined?'':' AND operation_id=?'}`,index===undefined?[]:secondary===undefined?[value!]:[value!,secondary]);}
+ receiptReader():ReceiptKeyReader{if(this.#closed)fail('ANCHOR_COLD_CLOSED');return new ReceiptKeyReader(this.#db,true,this.#w);}
  serialize():{bytes:Uint8Array;close:Release}{const n=(this.#db.prepare('PRAGMA page_count').get()!.page_count as number)*4096;if(n>1048576)fail('ANCHOR_COLD_BOUND');const release=this.#w.reserve(n,'v2 serialize');try{const bytes=this.#db.serialize();if(bytes.length!==n)fail('ANCHOR_COLD_BOUND');return{bytes,close:()=>{bytes.fill(0);release();}};}catch(e){release();throw e;}}
  close():void{if(!this.#closed){this.#closed=true;this.#db.close();this.#release();}}
 }

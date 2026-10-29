@@ -40,10 +40,10 @@ export function inspectMemoryDatabase(db:DatabaseSync,expected:MemorySchema):{sc
   if(expected===2)validateFanoutImage(db);
   return{schema:expected,revocationHighWater:db.prepare('SELECT coalesce(max(id),0) AS n FROM revocations').get()!.n as number};
 }
-function openImage(image:Uint8Array):DatabaseSync{
+function openImage(image:Uint8Array,bounded=false):DatabaseSync{
   if(!(image instanceof Uint8Array)||image.length>16*1024*1024)fail('DURABLE_LIMIT');
   const db=new DatabaseSync(':memory:',{allowExtension:false,enableForeignKeyConstraints:true,enableDoubleQuotedStringLiterals:false});
-  try{db.deserialize(image);return db;}catch(error){db.close();throw error;}
+  try{db.deserialize(image);if(bounded){db.exec('PRAGMA max_page_count=4096; PRAGMA temp_store=MEMORY; PRAGMA journal_mode=MEMORY; PRAGMA cache_spill=OFF;');if(db.prepare('PRAGMA page_size').get()!.page_size!==4096||db.prepare('PRAGMA max_page_count').get()!.max_page_count!==4096)fail('DURABLE_LIMIT');}return db;}catch(error){db.close();throw error;}
 }
 /** Disposable inspector, without MemoryStore construction, boot resets or callbacks. */
 export function inspectMemoryImage(image:Uint8Array,expected:MemorySchema):{schema:MemorySchema;revocationHighWater:number}{
@@ -121,8 +121,8 @@ export function fingerprintMemoryDatabase(db:DatabaseSync,schema:MemorySchema):s
 
 /** Physical packing only: no MemoryStore boot, live SQL, data deletion or path.
  * Refuses no benefit before callers create a target or consume an operation ID. */
-export function repackMemoryImage(image:Uint8Array,expected:MemorySchema,expectedHighWater?:number):Uint8Array{
-  assertSchema(expected);const db=openImage(image);let result:Uint8Array|undefined;
+export function repackMemoryImage(image:Uint8Array,expected:MemorySchema,expectedHighWater?:number,bounded=false):Uint8Array{
+  assertSchema(expected);const db=openImage(image,bounded);let result:Uint8Array|undefined;
   try{
     configureRepackRuntime(db);
     const before=inspectMemoryDatabase(db,expected),fingerprint=fingerprintMemoryDatabase(db,expected);
@@ -139,9 +139,9 @@ export function repackMemoryImage(image:Uint8Array,expected:MemorySchema,expecte
 export const MEMORY_MIGRATIONS=Object.freeze([{id:'memory-1-to-2',from:1 as const,to:2 as const}]);
 /** Atomic migration of a private RAM copy. No source file, image byte, lease,
  * runtime epoch or source ledger is modified by the migration itself. */
-export function migrateMemoryImage(image:Uint8Array,from:MemorySchema,to:MemorySchema,minimumWall=0):Uint8Array{
+export function migrateMemoryImage(image:Uint8Array,from:MemorySchema,to:MemorySchema,minimumWall=0,bounded=false):Uint8Array{
   if(from!==1||to!==2||!Number.isSafeInteger(minimumWall)||minimumWall<0)fail('UNSUPPORTED_MIGRATION');
-  const db=openImage(image);
+  const db=openImage(image,bounded);
   try{
     inspectMemoryDatabase(db,1);
     db.exec('BEGIN IMMEDIATE');
@@ -156,10 +156,10 @@ export function migrateMemoryImage(image:Uint8Array,from:MemorySchema,to:MemoryS
   }finally{db.close();}
 }
 /** Explicit maintenance of a frozen RAM copy, without booting the source. */
-export function maintainFanoutImage(image:Uint8Array,retainBatches:number,resetConsumerIds:string[],minimumWall:number):{
+export function maintainFanoutImage(image:Uint8Array,retainBatches:number,resetConsumerIds:string[],minimumWall:number,bounded=false):{
   image:Uint8Array;floor:number;resetConsumers:string[];removed:number;
 }{
-  const db=openImage(image);
+  const db=openImage(image,bounded);
   try{
     inspectMemoryDatabase(db,2);
     const controller=new DurableFanout(db,()=>minimumWall);

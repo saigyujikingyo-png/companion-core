@@ -45,6 +45,7 @@ export class MemoryStore {
   constructor(path: string, options: { clock?: Clock; image?: Uint8Array;
     persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void; onPoison?: () => void;
     assertCloseAllowed?: () => void; aroundAccess?: AccessGuard; schemaVersion?: MemorySchema; fanoutFault?: (point: FanoutFault) => void;
+    boundedMemoryImage?: boolean | number;
     endogenousBoot?: (encoded: string, scope: (id: string) => Scope) => string;
     endogenousMutation?: (encoded: string, scope: (id: string) => Scope) => string; onEndogenousInvalidated?: () => void;
     bindEndogenousWriter?: (write: (expected: string | null, next: string) => void) => void } = {}) {
@@ -57,7 +58,15 @@ export class MemoryStore {
     try {
       if ((options.image || options.persist) && (typeof this.#db.serialize !== 'function' || typeof this.#db.deserialize !== 'function'))
         v.fail('DURABLE_UNSUPPORTED');
+      const bounded=options.boundedMemoryImage!==undefined&&options.boundedMemoryImage!==false;
+      if (bounded && (path!==':memory:' || (options.image?.length??0)>16777216)) v.fail('DURABLE_LIMIT');
       if (options.image) this.#db.deserialize(options.image);
+      if(bounded){
+        const pages=options.boundedMemoryImage===true?4096:options.boundedMemoryImage;
+        if(typeof pages!=='number'||!Number.isSafeInteger(pages)||pages<1||pages>4096)v.fail('DURABLE_LIMIT');
+        this.#db.exec(`PRAGMA page_size=4096; PRAGMA max_page_count=${pages}; PRAGMA cache_spill=OFF;`);
+        if(this.#db.prepare('PRAGMA page_size').get()!.page_size!==4096||this.#db.prepare('PRAGMA max_page_count').get()!.max_page_count!==pages)v.fail('DURABLE_LIMIT');
+      }
       const version = this.#one('PRAGMA user_version')!.user_version as number;
       if (options.image && version !== this.#schema) v.fail('UNSUPPORTED_SCHEMA');
       if (version !== 0 && version !== this.#schema) v.fail('UNSUPPORTED_SCHEMA');

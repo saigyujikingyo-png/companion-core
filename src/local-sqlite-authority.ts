@@ -10,7 +10,7 @@ import {freezeCapacity} from './capacity-types.ts';
 import type {AuthorityCapacity,FrozenData} from './capacity-types.ts';
 import {RECEIPT_SEGMENT_LIMITS,RECEIPT_POINTER_PREFIX,RECEIPT_POINTER_LIMIT,normalizeRollover,parseReceiptPointer,receiptPointer,segmentFrame,validateReceiptEntry,encodeReceiptSegment,decodeReceiptSegment} from './receipt-segments.ts';
 import type {RolloverRequest,RolloverReceipt,ReceiptEntry} from './receipt-segments.ts';
-import {COLD_LIMITS,COLD_FORMAT,COLD_KIND,ROUTE_SQL,OPERATION_SQL,ROW_COLUMNS,ROW_BLOBS,ColdDatabase,normalizeCold,validateDescriptor,validateRequest,validateReceipt,validateIntent,emptyCounts,json,parsed,utf8,safeSum,sqlRows,keyCompare,sameRow,copyRow,frameBytes,hashRows,metaOf,receiptOf,plainJsonBytes,withPlainJSON,samePlainJSON} from './authority-cold-format.ts';
+import {COLD_LIMITS,COLD_FORMAT,COLD_KIND,ROUTE_SQL,OPERATION_SQL,ROW_COLUMNS,ROW_BLOBS,ColdDatabase,normalizeCold,validateDescriptor,validateRequest,validateReceipt,validateIntent,emptyCounts,json,parsed,utf8,safeSum,sqlRows,keyCompare,sameRow,copyRow,frameBytes,hashRows,metaOf,receiptOf,plainJsonBytes,withPlainJSON,samePlainJSON,ReceiptKeyReader,usingReceiptKeys} from './authority-cold-format.ts';
 import type {Kind,RawRow,Release,Descriptor,Intent,ColdInput,ColdReceipt,Counts,Moved,ColdMeta,Workspace} from './authority-cold-format.ts';
 import {ColdWorkspace,rootHeader,inspectFiles,loadCurrent,findStage,writeStage,exportClosure,readClosure,slotNames,readOwned,exclusive,safeDirectory,hashFileBounded} from './authority-cold-storage.ts';
 import type {Stage} from './authority-cold-storage.ts';
@@ -18,6 +18,8 @@ import {SHARD_LIMITS,SHARD_ROOT_SQL,ShardDatabase,normalizeShard,manifest as val
 import type {ShardInput,ShardRequest,ShardReceipt,ShardManifest,ShardReservation,ShardMeta,AnyRequest,AnyReceipt} from './authority-sharded-format.ts';
 import {inspectShardFiles,obligations,requiredFiles,loadShards,stageState,verifyFile,exportShardClosure,readShardClosure} from './authority-sharded-storage.ts';
 import type {LoadedShards} from './authority-sharded-storage.ts';
+import {SAFETY_V2_PROFILE,safetyOperation,safetyPhase} from './safety-v2-format.ts';
+import {readSafetyV2File} from './safety-v2-file.ts';
 
 export type PendingCommit = { version: 2; kind: 'create' | 'write' | 'restore' | 'rekey' | 'schema-migration' | 'fanout-maintenance' | 'compaction' | 'storage-upgrade' | 'legacy-m2-import'; operationId: string;
   requestDigest: string; oldHead: VaultHead | null; newHead: VaultHead; stagePath: string; stageDigest: string;
@@ -325,13 +327,21 @@ export class LocalSqliteAuthority {
       return{entries,receipt};
     }finally{payload.fill(0);}
   }
-  #verifySegmentPointers(segmentId:string,entries:ReceiptEntry[]):void{
+  #verifySegmentPointers(segmentId:string,entries:ReceiptEntry[],expectedHot?:boolean,readers?:readonly ReceiptKeyReader[]):void{
+    let wrongTier=false;
     for(const [index,entry] of entries.entries()){
-      if(this.#version>=5){const valid=this.#usingRaw('R',0,entry.vaultId,row=>row.values[1]===entry.operationId?utf8(row.values[2] as Uint8Array)===receiptPointer(segmentId,index,Buffer.byteLength(entry.json)):undefined,entry.operationId);if(!valid)fail('ANCHOR_RECEIPT_SEGMENT');continue;}
+      if(this.#version>=5){const check=(row:RawRow)=>{
+        if(row.values[1]!==entry.operationId)return undefined;
+        if(expectedHot!==undefined&&(row.epoch===0)!==expectedHot)wrongTier=true;
+        return utf8(row.values[2] as Uint8Array)===receiptPointer(segmentId,index,Buffer.byteLength(entry.json));
+      };const valid=readers?usingReceiptKeys(readers,entry.vaultId,entry.operationId,check):this.#usingRaw('R',0,entry.vaultId,check,entry.operationId);if(!valid)fail('ANCHOR_RECEIPT_SEGMENT');continue;}
       const row=this.#db.prepare('SELECT substr(receipt,1,?) AS receipt,length(CAST(receipt AS BLOB)) AS bytes FROM receipts WHERE vault_id=? AND operation_id=?').get(RECEIPT_POINTER_LIMIT+1,entry.vaultId,entry.operationId);
       const expected=receiptPointer(segmentId,index,Buffer.byteLength(entry.json));
       if(row?.receipt!==expected||row.bytes!==Buffer.byteLength(expected))fail('ANCHOR_RECEIPT_SEGMENT');
     }
+    // Preserve pointer-validation priority while sharing its actual row read.
+    // Different positive epochs are valid: the invariant is only hot vs cold.
+    if(wrongTier)fail('ANCHOR_RECEIPT_SEGMENT');
   }
   rolloverReceipts(input:RolloverRequest):FrozenData<RolloverReceipt>{
     const request=normalizeRollover(input),requestJSON=JSON.stringify(request);
@@ -516,7 +526,9 @@ export class LocalSqliteAuthority {
       }
     }
     if (pending.stagePath !== join(next.directory, `stage-${pending.operationId}.json`)
-      || (this.#version>=5?hashFileBounded(pending.stagePath,pending.newHead.format===INCREMENTAL_FORMAT?65536:STAGE_LIMIT,this.#workspace!):sha(pending.newHead.format===INCREMENTAL_FORMAT?readBounded(pending.stagePath,65536):readBounded(pending.stagePath))) !== pending.stageDigest) fail('ANCHOR_TRANSITION');
+      || (this.#version>=5?hashFileBounded(pending.stagePath,pending.newHead.format===INCREMENTAL_FORMAT?65536:STAGE_LIMIT,this.#workspace!):next.storageProfile===SAFETY_V2_PROFILE
+        ?safetyOperation(()=>safetyPhase(65537,'v2 PREPARED stage hash read',()=>sha(readSafetyV2File(pending.stagePath,65536))))
+        :sha(pending.newHead.format===INCREMENTAL_FORMAT?readBounded(pending.stagePath,65536):readBounded(pending.stagePath))) !== pending.stageDigest) fail('ANCHOR_TRANSITION');
   }
   #finalize(pending: PendingCommit): AnchorReceipt {
     if(this.#version>=5)plainJsonBytes(pending);
@@ -634,11 +646,13 @@ export class LocalSqliteAuthority {
       if(pointer){pointers++;continue;}validateReceiptEntry({vaultId:row.values[0] as string,operationId:row.values[1] as string,json:value});
       const receipt=JSON.parse(value) as AnchorReceipt;validateHead(receipt.newHead);if(receipt.newHead.authorityId!==this.authorityId)fail('ANCHOR_COLD_IDENTITY');
     }
-    for(const row of this.#rawRows('S')){if(++segments>128)fail('ANCHOR_ROLLOVER_SEGMENT_LIMIT');const decoded=this.#decodeSegment(row);try{this.#verifySegmentPointers(row.values[0] as string,decoded.entries);expectedPointers+=decoded.entries.length;
+    const readers:ReceiptKeyReader[]=[];
+    try{for(const row of this.#rawRows('S')){if(++segments>128)fail('ANCHOR_ROLLOVER_SEGMENT_LIMIT');const decoded=this.#decodeSegment(row);try{
+      if(!readers.length){readers.push(new ReceiptKeyReader(this.#db,false,this.#workspace!));if(this.#cold)readers.push(this.#cold.db.receiptReader());for(const db of this.#shards?.dbs??[])readers.push(db.receiptReader());}
       // A complete IF8 group is wholly hot or wholly cold.
-      for(const entry of decoded.entries){const epoch=this.#usingRaw('R',0,entry.vaultId,r=>r.values[1]===entry.operationId?r.epoch:undefined,entry.operationId);if(epoch===null||(epoch===0)!==(row.epoch===0))fail('ANCHOR_RECEIPT_SEGMENT');}
+      this.#verifySegmentPointers(row.values[0] as string,decoded.entries,row.epoch===0,readers);expectedPointers+=decoded.entries.length;
       }finally{decoded.close();}
-    }
+    }}finally{let closeError:unknown,failed=false;for(const reader of readers){try{reader.close();}catch(e){if(!failed){closeError=e;failed=true;}}}if(failed)throw closeError;}
     if(pointers!==expectedPointers)fail('ANCHOR_RECEIPT_SEGMENT');
     for(const row of this.#rawRows('L'))this.#withValues(()=>{
       const legacy=this.#legacy(row.values[0] as string);if(!legacy)fail('LEGACY_REGISTRY');
