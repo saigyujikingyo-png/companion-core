@@ -133,6 +133,23 @@ and all 18 original top-level fields remain in the pinned document; none is
 rewritten or reinterpreted as a new grant. The new RootAdmission and frozen config
 provide this cycle's authority. The host never refreshes an approved pin itself.
 
+An explicitly pinned public runtime entry may be an empty package marker such as
+`py.typed` or a distribution's `REQUESTED` file. Only the `runtimeFiles` verification
+path permits zero bytes, and the empty file must still match its approved SHA256.
+It retains the regular-file, single-link, resolved-path, size-cap and stable-stat
+checks. A formerly nonempty file becoming empty, or an empty marker gaining bytes,
+fails its existing hash pin. Generic/source/config/grant/evidence readers continue
+to require at least one byte; the public `readBytes(file, cap)` API has no empty-file
+override. The runtime manifest itself also remains nonempty.
+
+The first actual 16-candidate preflight was stopped before Initialize, Run, once or
+provider access because six approved public marker files were empty. A scoped
+diagnostic passed config, Root admission and source checks and located `TCH_FILE`
+in Python runtime verification. That failed preflight and its immutable proposal
+remain preserved. The launcher's outer phase did not identify the inner check;
+changing that error protocol is deferred. Revised source requires a separately
+bound proposal rather than changing the old config or approved library files.
+
 ## Root admission and mentor evidence
 
 `admission` has `{rootRecord, curriculum, projectUseRecord, mentorEvidence}`.

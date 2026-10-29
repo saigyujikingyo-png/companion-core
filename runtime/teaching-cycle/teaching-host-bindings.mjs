@@ -16,11 +16,12 @@ export { finalizeTeachingAuthority,revokeTeachingCycle } from './teaching-revoke
 
 export const HOST_FILES=['runtime/teaching-cycle/teaching-host-bindings.mjs','runtime/teaching-cycle/teaching-native-worker.mjs','runtime/teaching-cycle/teaching-revoker.mjs','runtime/teaching-cycle/Invoke-TeachingCycle.ps1'];
 const same=(a,b,code='TCH_BINDING')=>{if(canonical(a)!==canonical(b))stop(code);};
-export function readBytes(file,cap=4194304){
+function readStableBytes(file,cap,minBytes){
   if(!path.isAbsolute(file)||fs.realpathSync.native(file).toLowerCase()!==path.resolve(file).toLowerCase())stop('TCH_PATH');
-  const a=fs.lstatSync(file,{bigint:true});if(!a.isFile()||a.isSymbolicLink()||a.nlink!==1n||a.size<1n||a.size>BigInt(cap))stop('TCH_FILE');
+  const a=fs.lstatSync(file,{bigint:true});if(!a.isFile()||a.isSymbolicLink()||a.nlink!==1n||a.size<minBytes||a.size>BigInt(cap))stop('TCH_FILE');
   const bytes=fs.readFileSync(file),b=fs.lstatSync(file,{bigint:true});if(['dev','ino','size','mtimeNs','ctimeNs'].some(k=>a[k]!==b[k])||BigInt(bytes.length)!==a.size)stop('TCH_FILE_CHANGED');return bytes;
 }
+export function readBytes(file,cap=4194304){return readStableBytes(file,cap,1n);}
 export const readJson=(file,cap)=>JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(readBytes(file,cap)).replace(/^\uFEFF/,''));
 export function pinned(ref){shape(ref,['path','sha256']);digest(ref.sha256);const bytes=readBytes(ref.path);if(hash(bytes)!==ref.sha256)stop('TCH_PIN');return bytes;}
 const pinnedJson=ref=>JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(pinned(ref)).replace(/^\uFEFF/,''));
@@ -59,7 +60,8 @@ export function verifyTeachingPython(c){
   shape(pin,['version','scope','observedAtUtc','approval','historicalPin','closure','closureLimit','pythonPath','runtime','runtimeFiles','changes','signatures','publicAssets','realApiCalls','studentTraining','privateSamplesRead','testsRun','readiness']);shape(pin.runtime,['python','baseExecutable','basePrefix','executable','tokenizers','jinja2','markupsafe']);
   if(pin.version!=='S2CurrentPublicTokenizerPin/1'||pin.pythonPath!==pythonPath||pin.runtime.executable!==pythonPath||!path.isAbsolute(pythonPath)||!Array.isArray(pin.runtimeFiles)||pin.runtimeFiles.length!==84)stop('TCH_PYTHON_PIN');
   for(const name of ['python','tokenizers','jinja2','markupsafe'])same(pin.runtime[name],profile.runtime[name],'TCH_PYTHON_VERSION');
-  const seen=new Set();for(const entry of pin.runtimeFiles){shape(entry,['path','sha256']);digest(entry.sha256);const file=path.resolve(entry.path).toLowerCase();if(seen.has(file))stop('TCH_PYTHON_PIN');seen.add(file);if(hash(readBytes(entry.path,200000000))!==entry.sha256)stop('TCH_PYTHON_DRIFT');}
+  // Approved public package markers may be empty; every entry still needs its exact SHA.
+  const seen=new Set();for(const entry of pin.runtimeFiles){shape(entry,['path','sha256']);digest(entry.sha256);const file=path.resolve(entry.path).toLowerCase();if(seen.has(file))stop('TCH_PYTHON_PIN');seen.add(file);if(hash(readStableBytes(entry.path,200000000,0n))!==entry.sha256)stop('TCH_PYTHON_DRIFT');}
   if(!seen.has(path.resolve(pythonPath).toLowerCase())||!seen.has(path.resolve(pin.runtime.baseExecutable).toLowerCase()))stop('TCH_PYTHON_EXECUTABLE');
   const assets=shape(pin.publicAssets,['model','revision','assetRoot','files']);for(const name of ['model','revision','assetRoot'])same(assets[name],profile[name],'TCH_PYTHON_ASSETS');
   if(!Array.isArray(assets.files)||assets.files.length!==4||new Set(assets.files.map(f=>f.path)).size!==4)stop('TCH_PYTHON_ASSETS');

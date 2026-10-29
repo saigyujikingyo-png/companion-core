@@ -9,7 +9,7 @@ import { runTeachingCycle } from '../src/teaching-cycle-runner.ts';
 import { syntheticOwner } from './teaching-cycle-fixture.ts';
 import { installSyntheticTokenizer } from './teaching-tokenizer-fixture.ts';
 import { teachingNativeFixture,syntheticCredentials,syntheticTeachingFetch } from './teaching-native-fixture.mjs';
-import { initializeTeachingCustody,openTrustedTeachingHost,executeTeachingWorker,finalizeTeachingAuthority,checkRootAdmission,revokeTeachingCycle,verifyTeachingPython } from '../runtime/teaching-cycle/teaching-host-bindings.mjs';
+import { initializeTeachingCustody,openTrustedTeachingHost,executeTeachingWorker,finalizeTeachingAuthority,checkRootAdmission,revokeTeachingCycle,verifyTeachingPython,readBytes,readJson,pinned } from '../runtime/teaching-cycle/teaching-host-bindings.mjs';
 import { REVOKER_FILES } from '../runtime/teaching-cycle/teaching-revoker.mjs';
 
 const worker=fileURLToPath(new URL('./fixtures/teaching-finalization-worker.mjs',import.meta.url));
@@ -67,4 +67,25 @@ test('emergency revoker declaration covers its entire project import closure wit
   function walk(name){if(seen.has(name))return;seen.add(name);const source=fs.readFileSync(path.join(root,name),'utf8').replace(/^import\s+type\b[^;]*;/gm,'');for(const m of source.matchAll(/(?:from\s*|import\s*)['"](\.\.?\/[^'"]+)['"]/g))walk(path.posix.normalize(path.posix.join(path.posix.dirname(name),m[1])));}
   walk('runtime/teaching-cycle/teaching-revoker.mjs');for(const name of seen)assert.ok(REVOKER_FILES.includes(name),name);for(const name of REVOKER_FILES)assert.ok(seen.has(name)||name==='runtime/teaching-cycle/teaching-native-worker.mjs'||name==='runtime/teaching-cycle/Invoke-TeachingCycle.ps1',name);
   assert.equal(REVOKER_FILES.includes('src/corpus-production-runner.ts'),false);assert.equal(REVOKER_FILES.includes('runtime/teaching-cycle/teaching-host-bindings.mjs'),false);assert.equal(REVOKER_FILES.includes('src/wf1-usage-diagnostic.ts'),false);
+});
+
+test('approved Python byte manifest accepts empty markers only at exact pinned bytes',()=>{
+  const f=teachingNativeFixture(),ref=f.config.tokenizer.runtimePin,pin=JSON.parse(fs.readFileSync(ref.path)),entry=pin.runtimeFiles[1],empty=Buffer.alloc(0);
+  try{fs.writeFileSync(entry.path,empty);assert.throws(()=>verifyTeachingPython(f.config),{code:'TCH_PYTHON_DRIFT'});
+    entry.sha256=hash(empty);fs.writeFileSync(ref.path,canonical(pin)+'\n');ref.sha256=hash(fs.readFileSync(ref.path));assert.doesNotThrow(()=>verifyTeachingPython(f.config));
+    fs.writeFileSync(entry.path,'SYNTHETIC unexpected marker content');assert.throws(()=>verifyTeachingPython(f.config),{code:'TCH_PYTHON_DRIFT'});
+  }finally{f.key.fill(0);}
+});
+
+test('approved Python runtime files reject directory, hardlink and reparse entries',()=>{
+  const f=teachingNativeFixture(),ref=f.config.tokenizer.runtimePin,pin=JSON.parse(fs.readFileSync(ref.path)),entry=pin.runtimeFiles[1],directory=path.join(f.base,'synthetic-marker-directory'),marker=path.join(directory,'py.typed'),hardlink=path.join(f.base,'synthetic-marker-hardlink'),junction=path.join(f.base,'synthetic-marker-junction');
+  try{fs.mkdirSync(directory);fs.writeFileSync(marker,Buffer.alloc(0),{flag:'wx'});fs.linkSync(marker,hardlink);fs.symlinkSync(directory,junction,'junction');entry.sha256=hash(Buffer.alloc(0));
+    for(const [file,code]of [[directory,'TCH_FILE'],[hardlink,'TCH_FILE'],[path.join(junction,'py.typed'),'TCH_PATH']]){entry.path=file;fs.writeFileSync(ref.path,canonical(pin)+'\n');ref.sha256=hash(fs.readFileSync(ref.path));assert.throws(()=>verifyTeachingPython(f.config),{code});}
+  }finally{f.key.fill(0);}
+});
+
+test('generic/source/config readers remain nonempty even for approved empty bytes',()=>{
+  const f=teachingNativeFixture(),file=path.join(f.base,'synthetic-empty-input'),empty=Buffer.alloc(0);fs.writeFileSync(file,empty,{flag:'wx'});
+  try{assert.throws(()=>readBytes(file),{code:'TCH_FILE'});assert.throws(()=>pinned({path:file,sha256:hash(empty)}),{code:'TCH_FILE'});assert.throws(()=>readJson(file),{code:'TCH_FILE'});
+  }finally{f.key.fill(0);}
 });
