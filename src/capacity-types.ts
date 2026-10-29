@@ -13,6 +13,14 @@ export function freezeCapacity<T>(value:T):FrozenData<T>{
   return value as FrozenData<T>;
 }
 export const CAPACITY_DIRECTORY_ENTRY_LIMIT=16384;
+export type RetainedRootObservation={
+  root:string;canonicalRoot:string|null;entriesObserved:number;observedBytes:number;
+  status:'EOF'|'TRUNCATED'|'NOT_SCANNED'|'UNKNOWN';
+  reason:null|'ENTRY_LIMIT'|'ROOT_UNAVAILABLE'|'ROOT_CHANGED'|'ENTRY_UNAVAILABLE'|'IO_ERROR'|'UNSAFE_ENTRY';
+};
+export type RetainedRootsCapacity=FrozenData<{
+  version:1;entryLimit:number;entriesObserved:number;observedBytes:number;roots:RetainedRootObservation[];
+}>;
 export type AuthorityCapacity=FrozenData<{
   version:1;schemaVersion:2|3|4|5;
   database:{fileBytes:number;pageSize:number;pageCount:number;pageBytes:number;freelistPages:number};
