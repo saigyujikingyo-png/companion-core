@@ -19,5 +19,12 @@ __pycache__/
 checkpoint-*.bin
 *.claimed
 memory-key.init-claimed
-/runtime/
+/runtime/*
+!/runtime/teaching-cycle/
+/runtime/teaching-cycle/*
+# Reviewed launcher source only; private runtime material remains ignored.
+!/runtime/teaching-cycle/teaching-host-bindings.mjs
+!/runtime/teaching-cycle/teaching-native-worker.mjs
+!/runtime/teaching-cycle/teaching-revoker.mjs
+!/runtime/teaching-cycle/Invoke-TeachingCycle.ps1
 /vault/

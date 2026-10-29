@@ -8,12 +8,43 @@ import { openQualityArchive } from '../src/corpus-qa-source.ts';
 import { openQualityAudit } from '../src/corpus-qa-store.ts';
 import { createQaTransport,exportQualityAudit,readQualityIndex,runQualityAudit,verifyQualityAudit } from '../src/corpus-qa-runner.ts';
 import { assembleScopedIndexes,buildScopedIndex,qaExactFingerprints } from '../src/corpus-qa-index.ts';
-import { auditBody,auditReservation,FACTORY_BASELINE,FACTORY_BASELINE_DIGEST,QA,QA_TARGET_BASELINE,QA_TARGET_BASELINE_DIGEST,requireQaPurpose,validateAuditSpec } from '../src/corpus-qa-types.ts';
+import { auditBinding,auditBody,auditReservation,FACTORY_BASELINE,FACTORY_BASELINE_DIGEST,QA,QA_V2,QA_V2_PROFILE_DIGEST,QA_TARGET_BASELINE,QA_TARGET_BASELINE_DIGEST,requireQaPurpose,validateAuditRubric,validateAuditRequest,validateAuditSpec } from '../src/corpus-qa-types.ts';
 import { ENDPOINTS,MODELS } from '../src/wf1-types.ts';
 import type { ArtifactRef } from '../src/wf1-types.ts';
 import { runQualityAuditCommand } from '../src/corpus-qa-cli.ts';
 import { openProductionJob } from '../src/corpus-production-store.ts';
 import { qaFixture,qaMock,runQa } from './corpus-qa-fixture.ts';
+
+test('QA request policy preserves fixed v1 wires and binds new v2 systems and per-item scope',()=>{
+  const base={factoryBaseline:FACTORY_BASELINE,baselineDigest:FACTORY_BASELINE_DIGEST,auditTargetBaseline:QA_TARGET_BASELINE,auditTargetBaselineDigest:QA_TARGET_BASELINE_DIGEST},rubric={version:'CorpusQualityRubric/0.1',instructions:'SYNTHETIC policy',criteria:[{id:'c1',criterion:'SYNTHETIC criterion'}]},pair={prompt:'SYNTHETIC question',response:'SYNTHETIC response'};
+  // Captured from clean ca45a58 before the policy change, using only these synthetic inputs.
+  const old={rubric:{body:'61c02c4046ed305eae98103e3f686fc1f1923434f3b5c4a2642b5d97021763d5',binding:'9461c1500ef25dd46c1f58c8f71e843eab452fa0c8486854e46cd1df76b4b5e7'},review:{body:'1caa419353e0cb543b5e88233a4fe11651a78f2514750da383c179654e4186fe',binding:'38c4c037836fe4f7e4409ea169cc45e6269cb0ef78c083112199d37a203eb7c8'}};
+  assert.equal(QA_V2.requestPolicy.version,'CorpusQualityAuditRequestPolicy/0.1');assert.ok(Object.isFrozen(QA_V2.requestPolicy));
+  assert.notEqual(QA_V2_PROFILE_DIGEST,'d6f2dbff88314de27c1561067dae8b5dcf6e140752da63a48073c3b96aaeeed4');
+  for(const operation of ['rubric','review'] as const){
+    const data=operation==='rubric'?{...base,currentApprovedObjective:'SYNTHETIC objective'}:{...base,rubric,rubricDigest:hash(canonical(rubric)),items:[{caseId:'case-synthetic',inputDigest:hash(canonical(pair)),...pair}]},v1=auditBody(operation,0,data),v2=auditBody(operation,0,data,'CorpusQualityAudit/0.2'),body=JSON.parse(v2),system:string=body.messages[0].content,provider=operation==='rubric'?'deepseek':'together',binding=auditBinding(operation,0,'CorpusQualityAudit/0.2');
+    assert.equal(hash(v1),old[operation].body);assert.equal(hash(canonical(auditBinding(operation,0))),old[operation].binding);assert.notEqual(v1,v2);
+    assert.equal(hash(system),QA_V2.requestPolicy[operation==='rubric'?'rubricSystemDigest':'reviewSystemDigest']);assert.equal(binding.profileDigest,hash(canonical(QA_V2)));
+    for(const clause of ['not a requirement for every item or review batch','requested task','unrequested multilingual communication, tool use, identity exposition or private-life disclosure','Evaluate languages requested or present','If translation or cross-language fidelity is requested, a missing required language or failed fidelity must fail that applicable requirement','factual correctness, source provenance, privacy, tool authority, truthful execution claims and uncertainty checks remain mandatory','Inapplicable coverage requirements do not imply PASS'])assert.ok(system.includes(clause),clause);
+    if(operation==='rubric')for(const clause of ['2048 UTF-8 bytes','1-12 objects','1-96 ASCII bytes','^[A-Za-z0-9][A-Za-z0-9_.:-]*$','512 UTF-8 bytes','6-8 brief criteria','no additional fields'])assert.ok(system.includes(clause),clause);
+    validateAuditRequest(provider,operation,v2,binding);
+    assert.throws(()=>validateAuditRequest(provider,operation,v2,{...binding,profileDigest:'d6f2dbff88314de27c1561067dae8b5dcf6e140752da63a48073c3b96aaeeed4'}),{code:'CQA_REQUEST'});
+    body.messages[0].content+=' SYNTHETIC changed scope';assert.throws(()=>validateAuditRequest(provider,operation,canonical(body),binding),{code:'CQA_REQUEST'});
+  }
+});
+
+test('QA rubric count, UTF-8 text and closed ID boundaries remain strict',()=>{
+  const criterion='界'.repeat(170)+'ab',instructions='界'.repeat(682)+'ab',rubric={version:'CorpusQualityRubric/0.1',instructions,criteria:Array.from({length:12},(_,i)=>({id:i===0?'a'.repeat(96):'c'+i,criterion}))};
+  assert.equal(Buffer.byteLength(instructions),2048);assert.equal(Buffer.byteLength(criterion),512);assert.equal(validateAuditRubric(rubric),rubric);
+  assert.equal(validateAuditRubric({...rubric,criteria:[rubric.criteria[0]]}).criteria.length,1);
+  for(const criteria of [[],[...rubric.criteria,{id:'c12',criterion:'SYNTHETIC'}]])assert.throws(()=>validateAuditRubric({...rubric,criteria}),{code:'WF1_LIMIT'});
+  assert.throws(()=>validateAuditRubric({...rubric,instructions:instructions+'a'}),{code:'WF1_TEXT'});
+  assert.throws(()=>validateAuditRubric({...rubric,criteria:[{id:'c',criterion:criterion+'a'}]}),{code:'WF1_TEXT'});
+  for(const id of ['a'.repeat(97),'','bad id','中文','_first'])assert.throws(()=>validateAuditRubric({...rubric,criteria:[{id,criterion:'SYNTHETIC'}]}));
+  assert.throws(()=>validateAuditRubric({...rubric,criteria:[{id:'same',criterion},{id:'same',criterion}]}),{code:'WF1_DUPLICATE'});
+  assert.throws(()=>validateAuditRubric({...rubric,extra:true}),{code:'WF1_FIELDS'});assert.throws(()=>validateAuditRubric({...rubric,criteria:[{id:'c',criterion,weight:1}]}),{code:'WF1_FIELDS'});
+  for(const text of ['', 'SYNTHETIC\0', '\ud800'])assert.throws(()=>validateAuditRubric({...rubric,instructions:text}));
+});
 
 test('QA selected census completes blind DS policy/Together review and cold export without changing the source',async()=>{
   const f=await qaFixture(8,0),m=qaMock(f);try{const summary=await runQa(f,m);assert.equal(summary.status,'COMPLETED');assert.equal(summary.counts.PASS,7);assert.equal(m.sends,3);assert.ok(m.peak<=QA.concurrency);const out=exportQualityAudit(f.store,f.source);assert.equal(out.export.eligibleRows,7);assert.equal(out.factualTruth,'UNKNOWN');assert.equal(out.trainingReady,false);assert.equal(out.independence,'SAME_MODEL_OR_ROUTING_UNKNOWN');

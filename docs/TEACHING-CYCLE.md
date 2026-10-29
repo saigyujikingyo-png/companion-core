@@ -5,6 +5,10 @@ plan is qualified `SYNTHETIC_PLAN`; it does not claim that two mentors produced 
 approved a curriculum. Model reviews remain `MODEL_OPINION`, factual truth remains
 unknown, and Student training remains unauthorized.
 
+The separate [explicit real-plan cycle](TEACHING-CYCLE-REAL.md) describes `/0.2`
+admission, portable host bindings, qualified-yield accounting and independent-cold
+publication. It does not alter this `/0.1` synthetic profile or historical records.
+
 Each child has a durable stage: production, token measurement/export, QA, full
 index, complete or failed. Children may overlap; a child advances sequentially.
 A micro round advances only after every required child is complete and a barrier

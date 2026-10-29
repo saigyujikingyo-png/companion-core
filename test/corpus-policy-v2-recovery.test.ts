@@ -23,7 +23,22 @@ for(const window of ['before-settle','after-settle'] as const)test('QA v2 '+wind
     const store=openQualityAudit({...f.storeOptions,mode:'resume'}),next=nativeQa();try{const s=await runQualityAudit(f.spec,{store,source:f.source,selection:f.selection,objective:f.objective,transport:next.transport});assert.equal(s.status,'COMPLETED',JSON.stringify(s));assert.equal(s.counts.PASS,window==='before-settle'?4:8);assert.equal(s.counts.HOLD,window==='before-settle'?4:0);assert.ok(next.calls.every(c=>c.operation!=='review'||c.index!==0));const recovered=store.snapshot()!.attempts.find(a=>a.id===original.id)!;if(window==='before-settle'){assert.equal(recovered.settlementSource,'RECOVERY_UNKNOWN');assert.equal(recovered.serviceMs,null);assert.equal(s.timing.serviceMs,null);assert.equal(recovered.result,null);}else{assert.equal(recovered.settlementSource,undefined);assert.deepEqual(recovered.result,original.result);}assert.throws(()=>store.apply('SETTLE',{id:original.id,result:original.result,serviceMs:1,settledAtMs:recovered.settledAtMs}),{code:'CQA_CAS'});verifyQualityAudit(store,f.source);exportQualityAudit(store,f.source);}finally{store.close();}
   }finally{f.store.close();f.source.close();}
 });
-test('QA v2 malformed rubric isolates dependent rows, not an invented global integrity failure',async()=>{const f=await qaFixture(8,undefined,false,hash('qa format synthetic'),true),m=nativeQa({change:r=>{if(r.operation==='rubric')r.body={wrong:'shape'};}});try{const s=await runQualityAudit(f.spec,{store:f.store,source:f.source,selection:f.selection,objective:f.objective,transport:m.transport});assert.equal(s.status,'COMPLETED',JSON.stringify(s));assert.equal(s.counts.HOLD,8);assert.equal(m.calls.length,1);exportQualityAudit(f.store,f.source);}finally{f.store.close();f.source.close();}});
+test('QA v2 malformed rubric isolates dependent rows with fixed safe categories and never retries on cold inspect',async()=>{
+  const valid={version:'CorpusQualityRubric/0.1',instructions:'SYNTHETIC policy',criteria:[{id:'c',criterion:'SYNTHETIC criterion'}]},cases=[
+    {code:'CQA_RUBRIC_COUNT',body:{...valid,criteria:Array.from({length:13},(_,i)=>({id:'c'+i,criterion:'SYNTHETIC criterion'}))}},
+    {code:'CQA_RUBRIC_TEXT',body:{...valid,criteria:[{id:'c',criterion:'界'.repeat(171)}]}},
+    {code:'CQA_RUBRIC_ID',body:{...valid,criteria:[{id:'bad id',criterion:'SYNTHETIC criterion'}]}},
+    {code:'CQA_RUBRIC_DUPLICATE_ID',body:{...valid,criteria:[...valid.criteria,...valid.criteria]}},
+    {code:'CQA_RUBRIC_FIELDS',body:{wrong:'SYNTHETIC shape'}},
+    {code:'CQA_RUBRIC_FORMAT',body:{...valid,version:'SYNTHETIC unknown version'}},
+  ];
+  for(const entry of cases){
+    const f=await qaFixture(4,undefined,false,hash('qa format synthetic '+entry.code),true),m=nativeQa({change:r=>{if(r.operation==='rubric')r.body=entry.body;}});
+    try{const ports={source:f.source,selection:f.selection,objective:f.objective,transport:m.transport},s=await runQualityAudit(f.spec,{store:f.store,...ports});assert.equal(s.status,'COMPLETED',entry.code);assert.equal(s.counts.HOLD,4);assert.equal(s.counts.PASS,0);assert.deepEqual(s.failureCodes,{[entry.code]:4});assert.deepEqual(m.calls,[{operation:'rubric',index:0}]);assert.equal(f.store.snapshot()!.rubricRef,null);assert.equal(exportQualityAudit(f.store,f.source).export.eligibleRows,0);f.store.close();
+      const cold=openQualityAudit({...f.storeOptions,mode:'inspect'});try{verifyQualityAudit(cold,f.source);const result=await runQualityAudit(f.spec,{store:cold,...ports});assert.deepEqual(result.failureCodes,s.failureCodes);assert.equal(result.counts.HOLD,4);assert.deepEqual(m.calls,[{operation:'rubric',index:0}]);}finally{cold.close();}
+    }finally{f.store.close();f.source.close();}
+  }
+});
 
 test('observed request-binding faults stay global integrity failures instead of pure unknown',async()=>{const f=fixture(8,undefined,true);let calls=0;try{const s=await runCorpusProduction(f.spec,{store:f.store,objective:f.objective,registry:f.registry,transport:async()=>{calls++;stop('CPR_BINDING');}});assert.equal(s.status,'FENCED');assert.equal(calls,1);assert.ok(s.failureCodes.CPR_BINDING);}finally{f.store.close();}});
 test('v2 source revocation stops dispatch and cannot be softened into per-output isolation',async()=>{const f=fixture(8,undefined,true),m=nativeProduction({change:r=>{if(r.operation==='candidate')f.revokeSource();}});try{const s=await runCorpusProduction(f.spec,{store:f.store,objective:f.objective,registry:f.registry,transport:m.transport});assert.equal(s.status,'FENCED');assert.equal(m.calls.filter(c=>c.operation==='candidate').length,1);assert.equal(m.calls.filter(c=>c.operation==='review').length,0);}finally{f.store.close();}});
