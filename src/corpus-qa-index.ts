@@ -1,4 +1,4 @@
-import { canonical,copyJson,digest,hash,id,list,oneOf,shape,stop } from './wf1-json.ts';
+import { canonical,copyJson,digest,hash,id,integer,list,oneOf,shape,stop } from './wf1-json.ts';
 import { scopedQa } from './corpus-qa-types.ts';
 import type { AuditSelection,AuditState } from './corpus-qa-types.ts';
 import type { QaSelectedReader } from './corpus-qa-source.ts';
@@ -17,9 +17,16 @@ function validateIndex(input:unknown):ScopedDedupIndex{const index=shape(input,[
  * Cross-split links hold entire connected source families, including rejected QA
  * nodes. This is neither semantic ANN nor an all-history contamination guarantee. */
 export function assembleScopedIndexes(inputs:ScopedDedupIndex[],expectedDigests:string[]){
-  if(inputs.length<1||inputs.length>8||inputs.length!==expectedDigests.length)stop('CQA_INDEX');const indexes=inputs.map((v,i)=>{const index=validateIndex(v);if(hash(canonical(index))!==expectedDigests[i])stop('CQA_INDEX_BINDING');return index;}),entries=indexes.flatMap(i=>i.entries);
+  return assemble(inputs,expectedDigests,{maxInputs:8,maxRows:8*192,maxBytes:Number.MAX_SAFE_INTEGER});
+}
+/** Explicit cycle resource bounds; the legacy F2 entry point retains eight inputs. */
+export function assembleCycleIndexes(inputs:ScopedDedupIndex[],expectedDigests:string[],limits:{maxInputs:number;maxRows:number;maxBytes:number}){
+  shape(limits,['maxInputs','maxRows','maxBytes']);for(const value of Object.values(limits))integer(value,1);return assemble(inputs,expectedDigests,limits);
+}
+function assemble(inputs:ScopedDedupIndex[],expectedDigests:string[],limits:{maxInputs:number;maxRows:number;maxBytes:number}){
+  if(inputs.length<1||inputs.length>limits.maxInputs||inputs.length!==expectedDigests.length)stop('CQA_INDEX');let rows=0,bytes=0;const indexes=inputs.map((v,i)=>{const index=validateIndex(v),serialized=canonical(index);rows=integer(rows+index.entries.length);bytes=integer(bytes+Buffer.byteLength(serialized));if(rows>limits.maxRows||bytes>limits.maxBytes)stop('CQA_INDEX_RESOURCES');if(hash(serialized)!==expectedDigests[i])stop('CQA_INDEX_BINDING');return index;}),entries=indexes.flatMap(i=>i.entries);
   const key=(e:ScopedIndexEntry)=>canonical({jobId:e.sourceJobId,unitId:e.unitId}),family=(e:ScopedIndexEntry)=>canonical({jobId:e.sourceJobId,familyId:e.familyId});if(new Set(entries.map(key)).size!==entries.length)stop('CQA_INDEX_CONFLICT');
-  const parents=new Map<string,string>(),first=new Map<string,ScopedIndexEntry>(),duplicates=new Map<string,string>();for(const e of entries)parents.set(family(e),family(e));const root=(v:string):string=>parents.get(v)===v?v:root(parents.get(v)!);
+  const parents=new Map<string,string>(),first=new Map<string,ScopedIndexEntry>(),duplicates=new Map<string,string>();for(const e of entries)parents.set(family(e),family(e));const root=(v:string):string=>{let r=v;while(parents.get(r)!==r)r=parents.get(r)!;while(v!==r){const next=parents.get(v)!;parents.set(v,r);v=next;}return r;};
   for(const e of entries)for(const field of ['exactDigest','normalizedDigest','promptDigest'] as const){const k=field+':'+e[field],prior=first.get(k);if(prior){parents.set(root(family(e)),root(family(prior)));if(!duplicates.has(key(e)))duplicates.set(key(e),key(prior));}else first.set(k,e);}
   const splits=new Map<string,Set<string>>();for(const e of entries){const r=root(family(e)),set=splits.get(r)??new Set<string>();set.add(e.split);splits.set(r,set);}
   return {version:'CorpusScopedAssembly/0.1',indexDigests:expectedDigests,comparison:'EXACT_NORMALIZED_PROMPT_ONLY',rows:entries.map(e=>({sourceJobId:e.sourceJobId,unitId:e.unitId,poolId:e.poolId,familyId:e.familyId,split:e.split,rowRef:e.rowRef,rowDigest:e.rowDigest,duplicateOf:duplicates.get(key(e))??null,familyHold:splits.get(root(family(e)))!.size>1,qaDisposition:e.qaDisposition,eligibleForNextExport:e.qaDisposition==='PASS'&&!duplicates.has(key(e))&&splits.get(root(family(e)))!.size===1})),trainingReady:false,trainingJobPolicy:'NOT_AUTHORIZED'};
