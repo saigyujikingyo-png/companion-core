@@ -521,7 +521,7 @@ export class AnchoredVault {
       ...(this.#identity.storageProfile===COLD_SAFETY_PROFILE?{hotIngressCount:this.#ledger.hotCount,coldIngressCount:this.#ledger.coldCount}:{}),
       lastAcknowledgedDeliveryId: this.#ledger.globals.lastAcknowledgedDeliveryId, manualResumeRequired: true, coverage: 'current-state' as const }));
   }
-  exportBackup(target: string): BackupReceipt {
+  exportBackup(target: string, maxOutputBytes?: number): BackupReceipt {
     return this.#access(() => {
       const directory = storagePath(target, this.#identity.storageDomain, this.#authority, false);
       disjoint(directory, this.#identity.directory);
@@ -531,8 +531,21 @@ export class AnchoredVault {
         const files='files' in decoded?decoded.files:undefined;
         const bytes = Buffer.from(JSON.stringify(files?{format:INCREMENTAL_FORMAT,head:this.#head!,files:[...files].sort(([a],[b])=>a.localeCompare(b)).map(([name,data])=>({name,size:data.length,digest:sha(data)}))}:decoded.stage));
         const receipt: BackupReceipt = { format: this.#identity.format, coverage: 'current-state', head: this.#head!, stageDigest: sha(bytes) };
-        createDirectory(directory);if(files)for(const[name,data]of files)writeNew(join(directory,name),data);
-        writeNew(join(directory, 'current-state.json'), bytes); writeNew(join(directory, 'backup.json'), Buffer.from(JSON.stringify(receipt)));
+        const output: [string, Buffer][] = [...(files ?? []), ['current-state.json', bytes], ['backup.json', Buffer.from(JSON.stringify(receipt))]];
+        if (maxOutputBytes !== undefined) {
+          // Keep the existing target gate ahead of budget refusal; createDirectory
+          // still rechecks at publication. This check reserves no filesystem space.
+          if (existsSync(directory)) fail('ANCHOR_TARGET_EXISTS');
+          if (typeof maxOutputBytes !== 'number' || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 0) fail('INVALID_INPUT');
+          let outputBytes = 0;
+          for (const [, data] of output) {
+            outputBytes += data.length;
+            if (!Number.isSafeInteger(outputBytes)) fail('ANCHOR_BACKUP_OUTPUT_LIMIT');
+          }
+          if (outputBytes > maxOutputBytes) fail('ANCHOR_BACKUP_OUTPUT_LIMIT');
+        }
+        createDirectory(directory);
+        for (const [name, data] of output) writeNew(join(directory, name), data);
         return structuredClone(receipt);
       } finally { disposeDecoded(decoded); }
     });
