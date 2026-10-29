@@ -4,6 +4,8 @@
 
 ## 取舍和先后
 
+新增独立 `inspectRetainedRoots` 可对调用方显式列出的最多8个叶目录做有界元数据观测，见[容量检查](CAPACITY-INSPECTION.md#explicit-retained-roots)。它不证明目录归属或列表完整性；全局其他generation/backup仍为unmeasured，不与当前代报告自动求全库总量，不提供物理占盘、可回收量或GC。P5冷Store实验继续暂停，既有容量上限与精确控制合同不变。
+
 | 路线 | 决定与原因 |
 | --- | --- |
 | Safety不可变终态单冷段 | IF10已合并；热冷精确查回保持。三组负结果及一个有条件应用写入收益保留，不保证总成本下降 |
