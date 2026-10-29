@@ -18,6 +18,8 @@ import {SHARD_LIMITS,SHARD_ROOT_SQL,ShardDatabase,normalizeShard,manifest as val
 import type {ShardInput,ShardRequest,ShardReceipt,ShardManifest,ShardReservation,ShardMeta,AnyRequest,AnyReceipt} from './authority-sharded-format.ts';
 import {inspectShardFiles,obligations,requiredFiles,loadShards,stageState,verifyFile,exportShardClosure,readShardClosure} from './authority-sharded-storage.ts';
 import type {LoadedShards} from './authority-sharded-storage.ts';
+import {SAFETY_V2_PROFILE,safetyOperation,safetyPhase} from './safety-v2-format.ts';
+import {readSafetyV2File} from './safety-v2-file.ts';
 
 export type PendingCommit = { version: 2; kind: 'create' | 'write' | 'restore' | 'rekey' | 'schema-migration' | 'fanout-maintenance' | 'compaction' | 'storage-upgrade' | 'legacy-m2-import'; operationId: string;
   requestDigest: string; oldHead: VaultHead | null; newHead: VaultHead; stagePath: string; stageDigest: string;
@@ -516,7 +518,9 @@ export class LocalSqliteAuthority {
       }
     }
     if (pending.stagePath !== join(next.directory, `stage-${pending.operationId}.json`)
-      || (this.#version>=5?hashFileBounded(pending.stagePath,pending.newHead.format===INCREMENTAL_FORMAT?65536:STAGE_LIMIT,this.#workspace!):sha(pending.newHead.format===INCREMENTAL_FORMAT?readBounded(pending.stagePath,65536):readBounded(pending.stagePath))) !== pending.stageDigest) fail('ANCHOR_TRANSITION');
+      || (this.#version>=5?hashFileBounded(pending.stagePath,pending.newHead.format===INCREMENTAL_FORMAT?65536:STAGE_LIMIT,this.#workspace!):next.storageProfile===SAFETY_V2_PROFILE
+        ?safetyOperation(()=>safetyPhase(65537,'v2 PREPARED stage hash read',()=>sha(readSafetyV2File(pending.stagePath,65536))))
+        :sha(pending.newHead.format===INCREMENTAL_FORMAT?readBounded(pending.stagePath,65536):readBounded(pending.stagePath))) !== pending.stageDigest) fail('ANCHOR_TRANSITION');
   }
   #finalize(pending: PendingCommit): AnchorReceipt {
     if(this.#version>=5)plainJsonBytes(pending);

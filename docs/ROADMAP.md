@@ -18,6 +18,8 @@
 
 容量路线已有IF9物理压实、IF10 Safety终态冷段和IF11 authority有界永久冷路由；当前代fanout只消除旧代历史对当前512 nodes/2048 edges准入的污染，不释放永久历史。[长期容量设计](LONG-TERM-CAPACITY-DESIGN.md)继续保留Store完整RAM serialize、精确旧键/UNKNOWN、原总限及可信恢复边界；P5冷Store镜像负成本实验暂停，不推广或调参。IF10三组小历史成本为负，较大固定案例只证明有条件的应用写入减少。生产authority/custody与恢复准入独立推进。[三域架构决议](ADR-MEMORY-TOOL-BOUNDARY.md)与[I17](BAYESIAN-RECONSTRUCTION-DESIGN.md)仍按各自冻结入口推进，不以工程接口验收代替认知质量或训练接受。以下更早切片保留当时验证范围，其中旧“持久fanout未实现”时态已被后续实现取代。
 
+新增[Safety ledger v2](SAFETY-LEDGER-V2.md)显式 profile：hot256/永久total16384、流式精确热冷闭包、P4只读升级及独立归档动作；旧profile界与digest不变。短公共历史可验证满hot拒绝→归档→同请求成功；超过8192的固定长轨迹仍为NOT_RUN，不能用codec结构fixture代替。W128是新增操作级accounted预算，不扩大authority W12/B64、replay64、Store16MiB或目录256MiB，也不承诺RSS/I/O收益。P5/#15继续暂停。
+
 [历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
 
 **AEMC基础设施 IF3/IF4：** [完整前置矩阵](AEMC-INFRASTRUCTURE.md)、[研究ADR](AEMC-INFRA-RESEARCH.md)和[版本化合同](AEMC-INFRA-CONTRACTS.md)保留全部训练前范围。在外锚/密钥与schema2持久消费者基础上，已实现 [v3增量存储、链备份和新目标压实](INCREMENTAL-STORAGE.md)，以及 [旧M2冻结包导入、全局来源登记与实际准入门](LEGACY-M2-IMPORT.md)。[IF0](AEMC-INFRA-EVIDENCE-IF0.md)、[IF1](AEMC-INFRA-EVIDENCE-IF1.md)、[IF2](AEMC-INFRA-EVIDENCE-IF2.md)证据保留其原快照。生产custody、十年规模、历史GC、真实检索/多模态质量及其余前置仍开放；不授予训练准入，下方旧切片保留历史范围。

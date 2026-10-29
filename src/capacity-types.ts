@@ -1,6 +1,7 @@
 import type {VaultHead} from './anchored-codec.ts';
 import type {FANOUT_LIMITS} from './fanout-types.ts';
 import type {SafetyColdDescriptor} from './safety-format.ts';
+import type {SafetyColdV2} from './safety-v2-format.ts';
 import type {Counts} from './authority-cold-format.ts';
 
 export type FrozenData<T> = T extends object ? {readonly [K in keyof T]:FrozenData<T[K]>} : T;
@@ -55,7 +56,8 @@ export type GenerationCapacity=FrozenData<{
   diskLimitBytes:number;otherGenerationsAndBackups:'unmeasured';
 }>;
 export type SafetyCapacity=FrozenData<{ingressCount:number;ingressLimit:number;unknownCount:number;reserved:number;maxCalls:number;
-  hotCount?:number;coldCount?:number;coldEncodedBytes?:number;coldDecodedBytes?:number;coldDescriptor?:SafetyColdDescriptor|null}>;
+  hotCount?:number;coldCount?:number;coldEncodedBytes?:number;coldDecodedBytes?:number;coldDescriptor?:SafetyColdDescriptor|SafetyColdV2|null;
+  hotLimit?:number;entryLimitBytes?:number;globalsLimitBytes?:number;workspaceLimitBytes?:number;workspacePeakBytes?:number}>;
 type VaultCapacityBase={version:1;authority:AuthorityCapacity;blockers:Array<'VAULT_PREPARED'|'VAULT_UNREGISTERED'|'LEGACY_ADMISSION_REQUIRED'|'DIRECTORY_OVER_DISK_LIMIT'|'COMMIT_LIMIT_REACHED'>};
 export type VaultCapacity=FrozenData<VaultCapacityBase&(
   {status:'ACTIVE';detailsRead:true;currentHead:VaultHead;pending:null;legacyAdmission:'not-applicable'|'required'|'admitted';

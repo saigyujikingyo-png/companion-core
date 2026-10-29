@@ -1,5 +1,7 @@
 # IF10 immutable terminal Safety segment
 
+This document retains the original P4 contract and evidence. The separate [Safety ledger v2 profile](SAFETY-LEDGER-V2.md) adds a bounded streaming representation and explicit migration; it does not change the limits or results described below.
+
 This slice implements the frozen [IF10 contract](IF10-SAFETY-COLD-SEGMENT-PLAN.md). It does not delete historical generations, release consumed quota, resolve UNKNOWN, enlarge the 8192-request bound, train a model, or migrate private data.
 
 `blocks-br4-safety-cold-v1` (P4) is an explicit v3 storage profile. Create/import starts with `safetyCold: null` and all entries hot. Only P3 (`blocks-br4-safety-br4-v1`) can upgrade directly to P4. Upgrade and `AnchoredVault.archiveTerminalSafety(request)` are two separate, idempotent effects. The latter reuses `CompactRequest` and authority kind `compaction`, with action `archive-terminal-safety-v1` in its independent request digest. A retry uses the original receipt's old head. Reusing its operation ID for compact/repack/upgrade conflicts.
