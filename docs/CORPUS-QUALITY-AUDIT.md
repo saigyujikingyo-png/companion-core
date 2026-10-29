@@ -10,6 +10,14 @@ v2 生产 qualified row/export 的 0.2 版本可以进入新的选择与 QA 链�
 
 完整索引继续保留 PASS、REJECT、HOLD、UNCERTAIN 节点用于跨批连通去重，最终 eligible manifest 只是该完整索引的选择结果。归档 reader 的新 profile 仍只读 metadata/index/selection 与末端事件，不读 attempts/cases 表、provider raw/reasoning/rubric/verdict 正文或旧教材；它依赖受信宿主独立 pin 的 descriptor 和 cold receipt，摘要本身不是签名。缺 usage 的 raw 证明发生于原 production/QA 的当前 attempt 合法读取域，不扩张后续索引授权。新增测试全部为合成数据，不改变真实批次验收或 Student 训练状态。
 
+### 新 v2 请求策略与旧批边界
+
+`CorpusQualityAuditRequestPolicy/0.1` 将 coordinator 与 reviewer 的实际 system 文本摘要纳入 `QA_V2_PROFILE_DIGEST`。协调器明确收到既有封闭 JSON 合同：1–12 条唯一 ASCII ID 的 criteria、instructions 最多 2048 UTF-8 字节、每条 criterion 最多 512 字节，建议 6–8 条简短标准；本地限制不放宽，不截断、修复或重试输出。两方均按每条任务适用的标准评审，课程或数据集的六域覆盖不作为每行或每个 review batch 的要求，不强求未要求的多语言、工具、身份或私生活展示。题目明确要求翻译或跨语言保真时，缺少必需语言或保真失败仍须判该要求不合格。相关事实、来源、隐私、权限、执行真实性及不确定性检查仍必须满足，不因此自动 PASS。
+
+此策略只供新 build、新 job。新 reader 明确拒绝旧 v2 profile；旧 v2 已消费批次继续使用其原冻结 build/source（本次旧 execution62 为 `070f0ba1…`），不迁移、重开或改写旧请求。新 QA index/assembly profile 随 QA profile 派生变化，宿主须重新绑定对应 build、模板和准入；不得将旧 v2 归档交给新 reader 混读。v1 的 profile、rubric/review 请求字节和旧 F1/F2 读取路径保持不变。
+
+这次修复针对已观察的一次 16 行 canary：3 个 rubric 格式失败导致 12 行 HOLD，另 4 行被评审拒绝；技术冷验证通过与质量门失败分别保留。新 v2 在现有 `failureCodes` 中仅记录固定的 `CQA_RUBRIC_COUNT`、`TEXT`、`ID`、`DUPLICATE_ID`、`FIELDS` 类别及通用 `CQA_RUBRIC_FORMAT` 回退，不记录输出正文、异常 message 或 stack。类别不能证明样本质量，存储读取和 native 完整性失败仍 fence。后续真实模型质量须另行验收，Student 未获训练授权。
+
 ## 来源与读取边界
 
 受信 launcher 在旧 authority 仍可合法 inspect 时，通过 `prepareQualitySelection` 读取快照、registry、export、所选合格 row/candidate 及对应 token 收据，冻结旧 job/spec/build/profile/head、ledger/authority 文件摘要、export 摘要和逐条精确 refs/digests。它不调用 `verifyProduction`，不读取旧 provider 请求、raw、reasoning、计划/旧评分正文、被排除候选或 sealed 材料。新独立 selection/read grant 明确当前 read/retain、派生 review/training 用途；新 `openQualityArchive` 只暴露所选 case ID 的读取，不暴露任意 ref 解密。
