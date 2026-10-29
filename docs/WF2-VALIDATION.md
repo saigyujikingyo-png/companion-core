@@ -1,5 +1,19 @@
 # WF2 validation record
 
+The [closed failure diagnostics](WF2-FAILURE-DIAGNOSTICS.md) and [cross-model unit pilot](WF2-UNIT-PILOT.md) have completed source review and one real, separately admitted `.8` run. Authenticated metadata-only inspection identified the retained medium terminal code as `WF1_PAIR_BINDING`; no old payload was read or repaired.
+
+## Current .8 result — stopped, no frozen dataset
+
+The run completed four sealed units and four plan units, then stopped on the second candidate: `FIRST_FOUR_GATE / WF2_FIRST_EXACT_ORACLE / unitIndex=1`, response failure `NONE`. It consumed Together 11 and DeepSeek 1 calls, with one qualified candidate and one quarantined candidate. **No four-row manifest was frozen; delivered dataset rows remain zero.** The qualified candidate is retained evidence, not automatic training admission or completion of the older experiment.
+
+All 12 calls had known usage: input 13,242, completion 12,390 (including reported reasoning); estimated usage 9,793 micro-USD and reservation 72,813 micro-USD at frozen declared prices. Actual invoice is unknown. The wrapper measured 125.842 seconds including startup, checks and shutdown. Per-call latency and account RPM/TPM limits were not measured; this run cannot establish production capacity.
+
+Fresh cold inspection `/6` agreed with the live failure and counts, with authority `REVOKED`, `RECORDED_CLAIMS_ONLY`, and manifest `NOT_READ`. Duplicate execution was refused before any new worker, provider request or provider-key read. Both actual children closed (worker exit 0, DSH exit 1), without force or completion ACK. The original 26 source files, 31 carrier files and 22 archived runtime modules were preserved at run closure. Safe receipt SHA256: `3aa87b462fdaac6be0fe39e5b612174154287074f1b17da3197c5ca7a7f10dc3`.
+
+One combined local suite passed 978/978 plus strict TypeScript; independent Astra review accepted the source, carrier and actual negative result. Cross-platform acceptance belongs to the new PR checks, not the older CI receipts below. Subsequent work must use a separate admission to harvest already-qualified material or dispatch new units; this consumed run is not resumed, repaired or regraded. Four symbolic cases are a pipeline canary, not the large first-training corpus or a general language/emotion evaluation.
+
+## Retained .7 validation snapshot
+
 **Engineering delivery is `PARTIAL`; qualified real teaching items are0.** The bounded-depth6 low-effort pilot stopped at `EXACT_ORACLE`; HIGH2 stopped with response code `INCOMPLETE_FINAL`; the final medium-effort comparison stopped after two Together calls with stop reason `UNKNOWN` and response code `NONE`. The medium record reports sealed=true and planned=false; its specific plan-stage rejection cause is unverified. No first qualified dataset or completed teaching workflow has been established. The earlier expired high preparation did not run and is separate from HIGH2.
 
 This record separates source checks, local test evidence, Windows native scheduling, public probes, actual private campaigns and commit-specific CI. Failed attempts remain consumed and are not repaired, replayed or regraded.
