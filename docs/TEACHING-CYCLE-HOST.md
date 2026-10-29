@@ -284,6 +284,18 @@ still require normal-machine validation. The passing QA diagnostic is reused;
 complete core coverage follows in the three-platform CI run. Neither the source
 review nor that isolated pass replaces the original failures with acceptance.
 
+The v2 launcher suite subsequently passed all seven tests on the normal Windows
+host. Its first CI run nevertheless failed six controller tests before worker or
+key access at `CUSTODY_PATHS`; the PS5.1 array regression and both core freeze/recovery
+tests passed. A separate controlled PS5.1 probe reproduced `Test-Path` succeeding
+for a hidden directory while `Get-Item` without `-Force` failed. The v3 candidate
+uses `Get-Item -Force` when checking custody ancestors and reading owned files so
+their attributes remain inspectable; the same file, size and reparse checks stay
+in place. A regression explicitly hides a synthetic ancestor and metadata file,
+then verifies that a hidden junction is still refused. The old
+CI log did not identify the specific failing ancestor, so that attribution remains
+unconfirmed until hosted validation. Existing failed CI receipts are retained.
+
 The intended first actual run is the independently approved 16-candidate calibration.
 Any subsequent 768-candidate cycle is a new separately admitted cycle after the
 declared quality gate. This launcher does not autonomously start it or combine its

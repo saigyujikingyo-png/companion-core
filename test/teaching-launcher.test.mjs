@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath,pathToFileURL } from 'node:url';
 import { canonical,hash } from '../src/wf1-json.ts';
@@ -26,6 +27,24 @@ test('PS5 revoke JSON closure enumerates exact string paths and rejects nested/d
   const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),launcher=fileURLToPath(new URL('../runtime/teaching-cycle/Invoke-TeachingCycle.ps1',import.meta.url)),revoker=fileURLToPath(new URL('../runtime/teaching-cycle/teaching-revoker.mjs',import.meta.url));
   const script=`$ErrorActionPreference='Stop'; if($PSVersionTable.PSEdition-cne'Desktop'-or$PSVersionTable.PSVersion.Major-ne5){throw 'wrong shell'}; $t=$null;$e=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile(${quote(launcher)},[ref]$t,[ref]$e);$fn=$ast.Find({param($n)$n-is[System.Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-ceq'ReadRevokeClosure'},$true);. ([scriptblock]::Create($fn.Extent.Text));$source=Get-Content -LiteralPath ${quote(revoker)} -Raw -Encoding UTF8;$paths=ReadRevokeClosure $source;if($paths.Count-ne14-or$paths[0]-isnot[string]-or'runtime/teaching-cycle/teaching-native-worker.mjs'-cnotin$paths){throw 'bad flatten'};foreach($bad in @('REVOKER_FILES=[["a","b","c"]]','REVOKER_FILES=["a","a","b"]','REVOKER_FILES=["a",3,"c"]')){$denied=$false;try{$null=ReadRevokeClosure $bad}catch{$denied=$true};if(-not$denied){throw 'bad accepted'}};'PS51_EXACT_ARRAY_PASS'`;
   const result=spawnSync(shell,['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:15000});assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/PS51_EXACT_ARRAY_PASS/);
+});
+
+test('PS5 custody guard inspects hidden ancestors/files and still rejects a hidden junction',{skip:!windows},()=>{
+  const base=fs.realpathSync.native(fs.mkdtempSync(path.join(tmpdir(),'teaching-custody-path-'))),ancestor=path.join(base,'hidden parent 教学'),training=path.join(ancestor,'training'),control=path.join(ancestor,'control'),runtime=path.join(training,'cycle'),outside=path.join(base,'outside'),junction=path.join(training,'junction');
+  for(const directory of [runtime,control,outside])fs.mkdirSync(directory,{recursive:true});fs.symlinkSync(outside,junction,'junction');
+  const metadata=path.join(control,'synthetic-metadata.txt');fs.writeFileSync(metadata,'SYNTHETIC_METADATA_ONLY',{flag:'wx'});
+  const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),launcher=fileURLToPath(new URL('../runtime/teaching-cycle/Invoke-TeachingCycle.ps1',import.meta.url));
+  const script=`$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; if($PSVersionTable.PSEdition-cne'Desktop'-or$PSVersionTable.PSVersion.Major-ne5){throw 'wrong shell'};
+$t=$null;$e=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile(${quote(launcher)},[ref]$t,[ref]$e);foreach($fn in $ast.FindAll({param($n)$n-is[System.Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-in@('AssertCustodyPaths','ReadOwnBytes')},$true)){. ([scriptblock]::Create($fn.Extent.Text))};
+$config=[pscustomobject]@{approvedTrainingRoot=${quote(training)};controlRoot=${quote(control)};children=@();cycle=[pscustomobject]@{runtimeRoot=${quote(runtime)};authorityPath=${quote(path.join(control,'cycle.json'))}};launcher=[pscustomobject]@{credentialsDpapiPath=${quote(path.join(control,'synthetic-not-created.dpapi'))}}};
+AssertCustodyPaths; $original=[IO.File]::GetAttributes(${quote(ancestor)});$fileOriginal=[IO.File]::GetAttributes(${quote(metadata)});$junctionOriginal=[IO.File]::GetAttributes(${quote(junction)});
+try{[IO.File]::SetAttributes(${quote(ancestor)},($original-bor[IO.FileAttributes]::Hidden-bor[IO.FileAttributes]::System));AssertCustodyPaths;
+ [IO.File]::SetAttributes(${quote(metadata)},($fileOriginal-bor[IO.FileAttributes]::Hidden-bor[IO.FileAttributes]::System));if([Text.Encoding]::UTF8.GetString((ReadOwnBytes ${quote(metadata)} 64))-cne'SYNTHETIC_METADATA_ONLY'){throw 'hidden metadata mismatch'};
+ [IO.File]::SetAttributes(${quote(junction)},($junctionOriginal-bor[IO.FileAttributes]::Hidden-bor[IO.FileAttributes]::System));$attrs=[IO.File]::GetAttributes(${quote(junction)});if(($attrs-band[IO.FileAttributes]::Hidden)-eq0-or($attrs-band[IO.FileAttributes]::ReparsePoint)-eq0){throw 'hidden junction missing'};
+ $config.cycle.runtimeRoot=${quote(junction)};$denied=$false;try{AssertCustodyPaths}catch{if($_.Exception.Message-cne'TCH_CUSTODY'){throw};$denied=$true};if(-not$denied){throw 'junction accepted'};
+ 'PS51_HIDDEN_ANCESTOR_CHECKED_REPARSE_DENIED'
+}finally{[IO.File]::SetAttributes(${quote(junction)},$junctionOriginal);[IO.File]::SetAttributes(${quote(metadata)},$fileOriginal);[IO.File]::SetAttributes(${quote(ancestor)},$original)}`;
+  const result=spawnSync(shell,['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',windowsHide:true,timeout:15000});assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/PS51_HIDDEN_ANCESTOR_CHECKED_REPARSE_DENIED/);
 });
 
 test('Windows anonymous-stdin cold worker uses owned Job and never reads provider credentials; duplicate Run starts nothing',{skip:!windows},async()=>{

@@ -9,7 +9,7 @@ $config=$null;$key=$null;$credentialBytes=$null;$credentials=$null;$workers=0;$k
 $executionExit=$null;$terminal=$false;$revokeAttempted=$false;$revocation='NOT_REQUESTED'
 
 function ReadOwnBytes([string]$file,[long]$cap){
- $item=Get-Item -LiteralPath $file
+ $item=Get-Item -LiteralPath $file -Force
  if($item.PSIsContainer-or($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0-or$item.Length-lt1-or$item.Length-gt$cap){throw 'TCH_FILE'}
  $parent=$item.Directory
  while($null-ne$parent){if(($parent.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'TCH_PATH'};$parent=$parent.Parent}
@@ -65,7 +65,8 @@ function AssertCustodyPaths {
  if([IO.Path]::GetFullPath($config.launcher.credentialsDpapiPath).StartsWith($training+'\',[StringComparison]::OrdinalIgnoreCase)-or[IO.Path]::GetExtension($config.launcher.credentialsDpapiPath)-cne'.dpapi'){throw 'TCH_CREDENTIAL_PATH'}
  foreach($p in @($training,$control,$config.launcher.credentialsDpapiPath)+$runtime+$files){
   if(-not[IO.Path]::IsPathRooted($p)-or$p-match'(^|[\\/])OneDrive(?:\s|[\\/]|$)'){throw 'TCH_CUSTODY'}
-  $part=[IO.Path]::GetFullPath($p);while($part){if(Test-Path -LiteralPath $part){$item=Get-Item -LiteralPath $part;if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'TCH_CUSTODY'}};$part=[IO.Path]::GetDirectoryName($part)}
+  # Hidden ancestors still require the same reparse check; -Force exposes their metadata.
+  $part=[IO.Path]::GetFullPath($p);while($part){if(Test-Path -LiteralPath $part){$item=Get-Item -LiteralPath $part -Force;if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'TCH_CUSTODY'}};$part=[IO.Path]::GetDirectoryName($part)}
  }
 }
 function ReadDpapi([string]$file,[int]$limit){
