@@ -1,5 +1,7 @@
 # WF2 stable named data-function experiment
 
+Current failure-output versions are specified in [WF2 failure diagnostics](WF2-FAILURE-DIAGNOSTICS.md). The transport versions below retain the earlier protocol snapshot; provider requests and profile semantics are unchanged.
+
 This is a separately admitted request profile of `wf1-campaign/0.6`, not a new wire grammar or an automatic fallback. The previous beta fixed-slot run remains STOPPED with zero qualified items. Its authenticated bounded diagnosis reported native JSON invalid, strict parser `WF1_JSON`, and invalid root; the response had already preserved an arguments artifact. It did not reach slot projection, local schema or exact oracle. No previous output is repaired, retried or regraded.
 
 The finite profile registry admits the original beta digest `50a62d005dc05d8e97c06f30afe501a4279ca14f4d264a23b3a4852f5e71a6bc` and one new stable descriptor. The original `.3`, `.4`, `.5` and beta `.6` profile digests and request bytes stay unchanged. Omitting the new selector preserves beta `.6` request behavior; production uses the exact admitted spec digest. Historical runs require their archived worker and source closure.

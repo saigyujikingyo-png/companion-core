@@ -1,6 +1,12 @@
 # Companion Core
 
-[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)分列源码、原生调度、公开探针、真实教师与对应提交 CI。工程交付 `PARTIAL`；低 effort、HIGH2 和 medium 实际均已停止，合格数据0。Student 推理/训练未执行，教学数据保持私有。
+[CorpusQualityAudit/0.1 当前切片](docs/evidence/CORPUS-QUALITY-AUDIT-20261028.md)已从真实 API 生成的合成候选中冻结选择 127 条并完成实际模型 QA：116 PASS、9 REJECT、2 UNCERTAIN、0 HOLD/PENDING；本次 scoped 筛选导出 116 条（train 101 / dev 15），继承原精确计量的 8,571 input / 34,110 loss / 42,681 full tokens。33 次 native fetch、冷验证、权限撤销及重复执行拒绝分别留证；模型意见不等于事实或训练资格，Student 训练未启动。冻结源码的本机 whole 为 **1,080/1,080、0 fail、0 skip**，跨平台结果以本切片提交的 PR 检查记录为准。下方较早批次保留历史范围。
+
+[CorpusTeacherPilot/0.1 双队列切片](docs/CORPUS-TEACHER-PILOT.md)已完成一次真实小批：Together/DeepSeek 共 13 次调用，6 条新候选中 5 条通过模型评审、1 条独立隔离；加密清单与 344 input / 1,256 loss / 1,600 full tokens 经新进程复核一致，结束后撤销调用权限，重复执行无新增请求。Student 目标固定为官方 Nemotron 3.5 Super VL 120B-A12B NVFP4 混合精度版本；保留 Mamba/attention/MoE 架构边界，packing 关闭。候选标记为 `MODEL_REVIEWED`，Student 训练未启动；跨平台验证按本切片提交的 CI 记录。
+
+[CorpusPipeline/0.1 的 CP0 第一片](docs/CORPUS-PIPELINE.md)已实际采收1条合格候选（train1/dev0），生成新的加密清单并通过独立进程核验。固定 Student tokenizer 测得94 input /18 loss /112 full tokens，另一进程重算一致；计量回执独立保存，旧 `.8` STOPPED 和失败原件保留。本次采收新增模型调用0，Student训练未启动。
+
+[WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)已补齐失败诊断，并实现 [跨模型四单元 canary](docs/WF2-UNIT-PILOT.md)。真实 .8 完成4个密封单元和4个计划单元，调用 Together 11次、DeepSeek 1次后因第二候选未通过精确验算停止：已记录1条合格候选、1条隔离候选，原协议的四行 manifest 未完成。978项本地测试及独立审查通过；后续 CP0 单行采收独立记账，Student 推理/训练未执行，教学数据保持私有。
 
 [当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF11 的本机子集已进入 main，包括 [IF9 Store 物理压实](docs/CAPACITY-REPACK.md)（PR #5）、[IF10 Safety 终态冷段](docs/SAFETY-COLD-SEGMENT.md)（#6）、IF11 authority 有界永久冷路由（#12）；当前 generation fanout（#17）、E1a（#13）与 E1b（#16）也已合并。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的 BCD/共享 raw HTTP/E2 TEXT Host 于2026-10-28合并为 `b58310c`（tree `c89ff674`，与1393项/strict/独审候选相同），push+PR 14/14 CI通过，合并后main 7/7 CI通过。E3a 为本次 [SINGLE_MESSAGE_CONTROL_PROTOTYPE](docs/ENDOGENOUS-LIFECYCLE.md) 候选，不是长期收件队列或真实 AgentAPI 部署。[长期容量](docs/LONG-TERM-CAPACITY-DESIGN.md)仍有整库RAM镜像、16MiB图、8192 Safety总数及authority四个不可复用槽等硬界；P5 Store冷镜像负成本实验暂停，未推广。既有成本/阴性证据保留；真实新provider/Host部署、跨机和训练没有由本轮合成验证取得接受。
 

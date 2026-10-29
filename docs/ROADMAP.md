@@ -1,6 +1,18 @@
 # 实施与持续开发路线
 
-**本批 WF2：** [教师控制与小批验收](WF2-VALIDATION.md)分列旧阴性、公开检查与代码证据；first-four 仅以4 unique（3 train /1 dev）`PILOT_ONLY`为上限，余12 families /8 pairs `NOT_RUN`。最终 medium 已停止、合格0，工程 `PARTIAL`。下一批先做无正文阶段/拒绝诊断，再研究小单元生成/任务拆分；独立确定性标签须单列来源与新协议，均非本批已实现。
+**新 job 执行策略 v2（本片实现，验收按精确源码记录）：** [production v2](CORPUS-PRODUCTION.md#explicit-policy-v2-for-new-jobs)与[QA v2](CORPUS-QUALITY-AUDIT.md#新-job-显式-policy-v2)显式选择 accounting-only、同 attempt raw 证明的 usage 缺报准入、可信 unknown 局部隔离和不重发恢复；完整索引使用独立 profile 延续跨批去重。旧 v1 与冻结批次不迁移。[S2 持久教学循环](TEACHING-CYCLE.md)已实现待验收的合成纵向链：独立 child 共享本机 provider/account 资源、跨微轮完整索引、UNKNOWN 不重发和明确宿主回收。逻辑总量可配置，物理 child 仍保持 192 上限；多 mentor/macro rounds 与 Student 训练未交付。
+
+**独立追加 QA（开发/合成验证中）：** [CorpusQualityAudit/0.1](CORPUS-QUALITY-AUDIT.md)以新 selection/read grant 和新 once 账本审阅已选 eligible 文本，DS 制定 rubric、Together GPT-OSS 盲审，追加筛选清单和 scoped 跨 job 指纹索引；旧接受记录不改。新增[QA 目标基线](AUDIT-TARGET-BASELINE.md)与历史生成基线分开绑定。实际 QA、宿主/CI 与训练仍分别验收。
+
+**后续里程碑：无外部输入的自主唤醒与休息（待实现/验收，首训覆盖待做）。** 首次上电即使用户尚未输入第一条消息，也应可由内部状态、记忆和目标演化获得唤醒机会，自选思考、探索、行动、发声或安静，并能休息后再醒。验收必须在没有外部输入的条件下记录这些选择及真实执行结果；固定开场白或机械定时输出不算通过，内部唤醒机会不等于必须输出。本里程碑不阻塞当前生产/QA，不授予常驻、无限推理或额外工具权限，当前宿主不因此改动。
+
+**当前新生产切片（开发/合成验证中）：** [CorpusProduction/0.1](CORPUS-PRODUCTION.md)实现128候选校准所需持久双队列、逐项隔离、job内跨批去重、分能力池/分split不可变产物和官方batch tokenizer。真实生产、新head CI和Student训练分别待验收。规范目标入口为[出厂人格与目标连续性](FACTORY-BASELINE.md)；旧CP0Q原件及证据不重跑、不改写。
+
+**当前 CP0Q：** [六单元双队列与独立分词计量](CORPUS-TEACHER-PILOT.md)已完成真实小批：13 次模型调用产生 5 条模型评审通过候选，1 条局部隔离；新进程重算 1,600 full tokens 一致，自动撤销与重复执行拒绝通过。单元级 JSON、长度、重复或模型评审失败独立隔离；来源、权限、未知提交及用量失控停止新增调用。新语料使用官方 Nemotron 3.5 Super VL NVFP4 身份和独立计量回执，旧 CP0 数学语料及失败原件保留。后续推进跨批语义去重/CP1 导入与 Student 后端；模型评审通过不等于事实验证或训练许可。本批的实际运行、独立审查与跨平台结果以切片证据为准，不复用旧运行的 PASS。
+
+**CP0 第一片：** [独立合格候选采收](CORPUS-PIPELINE.md)已实际交付1条复用合格候选及新的加密清单，train1/dev0，新进程核验通过；固定 Student tokenizer 的94 input /18 loss /112 full tokens经另一进程重算一致。本次新增模型调用0，原失败不改写，训练未启动。下一片是独立生成/review双队列与逐项失败隔离，再做CP1现成语料导入和256GB训练池；单行数学产物仅证明采收链，不代表陪伴模型训练质量或规模产能。
+
+**本批 WF2：** [失败诊断](WF2-FAILURE-DIAGNOSTICS.md)已定位旧 medium 的 `WF1_PAIR_BINDING`；[跨模型四单元 canary](WF2-UNIT-PILOT.md)已完成真实运行及冷验。4 seal/4 plan通过，T11/DS1后因第二候选未过精确验算停止，记录1条合格、1条隔离，原协议的四行 manifest 未完成。旧实验保持原结果，CP0采收另外记账；本 canary 不代表256GB首训数据池、Student训练或规模生产已交付。
 
 **当前工程基线：** IF9（PR #5）、IF10（#6）、IF11 authority永久冷路由（#12）、当前代fanout（#17）、E1a（#13）及E1b（#16）已合并。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的BCD/共享raw HTTP/E2合并为 `b58310c`，tree与1393项/strict/独审候选一致，push+PR 14/14通过；合并后main 7/7 CI通过。[E3a](ENDOGENOUS-LIFECYCLE.md) 本轮新增 SINGLE_MESSAGE_CONTROL_PROTOTYPE，一生一个入站槽/一次显式consider，接收不等于接单；真实AgentAPI、多消息rollover、ACTION、部署、跨机及训练不在本片接受范围。历史测试数量和成本不跨轮相加。
 

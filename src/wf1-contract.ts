@@ -7,16 +7,17 @@ import { WF2_STRICT_PROFILE_DIGEST } from './wf2-strict-data.ts';
 import { WF2_SLOTS_PROFILE_DIGEST } from './wf2-fixed-slots.ts';
 import { slotProfile } from './wf2-named-data.ts';
 import { WF2_PILOT_PROFILE_DIGEST } from './wf2-together-pilot.ts';
+import { validateUnitPrices,WF2_UNIT_PROFILE_DIGEST } from './wf2-unit-pilot.ts';
 
 export const PROFILE_DIGEST=hash(canonical(WF1));
 export function validateSpec(input:unknown):CampaignSpec {
   const own=copyJson(input),version=own!==null&&typeof own==='object'&&!Array.isArray(own)?own.schemaVersion:undefined;
-  const s=shape(own,['schemaVersion','id','createdAt','expiresAt','sourceDigest','profileDigest','objectiveDigest','prices',...(version==='wf1-campaign/0.5'||version==='wf1-campaign/0.6'||version==='wf1-campaign/0.7'?['storageBindingDigest']:[])]);
-  oneOf(s.schemaVersion,['wf1-campaign/0.3','wf1-campaign/0.4','wf1-campaign/0.5','wf1-campaign/0.6','wf1-campaign/0.7']);id(s.id);integer(s.createdAt);integer(s.expiresAt);if(s.schemaVersion==='wf1-campaign/0.5'||s.schemaVersion==='wf1-campaign/0.6'||s.schemaVersion==='wf1-campaign/0.7')digest(s.storageBindingDigest);
+  const s=shape(own,['schemaVersion','id','createdAt','expiresAt','sourceDigest','profileDigest','objectiveDigest','prices',...(version==='wf1-campaign/0.5'||version==='wf1-campaign/0.6'||version==='wf1-campaign/0.7'||version==='wf1-campaign/0.8'?['storageBindingDigest']:[])]);
+  oneOf(s.schemaVersion,['wf1-campaign/0.3','wf1-campaign/0.4','wf1-campaign/0.5','wf1-campaign/0.6','wf1-campaign/0.7','wf1-campaign/0.8']);id(s.id);integer(s.createdAt);integer(s.expiresAt);if(s.schemaVersion==='wf1-campaign/0.5'||s.schemaVersion==='wf1-campaign/0.6'||s.schemaVersion==='wf1-campaign/0.7'||s.schemaVersion==='wf1-campaign/0.8')digest(s.storageBindingDigest);
   if(Number(s.expiresAt)<=Number(s.createdAt)||Number(s.expiresAt)-Number(s.createdAt)>WF1.campaignMs)stop('WF1_TIME');
-  digest(s.sourceDigest);digest(s.objectiveDigest);if(s.schemaVersion==='wf1-campaign/0.7'){if(s.profileDigest!==WF2_PILOT_PROFILE_DIGEST)stop('WF1_PROFILE');}else if(s.schemaVersion==='wf1-campaign/0.6')slotProfile(digest(s.profileDigest));else if(s.profileDigest!==(s.schemaVersion==='wf1-campaign/0.5'?WF2_STRICT_PROFILE_DIGEST:s.schemaVersion==='wf1-campaign/0.4'?WF2_TEACHER_PROFILE_DIGEST:PROFILE_DIGEST))stop('WF1_PROFILE');
+  digest(s.sourceDigest);digest(s.objectiveDigest);if(s.schemaVersion==='wf1-campaign/0.8'){if(s.profileDigest!==WF2_UNIT_PROFILE_DIGEST)stop('WF1_PROFILE');}else if(s.schemaVersion==='wf1-campaign/0.7'){if(s.profileDigest!==WF2_PILOT_PROFILE_DIGEST)stop('WF1_PROFILE');}else if(s.schemaVersion==='wf1-campaign/0.6')slotProfile(digest(s.profileDigest));else if(s.profileDigest!==(s.schemaVersion==='wf1-campaign/0.5'?WF2_STRICT_PROFILE_DIGEST:s.schemaVersion==='wf1-campaign/0.4'?WF2_TEACHER_PROFILE_DIGEST:PROFILE_DIGEST))stop('WF1_PROFILE');
   const prices=shape(s.prices,['deepseek','together']);for(const provider of ['deepseek','together']){const p=shape(prices[provider],['snapshotId','inputMicroUsdPerMillion','completionMicroUsdPerMillion']);id(p.snapshotId);integer(p.inputMicroUsdPerMillion,1,1_000_000_000);integer(p.completionMicroUsdPerMillion,1,1_000_000_000);}
-  return s as CampaignSpec;
+  if(s.schemaVersion==='wf1-campaign/0.8')validateUnitPrices(prices as CampaignSpec['prices']);return s as CampaignSpec;
 }
 export function validateAuthority(input:unknown):Authority {
   const a=shape(copyJson(input),['schemaVersion','campaignId','revision','runtimeId','status','expiresAt','head','rights']);
@@ -26,6 +27,10 @@ export function validateAuthority(input:unknown):Authority {
 }
 export function artifactRef(input:unknown):ArtifactRef {
   const a=shape(input,['id','kind','partition','bytes','digest']);if(typeof a.id!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(a.id))stop('WF1_ARTIFACT_ID');id(a.kind);oneOf(a.partition,['custody','train']);integer(a.bytes,28,WF1.artifactBytes+28);digest(a.digest);return a as ArtifactRef;
+}
+export function unitRecordedCounts(state:{sealUnits?:ArtifactRef[];planUnits?:ArtifactRef[]}){
+  const sealed=list(state.sealUnits,4),planned=list(state.planUnits,4);for(const [values,partition,kind] of [[sealed,'custody','sealed-unit'],[planned,'train','coordinator-plan-unit']] as const){const refs=values.map(artifactRef);unique(refs.map(r=>r.id));if(refs.some(r=>r.partition!==partition||r.kind!==kind))stop('WF2_UNIT_STATE');}
+  return {sealed:sealed.length,planned:planned.length};
 }
 function family(input:unknown):Family {
   const f=shape(input,['id','roots','split','formal']);id(f.id);const roots=list(f.roots,16,1).map(id);unique(roots);oneOf(f.split,['train','dev']);validateFormal(f.formal);return f as Family;
