@@ -327,13 +327,21 @@ export class LocalSqliteAuthority {
       return{entries,receipt};
     }finally{payload.fill(0);}
   }
-  #verifySegmentPointers(segmentId:string,entries:ReceiptEntry[]):void{
+  #verifySegmentPointers(segmentId:string,entries:ReceiptEntry[],expectedHot?:boolean):void{
+    let wrongTier=false;
     for(const [index,entry] of entries.entries()){
-      if(this.#version>=5){const valid=this.#usingRaw('R',0,entry.vaultId,row=>row.values[1]===entry.operationId?utf8(row.values[2] as Uint8Array)===receiptPointer(segmentId,index,Buffer.byteLength(entry.json)):undefined,entry.operationId);if(!valid)fail('ANCHOR_RECEIPT_SEGMENT');continue;}
+      if(this.#version>=5){const valid=this.#usingRaw('R',0,entry.vaultId,row=>{
+        if(row.values[1]!==entry.operationId)return undefined;
+        if(expectedHot!==undefined&&(row.epoch===0)!==expectedHot)wrongTier=true;
+        return utf8(row.values[2] as Uint8Array)===receiptPointer(segmentId,index,Buffer.byteLength(entry.json));
+      },entry.operationId);if(!valid)fail('ANCHOR_RECEIPT_SEGMENT');continue;}
       const row=this.#db.prepare('SELECT substr(receipt,1,?) AS receipt,length(CAST(receipt AS BLOB)) AS bytes FROM receipts WHERE vault_id=? AND operation_id=?').get(RECEIPT_POINTER_LIMIT+1,entry.vaultId,entry.operationId);
       const expected=receiptPointer(segmentId,index,Buffer.byteLength(entry.json));
       if(row?.receipt!==expected||row.bytes!==Buffer.byteLength(expected))fail('ANCHOR_RECEIPT_SEGMENT');
     }
+    // Preserve pointer-validation priority while sharing its actual row read.
+    // Different positive epochs are valid: the invariant is only hot vs cold.
+    if(wrongTier)fail('ANCHOR_RECEIPT_SEGMENT');
   }
   rolloverReceipts(input:RolloverRequest):FrozenData<RolloverReceipt>{
     const request=normalizeRollover(input),requestJSON=JSON.stringify(request);
@@ -638,9 +646,9 @@ export class LocalSqliteAuthority {
       if(pointer){pointers++;continue;}validateReceiptEntry({vaultId:row.values[0] as string,operationId:row.values[1] as string,json:value});
       const receipt=JSON.parse(value) as AnchorReceipt;validateHead(receipt.newHead);if(receipt.newHead.authorityId!==this.authorityId)fail('ANCHOR_COLD_IDENTITY');
     }
-    for(const row of this.#rawRows('S')){if(++segments>128)fail('ANCHOR_ROLLOVER_SEGMENT_LIMIT');const decoded=this.#decodeSegment(row);try{this.#verifySegmentPointers(row.values[0] as string,decoded.entries);expectedPointers+=decoded.entries.length;
+    for(const row of this.#rawRows('S')){if(++segments>128)fail('ANCHOR_ROLLOVER_SEGMENT_LIMIT');const decoded=this.#decodeSegment(row);try{
       // A complete IF8 group is wholly hot or wholly cold.
-      for(const entry of decoded.entries){const epoch=this.#usingRaw('R',0,entry.vaultId,r=>r.values[1]===entry.operationId?r.epoch:undefined,entry.operationId);if(epoch===null||(epoch===0)!==(row.epoch===0))fail('ANCHOR_RECEIPT_SEGMENT');}
+      this.#verifySegmentPointers(row.values[0] as string,decoded.entries,row.epoch===0);expectedPointers+=decoded.entries.length;
       }finally{decoded.close();}
     }
     if(pointers!==expectedPointers)fail('ANCHOR_RECEIPT_SEGMENT');

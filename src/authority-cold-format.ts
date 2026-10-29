@@ -132,18 +132,23 @@ export function* sqlRows(db:DatabaseSync,kind:Kind,table:string,cold:boolean,w:W
  const fields=columns.map((_,i)=>physicalColumn(kind,i,cold));
  const small=fields.map((c,i)=>ROW_BLOBS[kind].includes(i)?`length(CAST(${c} AS BLOB)) AS n${i}`:typeof i==='number'?`substr(CAST(${c} AS TEXT),1,257) AS s${i},length(CAST(${c} AS BLOB)) AS n${i}`:'');
  const selector=db.prepare(`SELECT ${small.join(',')}${cold?',moved_epoch':''} FROM ${table} ${where} ORDER BY ${keys.map(c=>c+' COLLATE BINARY').join(',')}`);
- for(const bounds of selector.iterate(...args)){
-  let total=0;for(let i=0;i<fields.length;i++){const n=bounds['n'+i];if(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||(!ROW_BLOBS[kind].includes(i)&&n>256))fail('ANCHOR_COLD_BOUND');total=safeSum(total,n);}
+ const blobs=fields.map((_,i)=>ROW_BLOBS[kind].includes(i)),lengthNames=fields.map((_,i)=>'n'+i),valueNames=fields.map((_,i)=>'c'+i),keyNames=keys.map((_,i)=>'s'+i);
+ const payloadSQL=`SELECT ${fields.map((c,i)=>blobs[i]?`CAST(${c} AS BLOB) AS c${i}`:`${c} AS c${i}`).join(',')} FROM ${table} WHERE ${keys.map(c=>c+'=?').join(' AND ')}`;
+ // One statement per iterator, never a result or cross-transaction cache.
+ // Prepare lazily after the first row's bounds and workspace admission.
+ let payload:ReturnType<DatabaseSync['prepare']>|undefined;const cursor=selector.iterate(...args);
+ try{for(;;){const next=cursor.next();if(next.done)break;const bounds=next.value;
+  let total=0;for(let i=0;i<fields.length;i++){const n=bounds[lengthNames[i]!];if(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||(!blobs[i]&&n>256))fail('ANCHOR_COLD_BOUND');total=safeSum(total,n);}
   const release=w.reserve(safeSum(total*2,512),'SQL row and transient UTF8 representation');let parsedRelease:Release|undefined,kept=false;let values:Cell[]=[];
   try{
    parsedRelease=w.reserve(safeSum(total*2,512),'SQL parsed representation');
-   const keyValues=keys.map((_,i)=>bounds['s'+i] as string);
-   const row=db.prepare(`SELECT ${fields.map((c,i)=>ROW_BLOBS[kind].includes(i)?`CAST(${c} AS BLOB) AS c${i}`:`${c} AS c${i}`).join(',')} FROM ${table} WHERE ${keys.map(c=>c+'=?').join(' AND ')}`).get(...keyValues);
-   if(!row)fail('ANCHOR_COLD_CORRUPT');values=fields.map((_,i)=>row['c'+i] as Cell);
-   for(let i=0;i<values.length;i++){const v=values[i];if(ROW_BLOBS[kind].includes(i)){if(!(v instanceof Uint8Array)||v.byteLength!==bounds['n'+i])fail('ANCHOR_COLD_CORRUPT');}else if(typeof v!=='string'&&typeof v!=='number')fail('ANCHOR_COLD_CORRUPT');}
+   const keyValues=keyNames.map(name=>bounds[name] as string);
+   payload??=db.prepare(payloadSQL);const row=payload.get(...keyValues);
+   if(!row)fail('ANCHOR_COLD_CORRUPT');values=valueNames.map(name=>row[name] as Cell);
+   for(let i=0;i<values.length;i++){const v=values[i];if(blobs[i]){if(!(v instanceof Uint8Array)||v.byteLength!==bounds[lengthNames[i]!])fail('ANCHOR_COLD_CORRUPT');}else if(typeof v!=='string'&&typeof v!=='number')fail('ANCHOR_COLD_CORRUPT');}
    yield{kind,values,epoch:cold?bounds.moved_epoch as number:0,keepParsed:()=>{if(kept)fail('ANCHOR_COLD_WORKSPACE');kept=true;return parsedRelease!;}};
   }finally{for(const v of values)if(v instanceof Uint8Array)v.fill(0);if(!kept)parsedRelease?.();release();}
- }
+ }}finally{cursor.return?.();}
 }
 export class ColdDatabase{
  #db:DatabaseSync;#w:Workspace;#release:Release;#closed=false;#mutable=false;#meta:ColdMeta;
