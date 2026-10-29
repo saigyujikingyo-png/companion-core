@@ -21,10 +21,13 @@
     "research:q0:prepare": "node --max-old-space-size=256 research/q0/replay.mjs --prepare",
     "research:tj1": "node src/tj1-canary-cli.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene && npm run demo:scene-authority && npm run demo:journal && npm run research:q0:smoke && npm run research:q0:prepare && npm run demo:training-journal"
+    "check": "npm run typecheck && npm test && npm run demo && npm run demo:curation && npm run demo:retrieval && npm run demo:scene && npm run demo:scene-authority && npm run demo:journal && npm run research:q0:smoke && npm run research:q0:prepare && npm run demo:training-journal",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.{ts,mjs}\" \"scripts/**/*.{ts,mjs}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.{ts,mjs}\" \"scripts/**/*.{ts,mjs}\""
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "prettier": "3.9.10",
     "typescript": "5.9.3"
   }
 }

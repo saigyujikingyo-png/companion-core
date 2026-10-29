@@ -1,203 +1,1103 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,mkdirSync,readFileSync,readdirSync,realpathSync,renameSync,writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn,spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { canonical,hash } from '../src/wf1-json.ts';
-import { validatePlan,validateSeal,validateSpec } from '../src/wf1-contract.ts';
-import { computeFormal,verifyFormal } from '../src/wf1-verifier.ts';
-import { providerBody,TeacherProvider } from '../src/wf1-provider.ts';
-import { MODELS,WF1 } from '../src/wf1-types.ts';
-import type { Authority,CampaignSpec,CampaignState,FormalSpec,Operation,Plan,Seal } from '../src/wf1-types.ts';
-import { fixedSlotBinding,fixedSlotSchema,fixedSlotStopReason,projectFixedSlots,validateFixedSlotRequest,WF2_SLOTS_PROFILE_DIGEST } from '../src/wf2-fixed-slots.ts';
+import { canonical, hash } from '../src/wf1-json.ts';
+import { validatePlan, validateSeal, validateSpec } from '../src/wf1-contract.ts';
+import { computeFormal, verifyFormal } from '../src/wf1-verifier.ts';
+import { providerBody, TeacherProvider } from '../src/wf1-provider.ts';
+import { MODELS, WF1 } from '../src/wf1-types.ts';
+import type { Authority, CampaignSpec, CampaignState, FormalSpec, Operation, Plan, Seal } from '../src/wf1-types.ts';
+import {
+  fixedSlotBinding,
+  fixedSlotSchema,
+  fixedSlotStopReason,
+  projectFixedSlots,
+  validateFixedSlotRequest,
+  WF2_SLOTS_PROFILE_DIGEST,
+} from '../src/wf2-fixed-slots.ts';
 import { WF2_STRICT_PROFILE_DIGEST } from '../src/wf2-strict-data.ts';
 import { bindTrainingRoot } from '../src/wf2-training-root.ts';
-import { bindTeacherCampaign,inspectTeacherCampaign,teacherWorkerBuildDigest } from '../src/wf2-teacher-worker.ts';
+import { bindTeacherCampaign, inspectTeacherCampaign, teacherWorkerBuildDigest } from '../src/wf2-teacher-worker.ts';
 import { TeacherControlService } from '../src/wf2-teacher-service.ts';
 
 // Independent public synthetic fixtures. No actual model material is read, regraded or repaired.
-const marker='SYNTHETIC_PILOT_07_e\u0301',capability='64'.repeat(32),key=Buffer.alloc(32,6);
-const formal=(n:number):FormalSpec=>({verifier:'rational.evaluate.v1',input:{op:'value',numerator:String(n),denominator:'1'}});
-const sealed=():Seal=>({version:'wf1-seal/1',rubric:marker,cases:Array.from({length:12},(_,i)=>({id:'seal'+i,roots:['seal-root'+i],formal:formal(100+i),target:computeFormal(formal(100+i))}))});
-const plan=():Plan=>({version:'wf1-plan/1',plan:marker,families:Array.from({length:16},(_,i)=>({id:'family'+i,roots:['root'+i],split:(i+1)%4===0?'dev':'train',formal:formal(i)})),pairedFamilyIds:Array.from({length:8},(_,i)=>'family'+i)});
-const table=(prefix:string,items:unknown[])=>Object.fromEntries(items.map((value,i)=>[prefix+String(i+1).padStart(2,'0'),value]));
-const wireSeal=()=>{const s=sealed();return {version:'wf2-seal-slots/1',rubric:s.rubric,cases:table('case',s.cases)};};
-const wirePlan=()=>{const p=plan();return {version:'wf2-plan-slots/1',plan:p.plan,families:table('family',p.families),pairedFamilyIds:table('pair',p.pairedFamilyIds)};};
-const payload=(operation:Operation,data:unknown={fixture:marker})=>({protocol:'wf1-private-role/1',operation,role:'SyntheticRole',protocolInstruction:'inert',jsonProfile:{fixture:true},outputSchema:{unused:true},data});
-function fixture(){
-  const base=realpathSync(mkdtempSync(join(tmpdir(),'companion-wf2-slots-'))),approvedTrainingRoot=join(base,'training'),runtimeRoot=join(approvedTrainingRoot,'run'),hostRoot=join(base,'host');mkdirSync(approvedTrainingRoot);mkdirSync(runtimeRoot);mkdirSync(hostRoot);
-  const authorityPath=join(hostRoot,'authority.json'),now=1000,authority:Authority={schemaVersion:'wf1-host/1',campaignId:'synthetic-teacher06',revision:1,runtimeId:'owner',status:'ACTIVE',expiresAt:now+WF1.campaignMs,head:null,rights:{seal:true,coordinate:true,generate:true,review:true,retain:true}};writeFileSync(authorityPath,canonical(authority));
-  const spec:CampaignSpec={schemaVersion:'wf1-campaign/0.7',id:authority.campaignId,createdAt:now,expiresAt:now+WF1.campaignMs,sourceDigest:teacherWorkerBuildDigest(),profileDigest:WF2_PILOT_PROFILE_DIGEST,objectiveDigest:hash(marker),storageBindingDigest:bindTrainingRoot(approvedTrainingRoot,runtimeRoot).storageBindingDigest,prices:{deepseek:{snapshotId:'synthetic-ds',inputMicroUsdPerMillion:300000,completionMicroUsdPerMillion:1200000},together:{snapshotId:'synthetic-tg',inputMicroUsdPerMillion:150000,completionMicroUsdPerMillion:600000}}};
-  const bootstrap={version:'wf2-teacher-bind/2',approvedTrainingRoot,runtimeRoot,authorityPath,expectedHead:null,spec,custodyKeyBase64:key.toString('base64'),objective:marker,credentials:{deepseek:null,together:'synthetic-only'},capability};return {base,approvedTrainingRoot,runtimeRoot,authorityPath,now,spec,bootstrap};
+const marker = 'SYNTHETIC_PILOT_07_e\u0301',
+  capability = '64'.repeat(32),
+  key = Buffer.alloc(32, 6);
+const formal = (n: number): FormalSpec => ({
+  verifier: 'rational.evaluate.v1',
+  input: { op: 'value', numerator: String(n), denominator: '1' },
+});
+const sealed = (): Seal => ({
+  version: 'wf1-seal/1',
+  rubric: marker,
+  cases: Array.from({ length: 12 }, (_, i) => ({
+    id: 'seal' + i,
+    roots: ['seal-root' + i],
+    formal: formal(100 + i),
+    target: computeFormal(formal(100 + i)),
+  })),
+});
+const plan = (): Plan => ({
+  version: 'wf1-plan/1',
+  plan: marker,
+  families: Array.from({ length: 16 }, (_, i) => ({
+    id: 'family' + i,
+    roots: ['root' + i],
+    split: (i + 1) % 4 === 0 ? 'dev' : 'train',
+    formal: formal(i),
+  })),
+  pairedFamilyIds: Array.from({ length: 8 }, (_, i) => 'family' + i),
+});
+const table = (prefix: string, items: unknown[]) =>
+  Object.fromEntries(items.map((value, i) => [prefix + String(i + 1).padStart(2, '0'), value]));
+const wireSeal = () => {
+  const s = sealed();
+  return { version: 'wf2-seal-slots/1', rubric: s.rubric, cases: table('case', s.cases) };
+};
+const wirePlan = () => {
+  const p = plan();
+  return {
+    version: 'wf2-plan-slots/1',
+    plan: p.plan,
+    families: table('family', p.families),
+    pairedFamilyIds: table('pair', p.pairedFamilyIds),
+  };
+};
+const payload = (operation: Operation, data: unknown = { fixture: marker }) => ({
+  protocol: 'wf1-private-role/1',
+  operation,
+  role: 'SyntheticRole',
+  protocolInstruction: 'inert',
+  jsonProfile: { fixture: true },
+  outputSchema: { unused: true },
+  data,
+});
+function fixture() {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'companion-wf2-slots-'))),
+    approvedTrainingRoot = join(base, 'training'),
+    runtimeRoot = join(approvedTrainingRoot, 'run'),
+    hostRoot = join(base, 'host');
+  mkdirSync(approvedTrainingRoot);
+  mkdirSync(runtimeRoot);
+  mkdirSync(hostRoot);
+  const authorityPath = join(hostRoot, 'authority.json'),
+    now = 1000,
+    authority: Authority = {
+      schemaVersion: 'wf1-host/1',
+      campaignId: 'synthetic-teacher06',
+      revision: 1,
+      runtimeId: 'owner',
+      status: 'ACTIVE',
+      expiresAt: now + WF1.campaignMs,
+      head: null,
+      rights: { seal: true, coordinate: true, generate: true, review: true, retain: true },
+    };
+  writeFileSync(authorityPath, canonical(authority));
+  const spec: CampaignSpec = {
+    schemaVersion: 'wf1-campaign/0.7',
+    id: authority.campaignId,
+    createdAt: now,
+    expiresAt: now + WF1.campaignMs,
+    sourceDigest: teacherWorkerBuildDigest(),
+    profileDigest: WF2_PILOT_PROFILE_DIGEST,
+    objectiveDigest: hash(marker),
+    storageBindingDigest: bindTrainingRoot(approvedTrainingRoot, runtimeRoot).storageBindingDigest,
+    prices: {
+      deepseek: { snapshotId: 'synthetic-ds', inputMicroUsdPerMillion: 300000, completionMicroUsdPerMillion: 1200000 },
+      together: { snapshotId: 'synthetic-tg', inputMicroUsdPerMillion: 150000, completionMicroUsdPerMillion: 600000 },
+    },
+  };
+  const bootstrap = {
+    version: 'wf2-teacher-bind/2',
+    approvedTrainingRoot,
+    runtimeRoot,
+    authorityPath,
+    expectedHead: null,
+    spec,
+    custodyKeyBase64: key.toString('base64'),
+    objective: marker,
+    credentials: { deepseek: null, together: 'synthetic-only' },
+    capability,
+  };
+  return { base, approvedTrainingRoot, runtimeRoot, authorityPath, now, spec, bootstrap };
 }
-function inspection(f:ReturnType<typeof fixture>){return {version:'wf2-teacher-inspect/2',approvedTrainingRoot:f.approvedTrainingRoot,runtimeRoot:f.runtimeRoot,authorityPath:f.authorityPath,expectedHead:JSON.parse(readFileSync(f.authorityPath,'utf8')).head,spec:f.spec,custodyKeyBase64:key.toString('base64')};}
-function state(f:ReturnType<typeof fixture>):CampaignState {const db=new DatabaseSync(join(f.runtimeRoot,'wf1-ledger.sqlite'),{readOnly:true});try{return JSON.parse(db.prepare('SELECT body FROM events ORDER BY sequence DESC LIMIT 1').get()!.body as string);}finally{db.close();}}
-function files(root:string){return readdirSync(root).sort().map(name=>[name,hash(readFileSync(join(root,name)))]);}
+function inspection(f: ReturnType<typeof fixture>) {
+  return {
+    version: 'wf2-teacher-inspect/2',
+    approvedTrainingRoot: f.approvedTrainingRoot,
+    runtimeRoot: f.runtimeRoot,
+    authorityPath: f.authorityPath,
+    expectedHead: JSON.parse(readFileSync(f.authorityPath, 'utf8')).head,
+    spec: f.spec,
+    custodyKeyBase64: key.toString('base64'),
+  };
+}
+function state(f: ReturnType<typeof fixture>): CampaignState {
+  const db = new DatabaseSync(join(f.runtimeRoot, 'wf1-ledger.sqlite'), { readOnly: true });
+  try {
+    return JSON.parse(db.prepare('SELECT body FROM events ORDER BY sequence DESC LIMIT 1').get()!.body as string);
+  } finally {
+    db.close();
+  }
+}
+function files(root: string) {
+  return readdirSync(root)
+    .sort()
+    .map((name) => [name, hash(readFileSync(join(root, name)))]);
+}
 
-import { pilotBinding,pilotBody,pilotCompletion,pilotMetadataProfile,pilotPayload,pilotSchema,preflightPilotBootstrap,validatePilotEnvelopeExtras,WF2_PILOT_POLICY,WF2_PILOT_LIMITS,WF2_PILOT_PROFILE_DIGEST } from '../src/wf2-together-pilot.ts';
-import { createArtifactBroker,HostAuthority } from '../src/wf1-storage.ts';
+import {
+  pilotBinding,
+  pilotBody,
+  pilotCompletion,
+  pilotMetadataProfile,
+  pilotPayload,
+  pilotSchema,
+  preflightPilotBootstrap,
+  validatePilotEnvelopeExtras,
+  WF2_PILOT_POLICY,
+  WF2_PILOT_LIMITS,
+  WF2_PILOT_PROFILE_DIGEST,
+} from '../src/wf2-together-pilot.ts';
+import { createArtifactBroker, HostAuthority } from '../src/wf1-storage.ts';
 import { TeachingCampaign } from '../src/wf1-campaign.ts';
 import { verifyTeacherManifest } from '../src/wf2-teacher-inspect.ts';
 import { validateTeacherMetadata } from '../src/wf2-teacher-service.ts';
-import { slotRequestBody,slotRequestBinding,WF2_NAMED_PROFILE_DIGEST } from '../src/wf2-named-data.ts';
+import { slotRequestBody, slotRequestBinding, WF2_NAMED_PROFILE_DIGEST } from '../src/wf2-named-data.ts';
 import { estimateMicroUsd } from '../src/wf1-contract.ts';
 import type { Provider } from '../src/wf1-types.ts';
 import { runTeacherBridge } from '../src/wf2-teacher-bridge.ts';
 
-type Failure='json'|'wrong'|'review'|'usage'|'source'|'sameFormal';
-function mock(f:ReturnType<typeof fixture>,failure?:Failure){const operations:string[]=[],bytes:number[]=[];const provider=new TeacherProvider({deepseek:null,together:'synthetic-only'},{fetch:async(url,init)=>{
-  const raw=String(init!.body),b=JSON.parse(raw),p=JSON.parse(b.messages[1].content),last=state(f).attempts.at(-1)!;operations.push(p.operation);bytes.push(Buffer.byteLength(raw));assert.equal(last.provider,'together');assert.equal(last.outcome,null);assert.equal(last.requestCommitment,hash(raw));assert.deepEqual(last.requestBinding,pilotBinding('together',last.operation));assert.equal(url,'https://api.together.ai/v1/chat/completions');assert.equal(b.model,MODELS.together);assert.equal(b.max_tokens,pilotCompletion(last.operation));assert.equal(b.messages.length,2);assert.equal(b.messages[0].role,'developer');assert.ok(b.messages[0].content.endsWith(canonical(b.response_format.json_schema.schema)));assert.equal(b.response_format.type,'json_schema');assert.equal(b.tools,undefined);assert.ok(!raw.includes('json.pointer.v1'));
-  let content:unknown;if(p.operation==='seal')content=wireSeal();else if(p.operation==='plan'){const v=wirePlan();if(failure==='source')(v.families.family01 as any).roots=['seal-root0'];if(failure==='sameFormal'){(v.families.family01 as any).roots=['wf2.plan.original.distinct-name'];(v.families.family01 as any).formal=formal(100);}content=v;assert.ok(!raw.includes('seal-root'));}else if(p.operation==='rubric'){content={version:'wf1-rubric/1',rubric:marker};assert.ok(!raw.includes('seal-root'));}else if(p.operation==='review')content={version:'wf1-review/1',disposition:failure==='review'?'FLAG':'CLEAR',notes:marker};else content={version:'wf1-candidate/1',target:failure==='wrong'?{numerator:'-90',denominator:'1'}:computeFormal(p.data.formalInput)};
-  return new Response(JSON.stringify({model:MODELS.together,prompt:[],warnings:[{message:'SYNTHETIC_PRIVATE_WARNING'}],choices:[{index:0,finish_reason:'stop',text:'NOT_SELECTED',seed:-42,top_logprobs:{},message:{role:'assistant',content:failure==='json'?'{broken':JSON.stringify(content),reasoning:'SYNTHETIC_NOT_SELECTED_REASONING'}}],...(failure==='usage'?{}:{usage:{prompt_tokens:20,completion_tokens:30,total_tokens:50,completion_tokens_details:{reasoning_tokens:10}}})}),{headers:{'content-type':'application/json'}});
-}});return {provider,operations,bytes};}
+type Failure = 'json' | 'wrong' | 'review' | 'usage' | 'source' | 'sameFormal';
+function mock(f: ReturnType<typeof fixture>, failure?: Failure) {
+  const operations: string[] = [],
+    bytes: number[] = [];
+  const provider = new TeacherProvider(
+    { deepseek: null, together: 'synthetic-only' },
+    {
+      fetch: async (url, init) => {
+        const raw = String(init!.body),
+          b = JSON.parse(raw),
+          p = JSON.parse(b.messages[1].content),
+          last = state(f).attempts.at(-1)!;
+        operations.push(p.operation);
+        bytes.push(Buffer.byteLength(raw));
+        assert.equal(last.provider, 'together');
+        assert.equal(last.outcome, null);
+        assert.equal(last.requestCommitment, hash(raw));
+        assert.deepEqual(last.requestBinding, pilotBinding('together', last.operation));
+        assert.equal(url, 'https://api.together.ai/v1/chat/completions');
+        assert.equal(b.model, MODELS.together);
+        assert.equal(b.max_tokens, pilotCompletion(last.operation));
+        assert.equal(b.messages.length, 2);
+        assert.equal(b.messages[0].role, 'developer');
+        assert.ok(b.messages[0].content.endsWith(canonical(b.response_format.json_schema.schema)));
+        assert.equal(b.response_format.type, 'json_schema');
+        assert.equal(b.tools, undefined);
+        assert.ok(!raw.includes('json.pointer.v1'));
+        let content: unknown;
+        if (p.operation === 'seal') content = wireSeal();
+        else if (p.operation === 'plan') {
+          const v = wirePlan();
+          if (failure === 'source') (v.families.family01 as any).roots = ['seal-root0'];
+          if (failure === 'sameFormal') {
+            (v.families.family01 as any).roots = ['wf2.plan.original.distinct-name'];
+            (v.families.family01 as any).formal = formal(100);
+          }
+          content = v;
+          assert.ok(!raw.includes('seal-root'));
+        } else if (p.operation === 'rubric') {
+          content = { version: 'wf1-rubric/1', rubric: marker };
+          assert.ok(!raw.includes('seal-root'));
+        } else if (p.operation === 'review')
+          content = { version: 'wf1-review/1', disposition: failure === 'review' ? 'FLAG' : 'CLEAR', notes: marker };
+        else
+          content = {
+            version: 'wf1-candidate/1',
+            target: failure === 'wrong' ? { numerator: '-90', denominator: '1' } : computeFormal(p.data.formalInput),
+          };
+        return new Response(
+          JSON.stringify({
+            model: MODELS.together,
+            prompt: [],
+            warnings: [{ message: 'SYNTHETIC_PRIVATE_WARNING' }],
+            choices: [
+              {
+                index: 0,
+                finish_reason: 'stop',
+                text: 'NOT_SELECTED',
+                seed: -42,
+                top_logprobs: {},
+                message: {
+                  role: 'assistant',
+                  content: failure === 'json' ? '{broken' : JSON.stringify(content),
+                  reasoning: 'SYNTHETIC_NOT_SELECTED_REASONING',
+                },
+              },
+            ],
+            ...(failure === 'usage'
+              ? {}
+              : {
+                  usage: {
+                    prompt_tokens: 20,
+                    completion_tokens: 30,
+                    total_tokens: 50,
+                    completion_tokens_details: { reasoning_tokens: 10 },
+                  },
+                }),
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        );
+      },
+    },
+  );
+  return { provider, operations, bytes };
+}
 
-test('pilot fixed schema uses standard refs, old profiles/body/bindings stay unchanged, caps are operation-bound',()=>{
-  for(const row of oldGoldens){const p=payload(row.operation,{fixture:'SYNTHETIC_PILOT_BASELINE'});assert.equal(hash(providerBody(row.provider,p,row.operation,'wf1-campaign/0.6')),row.beta);assert.equal(hash(slotRequestBody(row.provider,p,row.operation,WF2_NAMED_PROFILE_DIGEST)),row.named);assert.equal(hash(canonical(fixedSlotBinding(row.provider,row.operation))),row.betaBinding);assert.equal(hash(canonical(slotRequestBinding(row.provider,row.operation,WF2_NAMED_PROFILE_DIGEST))),row.namedBinding);}
-  for(const operation of ['seal','plan','rubric','candidate','review'] as const){const schema=pilotSchema(operation),raw=canonical(schema);assert.ok(!raw.includes('"$def"'));assert.ok(!raw.includes('#/$def/'));if(operation==='seal'||operation==='plan')assert.ok(raw.includes('#/$defs/expression'));const body=JSON.parse(pilotBody('together',pilotPayload(operation,{fixture:marker}),operation));assert.equal(body.max_tokens,operation==='seal'||operation==='plan'?8192:4096);assert.equal(canonical(body.response_format.json_schema.schema),raw);assert.ok(body.messages[0].content.endsWith(raw));}
-  const f=fixture();validateSpec(f.spec);assert.equal(2*estimateMicroUsd(18432,8192,f.spec.prices.together)+9*estimateMicroUsd(18432,4096,f.spec.prices.together),62367);assert.equal(WF1.togetherCalls,8);assert.equal(WF1.togetherCompletion,4096);assert.equal(WF1.totalMicroUsd,500000);
+test('pilot fixed schema uses standard refs, old profiles/body/bindings stay unchanged, caps are operation-bound', () => {
+  for (const row of oldGoldens) {
+    const p = payload(row.operation, { fixture: 'SYNTHETIC_PILOT_BASELINE' });
+    assert.equal(hash(providerBody(row.provider, p, row.operation, 'wf1-campaign/0.6')), row.beta);
+    assert.equal(hash(slotRequestBody(row.provider, p, row.operation, WF2_NAMED_PROFILE_DIGEST)), row.named);
+    assert.equal(hash(canonical(fixedSlotBinding(row.provider, row.operation))), row.betaBinding);
+    assert.equal(
+      hash(canonical(slotRequestBinding(row.provider, row.operation, WF2_NAMED_PROFILE_DIGEST))),
+      row.namedBinding,
+    );
+  }
+  for (const operation of ['seal', 'plan', 'rubric', 'candidate', 'review'] as const) {
+    const schema = pilotSchema(operation),
+      raw = canonical(schema);
+    assert.ok(!raw.includes('"$def"'));
+    assert.ok(!raw.includes('#/$def/'));
+    if (operation === 'seal' || operation === 'plan') assert.ok(raw.includes('#/$defs/expression'));
+    const body = JSON.parse(pilotBody('together', pilotPayload(operation, { fixture: marker }), operation));
+    assert.equal(body.max_tokens, operation === 'seal' || operation === 'plan' ? 8192 : 4096);
+    assert.equal(canonical(body.response_format.json_schema.schema), raw);
+    assert.ok(body.messages[0].content.endsWith(raw));
+  }
+  const f = fixture();
+  validateSpec(f.spec);
+  assert.equal(
+    2 * estimateMicroUsd(18432, 8192, f.spec.prices.together) +
+      9 * estimateMicroUsd(18432, 4096, f.spec.prices.together),
+    62367,
+  );
+  assert.equal(WF1.togetherCalls, 8);
+  assert.equal(WF1.togetherCompletion, 4096);
+  assert.equal(WF1.totalMicroUsd, 500000);
 });
 
-test('complete bootstrap byte preflight rejects oversized objectives before any ledger creation; comparison/DS/cap drift cannot dispatch',async()=>{
-  const good=preflightPilotBootstrap('a'.repeat(2048));assert.deepEqual(good.requests.map(x=>x.bytes),[12723,15288,5940]);assert.ok(good.requests.every(x=>x.bytes<16384));assert.throws(()=>preflightPilotBootstrap('a'.repeat(8192)));
-  const f=fixture(),long='a'.repeat(8192),bad={...f.bootstrap,objective:long,spec:{...f.spec,objectiveDigest:hash(long)}};assert.throws(()=>bindTeacherCampaign(bad));assert.deepEqual(readdirSync(f.runtimeRoot),[]);assert.equal(JSON.parse(readFileSync(f.authorityPath,'utf8')).head,null);
-  assert.throws(()=>bindTeacherCampaign({...f.bootstrap,credentials:{deepseek:'unneeded-secret',together:'synthetic'}}));assert.deepEqual(readdirSync(f.runtimeRoot),[]);
-  let sends=0;const provider=new TeacherProvider({deepseek:null,together:'synthetic'},{fetch:async()=>{sends++;throw Error('never');}}),body=pilotBody('together',pilotPayload('seal',{}),'seal'),binding=pilotBinding('together','seal'),changed=JSON.parse(body);changed.max_tokens=4096;
-  await assert.rejects(provider.submit('together',canonical(changed),{} as never,new AbortController().signal,send=>send(),{operation:'seal',binding}));await assert.rejects(provider.submit('deepseek',body,{} as never,new AbortController().signal,send=>send(),{operation:'seal',binding}));
-  const campaign=TeachingCampaign.admitCampaign({root:f.runtimeRoot,authorityPath:f.authorityPath,spec:f.spec,key,objective:marker,provider,now:()=>f.now,approvedTrainingRoot:f.approvedTrainingRoot});try{assert.throws(()=>campaign.reserveAttempt('comparison_candidate','{}'));assert.throws(()=>campaign.reserveAttempt('comparison_review','{}'));assert.throws(()=>campaign.reserveAttempt('seal',canonical(changed)));assert.equal(campaign.ledger.snapshot().attempts.length,0);assert.equal(sends,0);}finally{campaign.close();}
-});
-
-test('pilot bounded-depth6 DAG has complete acyclic refs and preserves every non-expression schema field',()=>{
-  for(const operation of ['seal','plan'] as const){
-    const schema:any=pilotSchema(operation),original:any=JSON.parse(canonical(fixedSlotSchema(operation)).replaceAll('"$def":','"$defs":').replaceAll('#/$def/','#/$defs/'));
-    const oldExpression=original.$defs.expression;assert.equal(schema.$defs.expression,undefined);assert.equal(canonical(schema.$defs.expression1),canonical(oldExpression.anyOf[0]));
-    for(let depth=2;depth<=6;depth++)assert.equal(canonical(schema.$defs['expression'+depth]),canonical({anyOf:[{$ref:'#/$defs/expression1'},JSON.parse(canonical(oldExpression.anyOf[1]).replaceAll('#/$defs/expression','#/$defs/expression'+(depth-1)))]}));
-    const unchanged=JSON.parse(canonical(schema).replaceAll('#/$defs/expression6','#/$defs/expression'));for(let depth=1;depth<=6;depth++)delete unchanged.$defs['expression'+depth];delete original.$defs.expression;assert.equal(canonical(unchanged),canonical(original));
-    const refs=(value:any):string[]=>value&&typeof value==='object'?[...(typeof value.$ref==='string'?[value.$ref]:[]),...Object.values(value).flatMap(refs)]:[];
-    const visiting=new Set<string>(),done=new Set<string>();const visit=(ref:string):void=>{assert.ok(ref.startsWith('#/$defs/'));const name=ref.slice('#/$defs/'.length);assert.ok(Object.hasOwn(schema.$defs,name),ref);assert.ok(!visiting.has(name),'cycle at '+name);if(done.has(name))return;visiting.add(name);refs(schema.$defs[name]).forEach(visit);visiting.delete(name);done.add(name);};
-    refs(schema).forEach(visit);Object.keys(schema.$defs).forEach(name=>visit('#/$defs/'+name));assert.equal(done.size,Object.keys(schema.$defs).length);
+test('complete bootstrap byte preflight rejects oversized objectives before any ledger creation; comparison/DS/cap drift cannot dispatch', async () => {
+  const good = preflightPilotBootstrap('a'.repeat(2048));
+  assert.deepEqual(
+    good.requests.map((x) => x.bytes),
+    [12723, 15288, 5940],
+  );
+  assert.ok(good.requests.every((x) => x.bytes < 16384));
+  assert.throws(() => preflightPilotBootstrap('a'.repeat(8192)));
+  const f = fixture(),
+    long = 'a'.repeat(8192),
+    bad = { ...f.bootstrap, objective: long, spec: { ...f.spec, objectiveDigest: hash(long) } };
+  assert.throws(() => bindTeacherCampaign(bad));
+  assert.deepEqual(readdirSync(f.runtimeRoot), []);
+  assert.equal(JSON.parse(readFileSync(f.authorityPath, 'utf8')).head, null);
+  assert.throws(() =>
+    bindTeacherCampaign({ ...f.bootstrap, credentials: { deepseek: 'unneeded-secret', together: 'synthetic' } }),
+  );
+  assert.deepEqual(readdirSync(f.runtimeRoot), []);
+  let sends = 0;
+  const provider = new TeacherProvider(
+      { deepseek: null, together: 'synthetic' },
+      {
+        fetch: async () => {
+          sends++;
+          throw Error('never');
+        },
+      },
+    ),
+    body = pilotBody('together', pilotPayload('seal', {}), 'seal'),
+    binding = pilotBinding('together', 'seal'),
+    changed = JSON.parse(body);
+  changed.max_tokens = 4096;
+  await assert.rejects(
+    provider.submit('together', canonical(changed), {} as never, new AbortController().signal, (send) => send(), {
+      operation: 'seal',
+      binding,
+    }),
+  );
+  await assert.rejects(
+    provider.submit('deepseek', body, {} as never, new AbortController().signal, (send) => send(), {
+      operation: 'seal',
+      binding,
+    }),
+  );
+  const campaign = TeachingCampaign.admitCampaign({
+    root: f.runtimeRoot,
+    authorityPath: f.authorityPath,
+    spec: f.spec,
+    key,
+    objective: marker,
+    provider,
+    now: () => f.now,
+    approvedTrainingRoot: f.approvedTrainingRoot,
+  });
+  try {
+    assert.throws(() => campaign.reserveAttempt('comparison_candidate', '{}'));
+    assert.throws(() => campaign.reserveAttempt('comparison_review', '{}'));
+    assert.throws(() => campaign.reserveAttempt('seal', canonical(changed)));
+    assert.equal(campaign.ledger.snapshot().attempts.length, 0);
+    assert.equal(sends, 0);
+  } finally {
+    campaign.close();
   }
 });
 
-test('pilot bounded-depth6 preserves the six-level expression domain while the original local node cap remains',()=>{
-  const schema:any=pilotSchema('seal'),defs=schema.$defs;
+test('pilot bounded-depth6 DAG has complete acyclic refs and preserves every non-expression schema field', () => {
+  for (const operation of ['seal', 'plan'] as const) {
+    const schema: any = pilotSchema(operation),
+      original: any = JSON.parse(
+        canonical(fixedSlotSchema(operation)).replaceAll('"$def":', '"$defs":').replaceAll('#/$def/', '#/$defs/'),
+      );
+    const oldExpression = original.$defs.expression;
+    assert.equal(schema.$defs.expression, undefined);
+    assert.equal(canonical(schema.$defs.expression1), canonical(oldExpression.anyOf[0]));
+    for (let depth = 2; depth <= 6; depth++)
+      assert.equal(
+        canonical(schema.$defs['expression' + depth]),
+        canonical({
+          anyOf: [
+            { $ref: '#/$defs/expression1' },
+            JSON.parse(
+              canonical(oldExpression.anyOf[1]).replaceAll('#/$defs/expression', '#/$defs/expression' + (depth - 1)),
+            ),
+          ],
+        }),
+      );
+    const unchanged = JSON.parse(canonical(schema).replaceAll('#/$defs/expression6', '#/$defs/expression'));
+    for (let depth = 1; depth <= 6; depth++) delete unchanged.$defs['expression' + depth];
+    delete original.$defs.expression;
+    assert.equal(canonical(unchanged), canonical(original));
+    const refs = (value: any): string[] =>
+      value && typeof value === 'object'
+        ? [...(typeof value.$ref === 'string' ? [value.$ref] : []), ...Object.values(value).flatMap(refs)]
+        : [];
+    const visiting = new Set<string>(),
+      done = new Set<string>();
+    const visit = (ref: string): void => {
+      assert.ok(ref.startsWith('#/$defs/'));
+      const name = ref.slice('#/$defs/'.length);
+      assert.ok(Object.hasOwn(schema.$defs, name), ref);
+      assert.ok(!visiting.has(name), 'cycle at ' + name);
+      if (done.has(name)) return;
+      visiting.add(name);
+      refs(schema.$defs[name]).forEach(visit);
+      visiting.delete(name);
+      done.add(name);
+    };
+    refs(schema).forEach(visit);
+    Object.keys(schema.$defs).forEach((name) => visit('#/$defs/' + name));
+    assert.equal(done.size, Object.keys(schema.$defs).length);
+  }
+});
+
+test('pilot bounded-depth6 preserves the six-level expression domain while the original local node cap remains', () => {
+  const schema: any = pilotSchema('seal'),
+    defs = schema.$defs;
   // Independent evaluator for the small expression-schema vocabulary; no provider material or production parser.
-  const accepts=(rule:any,value:any):boolean=>{
-    if(rule.$ref)return accepts(defs[rule.$ref.slice('#/$defs/'.length)],value);
-    if(rule.anyOf)return rule.anyOf.some((branch:any)=>accepts(branch,value));
-    if(rule.type==='string')return typeof value==='string'&&(!rule.enum||rule.enum.includes(value))&&(!rule.pattern||new RegExp(rule.pattern).test(value));
-    if(rule.type==='object')return value!==null&&typeof value==='object'&&!Array.isArray(value)&&rule.required.every((key:string)=>Object.hasOwn(value,key))&&Object.keys(value).every(key=>Object.hasOwn(rule.properties,key)&&accepts(rule.properties[key],value[key]));
+  const accepts = (rule: any, value: any): boolean => {
+    if (rule.$ref) return accepts(defs[rule.$ref.slice('#/$defs/'.length)], value);
+    if (rule.anyOf) return rule.anyOf.some((branch: any) => accepts(branch, value));
+    if (rule.type === 'string')
+      return (
+        typeof value === 'string' &&
+        (!rule.enum || rule.enum.includes(value)) &&
+        (!rule.pattern || new RegExp(rule.pattern).test(value))
+      );
+    if (rule.type === 'object')
+      return (
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        rule.required.every((key: string) => Object.hasOwn(value, key)) &&
+        Object.keys(value).every(
+          (key) => Object.hasOwn(rule.properties, key) && accepts(rule.properties[key], value[key]),
+        )
+      );
     throw Error('Unexpected test schema keyword');
   };
-  const leaf={op:'value',numerator:'1',denominator:'1'},chain=(depth:number,op:string,left:boolean):any=>depth===1?leaf:{op,left:left?chain(depth-1,op,left):leaf,right:left?leaf:chain(depth-1,op,left)},full=(depth:number):any=>depth===1?leaf:{op:'add',left:full(depth-1),right:full(depth-1)};
-  for(let depth=1;depth<=6;depth++)for(const op of ['add','sub','mul','div'])for(const left of [true,false])assert.ok(accepts(defs.expression6,chain(depth,op,left)));
-  for(const left of [true,false])assert.equal(accepts(defs.expression6,chain(7,'add',left)),false);
-  for(const value of [null,[],{...leaf,extra:true},{...leaf,denominator:'0'},{op:'pow',left:leaf,right:leaf},{op:'add',left:leaf}])assert.equal(accepts(defs.expression6,value),false);
-  const formalInput=(input:any):FormalSpec=>({verifier:'rational.evaluate.v1',input});assert.doesNotThrow(()=>computeFormal(formalInput(chain(6,'add',true))));assert.doesNotThrow(()=>computeFormal(formalInput(full(5))));
-  const nodes33={op:'add',left:full(5),right:leaf};assert.ok(accepts(defs.expression6,nodes33));assert.throws(()=>computeFormal(formalInput(nodes33)),{code:'WF1_FORMAL_LIMIT'});assert.throws(()=>computeFormal(formalInput(chain(7,'add',true))),{code:'WF1_FORMAL_LIMIT'});
+  const leaf = { op: 'value', numerator: '1', denominator: '1' },
+    chain = (depth: number, op: string, left: boolean): any =>
+      depth === 1
+        ? leaf
+        : { op, left: left ? chain(depth - 1, op, left) : leaf, right: left ? leaf : chain(depth - 1, op, left) },
+    full = (depth: number): any => (depth === 1 ? leaf : { op: 'add', left: full(depth - 1), right: full(depth - 1) });
+  for (let depth = 1; depth <= 6; depth++)
+    for (const op of ['add', 'sub', 'mul', 'div'])
+      for (const left of [true, false]) assert.ok(accepts(defs.expression6, chain(depth, op, left)));
+  for (const left of [true, false]) assert.equal(accepts(defs.expression6, chain(7, 'add', left)), false);
+  for (const value of [
+    null,
+    [],
+    { ...leaf, extra: true },
+    { ...leaf, denominator: '0' },
+    { op: 'pow', left: leaf, right: leaf },
+    { op: 'add', left: leaf },
+  ])
+    assert.equal(accepts(defs.expression6, value), false);
+  const formalInput = (input: any): FormalSpec => ({ verifier: 'rational.evaluate.v1', input });
+  assert.doesNotThrow(() => computeFormal(formalInput(chain(6, 'add', true))));
+  assert.doesNotThrow(() => computeFormal(formalInput(full(5))));
+  const nodes33 = { op: 'add', left: full(5), right: leaf };
+  assert.ok(accepts(defs.expression6, nodes33));
+  assert.throws(() => computeFormal(formalInput(nodes33)), { code: 'WF1_FORMAL_LIMIT' });
+  assert.throws(() => computeFormal(formalInput(chain(7, 'add', true))), { code: 'WF1_FORMAL_LIMIT' });
 });
 
-test('pilot historical schema delta remains limited to two copies after accounting for fixed medium effort',()=>{
-  const goldens={seal:'1ca3e55604ccda416d2633ae2a67ab18d9cc4f21b5602c003683ab7f5d63dabd',plan:'3c2c8bd35a1a130056c0d7d3b334175836dcf609dd67434dabc5a1055a676fd7',rubric:'b46948125b0f1ca5cc810e8db5eb2521c9e00a210f2cb46fadd1c5098418c154',candidate:'e750f06b2c9209c1bc07dccfa63595d3f84f17d1cefff1f9fb560fd589ee574b',review:'398a6eb7e76e97c79e9be96d0b97cc2b035cf7d8640eca1d0ff9846d2133931a'};
-  assert.equal(WF2_PILOT_POLICY.version,'wf2-together-first4/4');assert.equal(WF2_PILOT_POLICY.schemaDialect,'bounded-depth6/1');assert.notEqual(WF2_PILOT_PROFILE_DIGEST,'9d710634268d460d09093174032e9d357345ebf8d0faa6a7dda1c6e71f4d02fe');
-  for(const operation of ['seal','plan','rubric','candidate','review'] as const){
-    const raw=pilotBody('together',pilotPayload(operation,{fixture:marker}),operation),body=JSON.parse(raw),current=canonical(pilotSchema(operation));assert.equal(body.messages[0].content,WF2_PILOT_POLICY.instruction+current);assert.equal(canonical(body.response_format.json_schema.schema),current);
-    assert.equal(body.reasoning_effort,'medium');body.reasoning_effort='low';
-    if(operation==='seal'||operation==='plan'){assert.notEqual(hash(canonical(body)),goldens[operation]);const old=JSON.parse(canonical(fixedSlotSchema(operation)).replaceAll('"$def":','"$defs":').replaceAll('#/$def/','#/$defs/'));body.messages[0].content=WF2_PILOT_POLICY.instruction+canonical(old);body.response_format.json_schema.schema=old;assert.equal(hash(canonical(body)),goldens[operation]);}
-    else assert.equal(hash(canonical(body)),goldens[operation]);
+test('pilot historical schema delta remains limited to two copies after accounting for fixed medium effort', () => {
+  const goldens = {
+    seal: '1ca3e55604ccda416d2633ae2a67ab18d9cc4f21b5602c003683ab7f5d63dabd',
+    plan: '3c2c8bd35a1a130056c0d7d3b334175836dcf609dd67434dabc5a1055a676fd7',
+    rubric: 'b46948125b0f1ca5cc810e8db5eb2521c9e00a210f2cb46fadd1c5098418c154',
+    candidate: 'e750f06b2c9209c1bc07dccfa63595d3f84f17d1cefff1f9fb560fd589ee574b',
+    review: '398a6eb7e76e97c79e9be96d0b97cc2b035cf7d8640eca1d0ff9846d2133931a',
+  };
+  assert.equal(WF2_PILOT_POLICY.version, 'wf2-together-first4/4');
+  assert.equal(WF2_PILOT_POLICY.schemaDialect, 'bounded-depth6/1');
+  assert.notEqual(WF2_PILOT_PROFILE_DIGEST, '9d710634268d460d09093174032e9d357345ebf8d0faa6a7dda1c6e71f4d02fe');
+  for (const operation of ['seal', 'plan', 'rubric', 'candidate', 'review'] as const) {
+    const raw = pilotBody('together', pilotPayload(operation, { fixture: marker }), operation),
+      body = JSON.parse(raw),
+      current = canonical(pilotSchema(operation));
+    assert.equal(body.messages[0].content, WF2_PILOT_POLICY.instruction + current);
+    assert.equal(canonical(body.response_format.json_schema.schema), current);
+    assert.equal(body.reasoning_effort, 'medium');
+    body.reasoning_effort = 'low';
+    if (operation === 'seal' || operation === 'plan') {
+      assert.notEqual(hash(canonical(body)), goldens[operation]);
+      const old = JSON.parse(
+        canonical(fixedSlotSchema(operation)).replaceAll('"$def":', '"$defs":').replaceAll('#/$def/', '#/$defs/'),
+      );
+      body.messages[0].content = WF2_PILOT_POLICY.instruction + canonical(old);
+      body.response_format.json_schema.schema = old;
+      assert.equal(hash(canonical(body)), goldens[operation]);
+    } else assert.equal(hash(canonical(body)), goldens[operation]);
   }
 });
 
-test('pilot current policy refuses archived profiles or builds before creating campaign files',()=>{
-  const f=fixture();for(const [oldProfile,oldBuild] of [['9d710634268d460d09093174032e9d357345ebf8d0faa6a7dda1c6e71f4d02fe','85a0bf5fcc8646327070fbef38ee9d1c7510f34e96982aff21cbd493b60c676a'],['66b986ed11ed9b6bf085890b2de2c15b5c2ee511acda94dfa9148573014279c6','7bfda279ad665f88573fc58d1f5a7426d0d3080964c5e65588e2f1df168363ea'],['ffb62188a8305a5f60209aa7d5926fea583f997cd846f9b4d32191a4a2802399','2fb434f4204efbccd066471b1739dc1472717ee5cd2c0086930f64ecb9c1cfa6']]){
-    assert.throws(()=>validateSpec({...f.spec,profileDigest:oldProfile}),{code:'WF1_PROFILE'});
-    assert.throws(()=>bindTeacherCampaign({...f.bootstrap,spec:{...f.spec,profileDigest:oldProfile}}),{code:'WF1_PROFILE'});
-    assert.throws(()=>bindTeacherCampaign({...f.bootstrap,spec:{...f.spec,sourceDigest:oldBuild}}),{code:'WF2_BUILD_MISMATCH'});
+test('pilot current policy refuses archived profiles or builds before creating campaign files', () => {
+  const f = fixture();
+  for (const [oldProfile, oldBuild] of [
+    [
+      '9d710634268d460d09093174032e9d357345ebf8d0faa6a7dda1c6e71f4d02fe',
+      '85a0bf5fcc8646327070fbef38ee9d1c7510f34e96982aff21cbd493b60c676a',
+    ],
+    [
+      '66b986ed11ed9b6bf085890b2de2c15b5c2ee511acda94dfa9148573014279c6',
+      '7bfda279ad665f88573fc58d1f5a7426d0d3080964c5e65588e2f1df168363ea',
+    ],
+    [
+      'ffb62188a8305a5f60209aa7d5926fea583f997cd846f9b4d32191a4a2802399',
+      '2fb434f4204efbccd066471b1739dc1472717ee5cd2c0086930f64ecb9c1cfa6',
+    ],
+  ]) {
+    assert.throws(() => validateSpec({ ...f.spec, profileDigest: oldProfile }), { code: 'WF1_PROFILE' });
+    assert.throws(() => bindTeacherCampaign({ ...f.bootstrap, spec: { ...f.spec, profileDigest: oldProfile } }), {
+      code: 'WF1_PROFILE',
+    });
+    assert.throws(() => bindTeacherCampaign({ ...f.bootstrap, spec: { ...f.spec, sourceDigest: oldBuild } }), {
+      code: 'WF2_BUILD_MISMATCH',
+    });
   }
-  assert.deepEqual(readdirSync(f.runtimeRoot),[]);assert.equal(JSON.parse(readFileSync(f.authorityPath,'utf8')).head,null);
+  assert.deepEqual(readdirSync(f.runtimeRoot), []);
+  assert.equal(JSON.parse(readFileSync(f.authorityPath, 'utf8')).head, null);
 });
 
-test('pilot medium effort changes only the fixed effort field in five bodies with identical schemas and caps',()=>{
-  const oldHigh={seal:'8cfce6b8d073e76f98d68a7e16730c50dacfeaff16056cb27e33603dae6e488b',plan:'7132531fd95736221e7e3d5544a8cf3c012b5f1d7a6d7921799e49ced2806a63',rubric:'fda42e93f96f85540963a6f8248e661243e9cc6d37368e957dd777a844e1916d',candidate:'2cccd0a62589566a5de1fa96cfd00bff243baa5cc583b21c08a1b67226d71697',review:'bb936f63088f26fb860f127e2e874a0debc3bbe68d637ed0da919da7234e510a'} as const;
-  const oldLow={seal:['4445ecc533e24a90e21f39912f4578b6e21b107becae23bd585d5dabcca7256b','2d48fddfd1f51eb6118df7e9665464c856bc7c0a0beb5d4499e90c097b976ebc'],plan:['85714d928eecb57b569eb226538269b3a75a242cd9fd55f56ca470d59cf6c7dd','8602b7e38413d1af318a541d1b1d1600b7bce59f1ac9f1a5a178c1d40b8b8593'],rubric:['b46948125b0f1ca5cc810e8db5eb2521c9e00a210f2cb46fadd1c5098418c154','c480ee754e35237a5e68801dfb3861f74ca477d7df2abe1eec85b1d7dbbb8fe1'],candidate:['e750f06b2c9209c1bc07dccfa63595d3f84f17d1cefff1f9fb560fd589ee574b','7c3bf2edade058b143e3dbae3b782bb78d2478a15ea77ff8599fbb866f5dc429'],review:['398a6eb7e76e97c79e9be96d0b97cc2b035cf7d8640eca1d0ff9846d2133931a','d45d128effcdf42a1aa4f02674cbb68be7d0a1c1103dbc73ef85d3ebb59c3178']} as const;
-  assert.equal(WF2_PILOT_POLICY.version,'wf2-together-first4/4');assert.equal(WF2_PILOT_POLICY.reasoningEffort,'medium');assert.ok(Object.isFrozen(WF2_PILOT_POLICY));assert.equal(WF2_PILOT_POLICY.schemaDialect,'bounded-depth6/1');assert.notEqual(WF2_PILOT_PROFILE_DIGEST,'ffb62188a8305a5f60209aa7d5926fea583f997cd846f9b4d32191a4a2802399');
-  for(const operation of ['seal','plan','rubric','candidate','review'] as const){
-    const payload=pilotPayload(operation,{fixture:marker}),raw=pilotBody('together',payload,operation),body=JSON.parse(raw);assert.equal(body.reasoning_effort,'medium');assert.equal(body.max_tokens,operation==='seal'||operation==='plan'?8192:4096);assert.equal(pilotBinding('together',operation).schemaDigest,oldLow[operation][1]);
-    body.reasoning_effort='high';const high=canonical(body);assert.equal(hash(high),oldHigh[operation]);assert.equal(Buffer.byteLength(raw),Buffer.byteLength(high)+2);
-    body.reasoning_effort='low';const old=canonical(body);assert.equal(hash(old),oldLow[operation][0]);assert.equal(Buffer.byteLength(raw),Buffer.byteLength(old)+3);assert.throws(()=>pilotBody('together',{...payload,reasoning_effort:'low'},operation),{code:'WF1_FIELDS'});
+test('pilot medium effort changes only the fixed effort field in five bodies with identical schemas and caps', () => {
+  const oldHigh = {
+    seal: '8cfce6b8d073e76f98d68a7e16730c50dacfeaff16056cb27e33603dae6e488b',
+    plan: '7132531fd95736221e7e3d5544a8cf3c012b5f1d7a6d7921799e49ced2806a63',
+    rubric: 'fda42e93f96f85540963a6f8248e661243e9cc6d37368e957dd777a844e1916d',
+    candidate: '2cccd0a62589566a5de1fa96cfd00bff243baa5cc583b21c08a1b67226d71697',
+    review: 'bb936f63088f26fb860f127e2e874a0debc3bbe68d637ed0da919da7234e510a',
+  } as const;
+  const oldLow = {
+    seal: [
+      '4445ecc533e24a90e21f39912f4578b6e21b107becae23bd585d5dabcca7256b',
+      '2d48fddfd1f51eb6118df7e9665464c856bc7c0a0beb5d4499e90c097b976ebc',
+    ],
+    plan: [
+      '85714d928eecb57b569eb226538269b3a75a242cd9fd55f56ca470d59cf6c7dd',
+      '8602b7e38413d1af318a541d1b1d1600b7bce59f1ac9f1a5a178c1d40b8b8593',
+    ],
+    rubric: [
+      'b46948125b0f1ca5cc810e8db5eb2521c9e00a210f2cb46fadd1c5098418c154',
+      'c480ee754e35237a5e68801dfb3861f74ca477d7df2abe1eec85b1d7dbbb8fe1',
+    ],
+    candidate: [
+      'e750f06b2c9209c1bc07dccfa63595d3f84f17d1cefff1f9fb560fd589ee574b',
+      '7c3bf2edade058b143e3dbae3b782bb78d2478a15ea77ff8599fbb866f5dc429',
+    ],
+    review: [
+      '398a6eb7e76e97c79e9be96d0b97cc2b035cf7d8640eca1d0ff9846d2133931a',
+      'd45d128effcdf42a1aa4f02674cbb68be7d0a1c1103dbc73ef85d3ebb59c3178',
+    ],
+  } as const;
+  assert.equal(WF2_PILOT_POLICY.version, 'wf2-together-first4/4');
+  assert.equal(WF2_PILOT_POLICY.reasoningEffort, 'medium');
+  assert.ok(Object.isFrozen(WF2_PILOT_POLICY));
+  assert.equal(WF2_PILOT_POLICY.schemaDialect, 'bounded-depth6/1');
+  assert.notEqual(WF2_PILOT_PROFILE_DIGEST, 'ffb62188a8305a5f60209aa7d5926fea583f997cd846f9b4d32191a4a2802399');
+  for (const operation of ['seal', 'plan', 'rubric', 'candidate', 'review'] as const) {
+    const payload = pilotPayload(operation, { fixture: marker }),
+      raw = pilotBody('together', payload, operation),
+      body = JSON.parse(raw);
+    assert.equal(body.reasoning_effort, 'medium');
+    assert.equal(body.max_tokens, operation === 'seal' || operation === 'plan' ? 8192 : 4096);
+    assert.equal(pilotBinding('together', operation).schemaDigest, oldLow[operation][1]);
+    body.reasoning_effort = 'high';
+    const high = canonical(body);
+    assert.equal(hash(high), oldHigh[operation]);
+    assert.equal(Buffer.byteLength(raw), Buffer.byteLength(high) + 2);
+    body.reasoning_effort = 'low';
+    const old = canonical(body);
+    assert.equal(hash(old), oldLow[operation][0]);
+    assert.equal(Buffer.byteLength(raw), Buffer.byteLength(old) + 3);
+    assert.throws(() => pilotBody('together', { ...payload, reasoning_effort: 'low' }, operation), {
+      code: 'WF1_FIELDS',
+    });
   }
-  assert.deepEqual({deepseek:WF2_PILOT_LIMITS.deepseekCalls,together:WF2_PILOT_LIMITS.togetherCalls,total:WF2_PILOT_LIMITS.totalCalls,cap:WF2_PILOT_LIMITS.totalMicroUsd,togetherCap:WF2_PILOT_LIMITS.togetherMicroUsd},{deepseek:0,together:11,total:11,cap:100000,togetherCap:100000});
-  const f=fixture();assert.equal(2*estimateMicroUsd(18432,8192,f.spec.prices.together)+9*estimateMicroUsd(18432,4096,f.spec.prices.together),62367);
+  assert.deepEqual(
+    {
+      deepseek: WF2_PILOT_LIMITS.deepseekCalls,
+      together: WF2_PILOT_LIMITS.togetherCalls,
+      total: WF2_PILOT_LIMITS.totalCalls,
+      cap: WF2_PILOT_LIMITS.totalMicroUsd,
+      togetherCap: WF2_PILOT_LIMITS.togetherMicroUsd,
+    },
+    { deepseek: 0, together: 11, total: 11, cap: 100000, togetherCap: 100000 },
+  );
+  const f = fixture();
+  assert.equal(
+    2 * estimateMicroUsd(18432, 8192, f.spec.prices.together) +
+      9 * estimateMicroUsd(18432, 4096, f.spec.prices.together),
+    62367,
+  );
 });
 
-test('pilot medium effort refuses old high and low bodies and bindings before authorization or fetch',async()=>{
-  let sends=0,authorizations=0;const provider=new TeacherProvider({deepseek:null,together:'synthetic'},{fetch:async()=>{sends++;throw Error('never');}}),authorize=<T>(send:()=>T):T=>{authorizations++;return send();};
-  for(const operation of ['seal','plan','rubric','candidate','review'] as const){
-    const current=pilotBody('together',pilotPayload(operation,{fixture:marker}),operation),binding=pilotBinding('together',operation);
-    for(const [effort,profileDigest] of [['low','66b986ed11ed9b6bf085890b2de2c15b5c2ee511acda94dfa9148573014279c6'],['high','ffb62188a8305a5f60209aa7d5926fea583f997cd846f9b4d32191a4a2802399']] as const){
-      const body=JSON.parse(current);body.reasoning_effort=effort;const old=canonical(body),oldBinding={...binding,profileDigest};
-      for(const [raw,selected] of [[old,binding],[current,oldBinding],[old,oldBinding]] as const)await assert.rejects(provider.submit('together',raw,{} as never,new AbortController().signal,authorize,{operation,binding:selected}),{code:'WF2_PILOT_BINDING'});
+test('pilot medium effort refuses old high and low bodies and bindings before authorization or fetch', async () => {
+  let sends = 0,
+    authorizations = 0;
+  const provider = new TeacherProvider(
+      { deepseek: null, together: 'synthetic' },
+      {
+        fetch: async () => {
+          sends++;
+          throw Error('never');
+        },
+      },
+    ),
+    authorize = <T>(send: () => T): T => {
+      authorizations++;
+      return send();
+    };
+  for (const operation of ['seal', 'plan', 'rubric', 'candidate', 'review'] as const) {
+    const current = pilotBody('together', pilotPayload(operation, { fixture: marker }), operation),
+      binding = pilotBinding('together', operation);
+    for (const [effort, profileDigest] of [
+      ['low', '66b986ed11ed9b6bf085890b2de2c15b5c2ee511acda94dfa9148573014279c6'],
+      ['high', 'ffb62188a8305a5f60209aa7d5926fea583f997cd846f9b4d32191a4a2802399'],
+    ] as const) {
+      const body = JSON.parse(current);
+      body.reasoning_effort = effort;
+      const old = canonical(body),
+        oldBinding = { ...binding, profileDigest };
+      for (const [raw, selected] of [
+        [old, binding],
+        [current, oldBinding],
+        [old, oldBinding],
+      ] as const)
+        await assert.rejects(
+          provider.submit('together', raw, {} as never, new AbortController().signal, authorize, {
+            operation,
+            binding: selected,
+          }),
+          { code: 'WF2_PILOT_BINDING' },
+        );
     }
   }
-  assert.equal(authorizations,0);assert.equal(sends,0);
+  assert.equal(authorizations, 0);
+  assert.equal(sends, 0);
 });
 
-test('pilot eleven calls freeze only first-four exact set and cold verify four unique rows without sealed reads',async()=>{
-  const f=fixture(),m=mock(f),b=bindTeacherCampaign(f.bootstrap,{provider:m.provider,now:()=>f.now}),service=new TeacherControlService(b.run,capability);service.dispatch({version:1,requestId:'start',operation:'start',capability});await service.settled();const receipt=service.completionReceipt();assert.deepEqual({...receipt.metadata.calls},{deepseek:0,together:11});assert.equal(receipt.metadata.profile!.scope,'PILOT_ONLY');assert.equal(receipt.metadata.candidates.qualified,4);assert.equal(receipt.metadata.estimatedReserveMicroUsd,62367);assert.deepEqual(m.operations,['seal','plan','rubric','candidate','review','candidate','review','candidate','review','candidate','review']);service.acknowledgeCompleted(receipt.digest);service.ownerLost();
-  const s=state(f),train=createArtifactBroker(f.runtimeRoot,f.spec.id,key).train,p=validatePlan(JSON.parse(train.read(s.planRef!).toString())),manifest=JSON.parse(train.read(s.manifestRef!).toString());assert.equal(s.manifestRef!.kind,'private-pilot-manifest');assert.equal(manifest.scope,'PILOT_ONLY');assert.equal(manifest.pairedComparison,'NOT_RUN');assert.equal(manifest.reviewClass,'MODEL_REVIEW_ONLY');assert.deepEqual(verifyTeacherManifest(s,p,manifest),{status:'VERIFIED',rows:4,uniqueRows:4,splitCounts:{train:3,dev:1}});
-  const variants=[];for(const mutate of [(x:any)=>{x.rows.pop();},(x:any)=>{x.rows[1]=x.rows[0];},(x:any)=>{x.rows[0].familyId=p.families[4]!.id;},(x:any)=>{x.rows[0].split='dev';},(x:any)=>{x.rows[0].roots=['other'];},(x:any)=>{x.rows.push(...x.rows,...x.rows,...x.rows);},(x:any)=>{x.version='wf1-private-manifest/1';delete x.scope;delete x.remainingFamilies;delete x.pairedComparison;delete x.reviewClass;}]){const x=structuredClone(manifest);mutate(x);variants.push(x);}for(const x of variants)assert.throws(()=>verifyTeacherManifest(s,p,x));
-  const wrongPlan=structuredClone(p);wrongPlan.families[15]!.roots=wrongPlan.families[0]!.roots;assert.throws(()=>verifyTeacherManifest(s,wrongPlan,manifest));const oldState=structuredClone(s);oldState.spec={...s.spec,schemaVersion:'wf1-campaign/0.6',profileDigest:WF2_SLOTS_PROFILE_DIGEST};assert.throws(()=>verifyTeacherManifest(oldState,p,manifest));
+test('pilot eleven calls freeze only first-four exact set and cold verify four unique rows without sealed reads', async () => {
+  const f = fixture(),
+    m = mock(f),
+    b = bindTeacherCampaign(f.bootstrap, { provider: m.provider, now: () => f.now }),
+    service = new TeacherControlService(b.run, capability);
+  service.dispatch({ version: 1, requestId: 'start', operation: 'start', capability });
+  await service.settled();
+  const receipt = service.completionReceipt();
+  assert.deepEqual({ ...receipt.metadata.calls }, { deepseek: 0, together: 11 });
+  assert.equal(receipt.metadata.profile!.scope, 'PILOT_ONLY');
+  assert.equal(receipt.metadata.candidates.qualified, 4);
+  assert.equal(receipt.metadata.estimatedReserveMicroUsd, 62367);
+  assert.deepEqual(m.operations, [
+    'seal',
+    'plan',
+    'rubric',
+    'candidate',
+    'review',
+    'candidate',
+    'review',
+    'candidate',
+    'review',
+    'candidate',
+    'review',
+  ]);
+  service.acknowledgeCompleted(receipt.digest);
+  service.ownerLost();
+  const s = state(f),
+    train = createArtifactBroker(f.runtimeRoot, f.spec.id, key).train,
+    p = validatePlan(JSON.parse(train.read(s.planRef!).toString())),
+    manifest = JSON.parse(train.read(s.manifestRef!).toString());
+  assert.equal(s.manifestRef!.kind, 'private-pilot-manifest');
+  assert.equal(manifest.scope, 'PILOT_ONLY');
+  assert.equal(manifest.pairedComparison, 'NOT_RUN');
+  assert.equal(manifest.reviewClass, 'MODEL_REVIEW_ONLY');
+  assert.deepEqual(verifyTeacherManifest(s, p, manifest), {
+    status: 'VERIFIED',
+    rows: 4,
+    uniqueRows: 4,
+    splitCounts: { train: 3, dev: 1 },
+  });
+  const variants = [];
+  for (const mutate of [
+    (x: any) => {
+      x.rows.pop();
+    },
+    (x: any) => {
+      x.rows[1] = x.rows[0];
+    },
+    (x: any) => {
+      x.rows[0].familyId = p.families[4]!.id;
+    },
+    (x: any) => {
+      x.rows[0].split = 'dev';
+    },
+    (x: any) => {
+      x.rows[0].roots = ['other'];
+    },
+    (x: any) => {
+      x.rows.push(...x.rows, ...x.rows, ...x.rows);
+    },
+    (x: any) => {
+      x.version = 'wf1-private-manifest/1';
+      delete x.scope;
+      delete x.remainingFamilies;
+      delete x.pairedComparison;
+      delete x.reviewClass;
+    },
+  ]) {
+    const x = structuredClone(manifest);
+    mutate(x);
+    variants.push(x);
+  }
+  for (const x of variants) assert.throws(() => verifyTeacherManifest(s, p, x));
+  const wrongPlan = structuredClone(p);
+  wrongPlan.families[15]!.roots = wrongPlan.families[0]!.roots;
+  assert.throws(() => verifyTeacherManifest(s, wrongPlan, manifest));
+  const oldState = structuredClone(s);
+  oldState.spec = { ...s.spec, schemaVersion: 'wf1-campaign/0.6', profileDigest: WF2_SLOTS_PROFILE_DIGEST };
+  assert.throws(() => verifyTeacherManifest(oldState, p, manifest));
   // A coherent alternative 3/1 set with valid oracle/source records still is not the prescribed first four.
-  const otherState=structuredClone(s),otherManifest=structuredClone(manifest);otherState.exclusions=[];otherManifest.rows=p.families.slice(4,8).map((family,i)=>{const target=computeFormal(family.formal),projection={tool:family.formal.verifier,input:family.formal.input,typedTarget:target},candidate=otherState.candidates[i]!;candidate.familyId=family.id;candidate.evidence=verifyFormal(family.formal,target);otherState.exclusions.push({candidateId:candidate.id,result:'CLEAR',commitment:hash(canonical(projection))});return {familyId:family.id,roots:family.roots,split:family.split,provider:'together',projection,selectedTargetCoverage:'COMPLETE'};});assert.throws(()=>verifyTeacherManifest(otherState,p,otherManifest),(e:any)=>e.code==='WF2_PILOT_MANIFEST');
-  for(const name of readdirSync(f.runtimeRoot).filter(n=>n.startsWith('custody-')))renameSync(join(f.runtimeRoot,name),join(f.runtimeRoot,name+'.unavailable'));const before=files(f.runtimeRoot),hostBefore=files(join(f.base,'host'));
-  const source=`import {inspectTeacherCampaign} from ${JSON.stringify(new URL('../src/wf2-teacher-inspect.ts',import.meta.url).href)};let raw='';for await(const part of process.stdin)raw+=part;process.stdout.write(JSON.stringify(inspectTeacherCampaign(JSON.parse(raw),()=>1000)));`;
-  const child=spawnSync(process.execPath,['--input-type=module','--eval',source],{input:canonical(inspection(f)),encoding:'utf8',timeout:5000,maxBuffer:32768,windowsHide:true});assert.equal(child.status,0,child.stderr);const cold=JSON.parse(child.stdout);assert.equal(cold.version,'wf2-teacher-inspection/5');assert.equal(cold.profile.profileDigest,WF2_PILOT_PROFILE_DIGEST);assert.equal(cold.providers.together.calls,11);assert.equal(cold.providers.deepseek.calls,0);assert.deepEqual(cold.manifestVerification,{status:'VERIFIED',rows:4,uniqueRows:4,splitCounts:{train:3,dev:1}});assert.equal(cold.uniqueManifestRows,4);assert.ok(!child.stdout.includes('SYNTHETIC_PRIVATE'));assert.deepEqual(files(f.runtimeRoot),before);assert.deepEqual(files(join(f.base,'host')),hostBefore);
+  const otherState = structuredClone(s),
+    otherManifest = structuredClone(manifest);
+  otherState.exclusions = [];
+  otherManifest.rows = p.families.slice(4, 8).map((family, i) => {
+    const target = computeFormal(family.formal),
+      projection = { tool: family.formal.verifier, input: family.formal.input, typedTarget: target },
+      candidate = otherState.candidates[i]!;
+    candidate.familyId = family.id;
+    candidate.evidence = verifyFormal(family.formal, target);
+    otherState.exclusions.push({ candidateId: candidate.id, result: 'CLEAR', commitment: hash(canonical(projection)) });
+    return {
+      familyId: family.id,
+      roots: family.roots,
+      split: family.split,
+      provider: 'together',
+      projection,
+      selectedTargetCoverage: 'COMPLETE',
+    };
+  });
+  assert.throws(
+    () => verifyTeacherManifest(otherState, p, otherManifest),
+    (e: any) => e.code === 'WF2_PILOT_MANIFEST',
+  );
+  for (const name of readdirSync(f.runtimeRoot).filter((n) => n.startsWith('custody-')))
+    renameSync(join(f.runtimeRoot, name), join(f.runtimeRoot, name + '.unavailable'));
+  const before = files(f.runtimeRoot),
+    hostBefore = files(join(f.base, 'host'));
+  const source = `import {inspectTeacherCampaign} from ${JSON.stringify(new URL('../src/wf2-teacher-inspect.ts', import.meta.url).href)};let raw='';for await(const part of process.stdin)raw+=part;process.stdout.write(JSON.stringify(inspectTeacherCampaign(JSON.parse(raw),()=>1000)));`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '--eval', source], {
+    input: canonical(inspection(f)),
+    encoding: 'utf8',
+    timeout: 5000,
+    maxBuffer: 32768,
+    windowsHide: true,
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const cold = JSON.parse(child.stdout);
+  assert.equal(cold.version, 'wf2-teacher-inspection/5');
+  assert.equal(cold.profile.profileDigest, WF2_PILOT_PROFILE_DIGEST);
+  assert.equal(cold.providers.together.calls, 11);
+  assert.equal(cold.providers.deepseek.calls, 0);
+  assert.deepEqual(cold.manifestVerification, {
+    status: 'VERIFIED',
+    rows: 4,
+    uniqueRows: 4,
+    splitCounts: { train: 3, dev: 1 },
+  });
+  assert.equal(cold.uniqueManifestRows, 4);
+  assert.ok(!child.stdout.includes('SYNTHETIC_PRIVATE'));
+  assert.deepEqual(files(f.runtimeRoot), before);
+  assert.deepEqual(files(join(f.base, 'host')), hostBefore);
 });
 
-test('pilot first-four, source, response syntax and unknown usage stop without repair or more families',async()=>{
-  for(const failure of ['json','wrong','review','usage','source','sameFormal'] as const){const f=fixture(),m=mock(f,failure),b=bindTeacherCampaign(f.bootstrap,{provider:m.provider,now:()=>f.now});try{await b.run.run();const t=b.terminal!();assert.equal(t.metadata.campaignStatus,'STOPPED');assert.equal(t.metadata.calls.deepseek,0);assert.equal(t.metadata.candidates.qualified,0);assert.equal(t.metadata.manifestFrozen,false);assert.equal(m.operations.length,failure==='wrong'||failure==='source'||failure==='sameFormal'?4:failure==='review'?5:1);if(failure==='json')assert.equal(t.responseFailureCode,'FINAL_NATIVE_JSON_INVALID');}finally{b.run.withdraw('REVOKED');}const cold=inspectTeacherCampaign(inspection(f),()=>f.now);assert.equal(cold.manifestVerification.status,'NOT_READ');assert.equal(cold.profile!.scope,'PILOT_ONLY');assert.throws(()=>bindTeacherCampaign(f.bootstrap));}
-});
-
-test('metadata shape and count limits require the exact trusted pilot profile; defaults never expand',()=>{
-  const value={profile:pilotMetadataProfile(),campaignStatus:'COMPLETED',countCompleteness:'CURRENT_AUTHORITY',calls:{deepseek:0,together:11},candidates:{deepseek:0,together:4,qualified:4,quarantined:0},sealed:true,planned:true,manifestFrozen:true,usage:{input:220,completion:330,unknown:0},estimatedReserveMicroUsd:62367};validateTeacherMetadata(value,WF2_PILOT_PROFILE_DIGEST);assert.throws(()=>validateTeacherMetadata(value));assert.throws(()=>validateTeacherMetadata(value,WF2_SLOTS_PROFILE_DIGEST));assert.throws(()=>validateTeacherMetadata({...value,profile:{...value.profile,scope:'FULL'}},WF2_PILOT_PROFILE_DIGEST));assert.throws(()=>validateTeacherMetadata({...value,calls:{deepseek:1,together:11}},WF2_PILOT_PROFILE_DIGEST));assert.throws(()=>validateTeacherMetadata({...value,calls:{deepseek:0,together:12}},WF2_PILOT_PROFILE_DIGEST));const legacy:any={...value};delete legacy.profile;assert.throws(()=>validateTeacherMetadata(legacy));
-});
-
-test('Together documented optional fields are raw-only; unknown/type mismatch and final lexical failures reject',async()=>{
-  const envelope=(raw='{}')=>({model:MODELS.together,prompt:[{text:'UNSELECTED_PROMPT',logprobs:{}}],warnings:[{message:'UNSELECTED_WARNING'}],choices:[{index:0,finish_reason:'stop',text:'UNSELECTED_TEXT',seed:-42,top_logprobs:{},message:{role:'assistant',content:raw,reasoning:'UNSELECTED_REASONING'}}],usage:{prompt_tokens:20,completion_tokens:30,total_tokens:50}});
-  const cases:[any,string][]=[[envelope(),'NONE'],[envelope('{bad'),'FINAL_NATIVE_JSON_INVALID'],[envelope('{"x":-0}'),'FINAL_WF1_NUMBER'],[envelope('{"x":1,"x":2}'),'FINAL_WF1_DUPLICATE_KEY'],[envelope('[]'),'FINAL_ROOT_NOT_OBJECT'],[{...envelope(),extra:'PRIVATE'},'ENVELOPE_REJECTED'],[{...envelope(),warnings:['wrong']},'ENVELOPE_REJECTED'],[{...envelope(),prompt:null},'ENVELOPE_REJECTED']];
-  for(const change of ['text','seed','top_logprobs']){const e:any=envelope();e.choices[0][change]=change==='seed'?'42':42;cases.push([e,'ENVELOPE_REJECTED']);}const floats:any=envelope();floats.choices[0].top_logprobs={x:0.5};cases.push([floats,'ENVELOPE_WF1_NUMBER']);
-  for(const [e,code] of cases){const f=fixture(),broker=createArtifactBroker(f.runtimeRoot,f.spec.id,key),provider=new TeacherProvider({deepseek:null,together:'synthetic'},{fetch:async()=>new Response(JSON.stringify(e),{headers:{'content-type':'application/json'}})}),result=await provider.submit('together',pilotBody('together',pilotPayload('candidate',{}),'candidate'),broker.train,new AbortController().signal,send=>send(),{operation:'candidate',binding:pilotBinding('together','candidate')});assert.equal(result.responseFailureCode,code);assert.equal(result.outcome,code==='NONE'?'COMPLETED':'FAILED');if(result.finalRef)assert.equal(broker.train.read(result.finalRef).toString(),e.choices[0].message.content);assert.equal(result.argumentsRef,null);}
-  const child=spawnSync(process.execPath,['src/wf2-teacher-worker.ts','--inspect-pilot'],{input:'{"private":"DO_NOT_ECHO"}',encoding:'utf8',timeout:5000,maxBuffer:32768,windowsHide:true});assert.equal(child.status,1);assert.equal(JSON.parse(child.stdout).version,'wf2-teacher-inspection/5');assert.ok(!child.stdout.includes('DO_NOT_ECHO'));
-});
-
-test('Together optional seed accepts observed null and safe integers while keeping nonnull integer bounds',()=>{
-  assert.doesNotThrow(()=>validatePilotEnvelopeExtras({},{}));
-  for(const seed of [null,-Number.MAX_SAFE_INTEGER,-42,0,42,Number.MAX_SAFE_INTEGER])assert.doesNotThrow(()=>validatePilotEnvelopeExtras({},{seed}));
-  for(const seed of ['42',true,false,{},[],0.5,-0,Number.MAX_SAFE_INTEGER+1,-Number.MAX_SAFE_INTEGER-1])assert.throws(()=>validatePilotEnvelopeExtras({},{seed}),{code:'WF1_NUMBER'});
-});
-
-test('Together nullable seed remains raw-only and wire numeric or unknown-field violations still reject',async()=>{
-  const final='{"status":"ok"}',valid:[string,string][]=[['absent',''],['null',',"seed":null'],['minimum',',"seed":-9007199254740991'],['zero',',"seed":0'],['integer',',"seed":42'],['maximum',',"seed":9007199254740991']];
-  const cases:[string,string,string][]=[...valid.map(([name,extra]):[string,string,string]=>[name,extra,'NONE'])];
-  for(const raw of ['"42"','true','false','{}','[]'])cases.push(['wrong type '+raw,',"seed":'+raw,'ENVELOPE_REJECTED']);
-  // Literal wire tokens preserve negative zero and unsafe integers that JSON.stringify would change.
-  for(const raw of ['0.5','-0','9007199254740992','-9007199254740992'])cases.push(['invalid number '+raw,',"seed":'+raw,'ENVELOPE_WF1_NUMBER']);
-  cases.push(['unknown choice field',',"seed":null,"unknown_seed":null','ENVELOPE_REJECTED']);
-  for(const [name,extra,code] of cases){
-    const raw='{"model":'+JSON.stringify(MODELS.together)+',"choices":[{"index":0,"finish_reason":"stop","text":"UNSELECTED_TEXT","message":{"role":"assistant","content":'+JSON.stringify(final)+'}'+extra+'}],"usage":{"prompt_tokens":20,"completion_tokens":30,"total_tokens":50}}';
-    const f=fixture(),broker=createArtifactBroker(f.runtimeRoot,f.spec.id,key),provider=new TeacherProvider({deepseek:null,together:'synthetic'},{fetch:async()=>new Response(raw,{headers:{'content-type':'application/json'}})});
-    const result=await provider.submit('together',pilotBody('together',pilotPayload('candidate',{}),'candidate'),broker.train,new AbortController().signal,send=>send(),{operation:'candidate',binding:pilotBinding('together','candidate')});
-    assert.equal(result.responseFailureCode,code,name);assert.equal(result.outcome,code==='NONE'?'COMPLETED':'FAILED',name);assert.ok(result.rawRef,name);assert.equal(broker.train.read(result.rawRef).toString(),raw,name);assert.equal(result.argumentsRef,null,name);
-    if(code==='NONE'){assert.ok(result.finalRef,name);assert.equal(broker.train.read(result.finalRef).toString(),final,name);assert.equal(result.returnedModel,MODELS.together,name);assert.deepEqual(result.usage,{input:20,completion:30,reasoning:null},name);assert.equal(result.finishReason,'stop',name);}
-    else assert.equal(result.finalRef,null,name);
+test('pilot first-four, source, response syntax and unknown usage stop without repair or more families', async () => {
+  for (const failure of ['json', 'wrong', 'review', 'usage', 'source', 'sameFormal'] as const) {
+    const f = fixture(),
+      m = mock(f, failure),
+      b = bindTeacherCampaign(f.bootstrap, { provider: m.provider, now: () => f.now });
+    try {
+      await b.run.run();
+      const t = b.terminal!();
+      assert.equal(t.metadata.campaignStatus, 'STOPPED');
+      assert.equal(t.metadata.calls.deepseek, 0);
+      assert.equal(t.metadata.candidates.qualified, 0);
+      assert.equal(t.metadata.manifestFrozen, false);
+      assert.equal(
+        m.operations.length,
+        failure === 'wrong' || failure === 'source' || failure === 'sameFormal' ? 4 : failure === 'review' ? 5 : 1,
+      );
+      if (failure === 'json') assert.equal(t.responseFailureCode, 'FINAL_NATIVE_JSON_INVALID');
+    } finally {
+      b.run.withdraw('REVOKED');
+    }
+    const cold = inspectTeacherCampaign(inspection(f), () => f.now);
+    assert.equal(cold.manifestVerification.status, 'NOT_READ');
+    assert.equal(cold.profile!.scope, 'PILOT_ONLY');
+    assert.throws(() => bindTeacherCampaign(f.bootstrap));
   }
 });
 
-test('trusted bridge accepts T11 metadata only with the frozen pilot profile and closes both Node fixture pipes',{timeout:15000},async()=>{
-  const workerUrl=new URL('../src/wf2-teacher-worker.ts',import.meta.url).href,policyUrl=new URL('../src/wf2-together-pilot.ts',import.meta.url).href,pluginUrl=new URL('../integrations/dsh-teacher-control/index.mjs',import.meta.url).href;
-  const workerSource=`import {serveTeacherControl} from ${JSON.stringify(workerUrl)};import {pilotMetadataProfile,WF2_PILOT_PROFILE_DIGEST} from ${JSON.stringify(policyUrl)};let done=false;const metadata=()=>({profile:pilotMetadataProfile(),campaignStatus:done?'COMPLETED':'ACTIVE',countCompleteness:'CURRENT_AUTHORITY',calls:{deepseek:0,together:done?11:0},candidates:{deepseek:0,together:done?4:0,qualified:done?4:0,quarantined:0},sealed:done,planned:done,manifestFrozen:done,usage:{input:done?220:0,completion:done?330:0,unknown:0},estimatedReserveMicroUsd:done?62367:0});const session=serveTeacherControl(process.stdin,process.stdout,b=>({capability:b.capability,run:{metadataProfileDigest:WF2_PILOT_PROFILE_DIGEST,run:async()=>{done=true},close:()=>{},withdraw:()=>{},metadata}}));await session.closed;process.stdin.destroy();`;
-  const dshSource=`import {apply} from ${JSON.stringify(pluginUrl)};const disposers=[];apply({get:n=>({cmdlineArgs:{get:()=>['--teacher-control']},appExit:n=>{for(const d of disposers)d();process.exitCode=n},appReady:{onReady:f=>{const p=setImmediate(f);return ()=>clearImmediate(p)}}})[n],effect:f=>disposers.push(f())});`;
-  for(const admitted of [true,false]){const evidenceRoot=realpathSync(mkdtempSync(join(tmpdir(),'companion-wf2-pilot-bridge-'))),result=await runTeacherBridge({evidenceRoot,deadlineMs:3000,...(admitted?{metadataProfileDigest:WF2_PILOT_PROFILE_DIGEST}:{}),startWorker:cap=>{const child=spawn(process.execPath,['--input-type=module','--eval',workerSource],{stdio:['pipe','pipe','pipe'],windowsHide:true});child.stdin.write(JSON.stringify({capability:cap})+'\n');return child;},startDsh:()=>spawn(process.execPath,['--input-type=module','--eval',dshSource],{stdio:['pipe','pipe','pipe'],windowsHide:true}),forceClose:async children=>{for(const child of children)child.kill();}});assert.equal(result.status,admitted?'COMPLETED':'UNKNOWN_OR_STOPPED');assert.equal(result.completionAcknowledged,admitted);assert.equal(result.forced,false);assert.equal(result.workerClosed,true);assert.equal(result.dshClosed,true);if(admitted){assert.equal(result.metadata!.profile!.profileDigest,WF2_PILOT_PROFILE_DIGEST);assert.equal(result.metadata!.calls.together,11);assert.equal(result.responseFailureCode,'UNKNOWN');}else assert.equal(result.metadata,null);}
+test('metadata shape and count limits require the exact trusted pilot profile; defaults never expand', () => {
+  const value = {
+    profile: pilotMetadataProfile(),
+    campaignStatus: 'COMPLETED',
+    countCompleteness: 'CURRENT_AUTHORITY',
+    calls: { deepseek: 0, together: 11 },
+    candidates: { deepseek: 0, together: 4, qualified: 4, quarantined: 0 },
+    sealed: true,
+    planned: true,
+    manifestFrozen: true,
+    usage: { input: 220, completion: 330, unknown: 0 },
+    estimatedReserveMicroUsd: 62367,
+  };
+  validateTeacherMetadata(value, WF2_PILOT_PROFILE_DIGEST);
+  assert.throws(() => validateTeacherMetadata(value));
+  assert.throws(() => validateTeacherMetadata(value, WF2_SLOTS_PROFILE_DIGEST));
+  assert.throws(() =>
+    validateTeacherMetadata({ ...value, profile: { ...value.profile, scope: 'FULL' } }, WF2_PILOT_PROFILE_DIGEST),
+  );
+  assert.throws(() =>
+    validateTeacherMetadata({ ...value, calls: { deepseek: 1, together: 11 } }, WF2_PILOT_PROFILE_DIGEST),
+  );
+  assert.throws(() =>
+    validateTeacherMetadata({ ...value, calls: { deepseek: 0, together: 12 } }, WF2_PILOT_PROFILE_DIGEST),
+  );
+  const legacy: any = { ...value };
+  delete legacy.profile;
+  assert.throws(() => validateTeacherMetadata(legacy));
 });
-const oldGoldens=[{"provider":"deepseek","operation":"seal","beta":"3eaa11107841089d5a3a8ffda4e407d1c81d64a916b2516761051c468a9ee92d","named":"26eeb0e6d18bf13831d2e96d175684cf748cf164315c53774cace4e6a8a94962","betaBinding":"56086ad9907d6acb06fee442c7e6da4a2267e17ff2307125dd73dddfd39cfe65","namedBinding":"432b10a712b71d9b215798ef162160099f3d5e1b7e3d79a8f2d3ac11107e477e"},{"provider":"deepseek","operation":"plan","beta":"38772a4a90e17341ff2c6340b30d0e194bb5a31a2341a14b69c345dd241b7878","named":"28913007f352fecc6029f789f8d1d67974e3f7536778c13cde918a4f4ef52e02","betaBinding":"14d6270e42fadeb80087cb0341959a456581be6bfb91c734ad832493828a0bc3","namedBinding":"a18323b7d8d04d0c5c2dd709faa699d9dd8b820939209ea62474231794a7fc83"},{"provider":"deepseek","operation":"rubric","beta":"d76c173448974fecb4732dcf9709d071ceebdd8f7cb8205db94844e3cdeac1c3","named":"84fd2ba77e0e4e01c269581838d3e37a7eebb0e4be092ff1621b933947f31576","betaBinding":"2517204c1f322ddacf53f51da3191310c3ecd70965802b09e92e4d1dd0f7279a","namedBinding":"ff2c10756d6429df90c7bd431b91d1f13bcdfbd74598ea3613da645348101a7e"},{"provider":"deepseek","operation":"candidate","beta":"8fe25e0400932e66364de6a353a749e794ed8eb08dee086050f865127bcea5df","named":"de16b1942b63166c321531ae5272a60ee7722d563176c8dfbcb7b50bf7b4957c","betaBinding":"a77f2528a4799c26fa4ad37dd88bcd15a4e637abff1c3e923b3b2302bde3edf6","namedBinding":"606e14b5b4a4e7179550b49dbe243bc22fb688a71f492f0f2a02c66e31bee35c"},{"provider":"deepseek","operation":"review","beta":"8f77828efe06389abf36f8acd9ea2b738c0c6e558b632a9b54e14c639bd4af6c","named":"1697c6e1f94bb6eb4f4ae9c15715fef67b16b83a079b4b828be6cb463a2148a6","betaBinding":"950e4d7aa85b0a7e778d632c772f1fa7ceff64069f4ea1ca52fc815d18a26800","namedBinding":"d7f764c497dcc18c1b0937a208b3d5f5aaad263e50387206fd10c93647f3be24"},{"provider":"deepseek","operation":"comparison_candidate","beta":"9f2bb1e560cd6532c9959cffe88db46446fc6c9b72fbaccfe6fe00bc61e461ee","named":"aeb8759ed1d07ea9a64c7b4dd91e7e18ac0025088df49a1c920e6dc11de9ee81","betaBinding":"e16ca75ce14890bfd7526651ef0440a77c4bd4a09095d73ef8a73ac0ce3a572b","namedBinding":"50f77507a745d25ee872541762aef59852e074439a5be8ad7db1a5932f351d67"},{"provider":"deepseek","operation":"comparison_review","beta":"d3465f415a5ab700e048ade3bceee2808757504337f51045016a31684f9a3895","named":"e43d896053115d149e94282c03360814325c04570d7741659f8344a23baf7361","betaBinding":"d131b248c02844c191ffc215211ccbec4231e3bb4f29c65bdc9d08fc6bd6cd0b","namedBinding":"0ec94b821325e2ea26fb4f866579e623ae60c060dbf1c1e906b754f8ea80d95f"},{"provider":"together","operation":"rubric","beta":"ea3787d6bea7aacfd691762becd25a77ce88ca769a92e74ce7c4c8d87e605da8","named":"ea3787d6bea7aacfd691762becd25a77ce88ca769a92e74ce7c4c8d87e605da8","betaBinding":"f1631f43cd4c810e428d7e4f5fa818c74d06241ca22f3763fb18e9308e2dc526","namedBinding":"2334a467de65e486a5304e7d15afd77780122c961b4ae638e3e0fb95cd6985c8"},{"provider":"together","operation":"candidate","beta":"3a8656dfb2cd0da262dfbc669e65acb18e541be779704390594423e2c2257987","named":"3a8656dfb2cd0da262dfbc669e65acb18e541be779704390594423e2c2257987","betaBinding":"0ef75ffa7fe8be0b153858478f15eeac35dda03ad4532dda99a32fa2524d924f","namedBinding":"7b1b825db202654f4861ba6d1ed868e6e5c9b8ff881bc648e0763f992ec97e05"},{"provider":"together","operation":"review","beta":"d7c91991f2c5b86503ebddac46628d07135a52f4014d76df1dd7bb983ce05f76","named":"d7c91991f2c5b86503ebddac46628d07135a52f4014d76df1dd7bb983ce05f76","betaBinding":"49ef58b3f395085426fbb6f0b72b92dee2db1ac6ec10df85e134e96e474fb270","namedBinding":"8cd53dc17855d692b644ef9fabf784b669511a8620a03b066874cdee5e7261c6"},{"provider":"together","operation":"comparison_candidate","beta":"f15c7a831b9736690e08bb69cab320a58038c22fd4d6bc640918252df2abc7cf","named":"f15c7a831b9736690e08bb69cab320a58038c22fd4d6bc640918252df2abc7cf","betaBinding":"0ef75ffa7fe8be0b153858478f15eeac35dda03ad4532dda99a32fa2524d924f","namedBinding":"7b1b825db202654f4861ba6d1ed868e6e5c9b8ff881bc648e0763f992ec97e05"},{"provider":"together","operation":"comparison_review","beta":"81445d0554d6b79410a1867782bc5f6d410a996d67ddc0f345eb44345b0209bb","named":"81445d0554d6b79410a1867782bc5f6d410a996d67ddc0f345eb44345b0209bb","betaBinding":"49ef58b3f395085426fbb6f0b72b92dee2db1ac6ec10df85e134e96e474fb270","namedBinding":"8cd53dc17855d692b644ef9fabf784b669511a8620a03b066874cdee5e7261c6"}] as const;
+
+test('Together documented optional fields are raw-only; unknown/type mismatch and final lexical failures reject', async () => {
+  const envelope = (raw = '{}') => ({
+    model: MODELS.together,
+    prompt: [{ text: 'UNSELECTED_PROMPT', logprobs: {} }],
+    warnings: [{ message: 'UNSELECTED_WARNING' }],
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'stop',
+        text: 'UNSELECTED_TEXT',
+        seed: -42,
+        top_logprobs: {},
+        message: { role: 'assistant', content: raw, reasoning: 'UNSELECTED_REASONING' },
+      },
+    ],
+    usage: { prompt_tokens: 20, completion_tokens: 30, total_tokens: 50 },
+  });
+  const cases: [any, string][] = [
+    [envelope(), 'NONE'],
+    [envelope('{bad'), 'FINAL_NATIVE_JSON_INVALID'],
+    [envelope('{"x":-0}'), 'FINAL_WF1_NUMBER'],
+    [envelope('{"x":1,"x":2}'), 'FINAL_WF1_DUPLICATE_KEY'],
+    [envelope('[]'), 'FINAL_ROOT_NOT_OBJECT'],
+    [{ ...envelope(), extra: 'PRIVATE' }, 'ENVELOPE_REJECTED'],
+    [{ ...envelope(), warnings: ['wrong'] }, 'ENVELOPE_REJECTED'],
+    [{ ...envelope(), prompt: null }, 'ENVELOPE_REJECTED'],
+  ];
+  for (const change of ['text', 'seed', 'top_logprobs']) {
+    const e: any = envelope();
+    e.choices[0][change] = change === 'seed' ? '42' : 42;
+    cases.push([e, 'ENVELOPE_REJECTED']);
+  }
+  const floats: any = envelope();
+  floats.choices[0].top_logprobs = { x: 0.5 };
+  cases.push([floats, 'ENVELOPE_WF1_NUMBER']);
+  for (const [e, code] of cases) {
+    const f = fixture(),
+      broker = createArtifactBroker(f.runtimeRoot, f.spec.id, key),
+      provider = new TeacherProvider(
+        { deepseek: null, together: 'synthetic' },
+        { fetch: async () => new Response(JSON.stringify(e), { headers: { 'content-type': 'application/json' } }) },
+      ),
+      result = await provider.submit(
+        'together',
+        pilotBody('together', pilotPayload('candidate', {}), 'candidate'),
+        broker.train,
+        new AbortController().signal,
+        (send) => send(),
+        { operation: 'candidate', binding: pilotBinding('together', 'candidate') },
+      );
+    assert.equal(result.responseFailureCode, code);
+    assert.equal(result.outcome, code === 'NONE' ? 'COMPLETED' : 'FAILED');
+    if (result.finalRef) assert.equal(broker.train.read(result.finalRef).toString(), e.choices[0].message.content);
+    assert.equal(result.argumentsRef, null);
+  }
+  const child = spawnSync(process.execPath, ['src/wf2-teacher-worker.ts', '--inspect-pilot'], {
+    input: '{"private":"DO_NOT_ECHO"}',
+    encoding: 'utf8',
+    timeout: 5000,
+    maxBuffer: 32768,
+    windowsHide: true,
+  });
+  assert.equal(child.status, 1);
+  assert.equal(JSON.parse(child.stdout).version, 'wf2-teacher-inspection/5');
+  assert.ok(!child.stdout.includes('DO_NOT_ECHO'));
+});
+
+test('Together optional seed accepts observed null and safe integers while keeping nonnull integer bounds', () => {
+  assert.doesNotThrow(() => validatePilotEnvelopeExtras({}, {}));
+  for (const seed of [null, -Number.MAX_SAFE_INTEGER, -42, 0, 42, Number.MAX_SAFE_INTEGER])
+    assert.doesNotThrow(() => validatePilotEnvelopeExtras({}, { seed }));
+  for (const seed of ['42', true, false, {}, [], 0.5, -0, Number.MAX_SAFE_INTEGER + 1, -Number.MAX_SAFE_INTEGER - 1])
+    assert.throws(() => validatePilotEnvelopeExtras({}, { seed }), { code: 'WF1_NUMBER' });
+});
+
+test('Together nullable seed remains raw-only and wire numeric or unknown-field violations still reject', async () => {
+  const final = '{"status":"ok"}',
+    valid: [string, string][] = [
+      ['absent', ''],
+      ['null', ',"seed":null'],
+      ['minimum', ',"seed":-9007199254740991'],
+      ['zero', ',"seed":0'],
+      ['integer', ',"seed":42'],
+      ['maximum', ',"seed":9007199254740991'],
+    ];
+  const cases: [string, string, string][] = [
+    ...valid.map(([name, extra]): [string, string, string] => [name, extra, 'NONE']),
+  ];
+  for (const raw of ['"42"', 'true', 'false', '{}', '[]'])
+    cases.push(['wrong type ' + raw, ',"seed":' + raw, 'ENVELOPE_REJECTED']);
+  // Literal wire tokens preserve negative zero and unsafe integers that JSON.stringify would change.
+  for (const raw of ['0.5', '-0', '9007199254740992', '-9007199254740992'])
+    cases.push(['invalid number ' + raw, ',"seed":' + raw, 'ENVELOPE_WF1_NUMBER']);
+  cases.push(['unknown choice field', ',"seed":null,"unknown_seed":null', 'ENVELOPE_REJECTED']);
+  for (const [name, extra, code] of cases) {
+    const raw =
+      '{"model":' +
+      JSON.stringify(MODELS.together) +
+      ',"choices":[{"index":0,"finish_reason":"stop","text":"UNSELECTED_TEXT","message":{"role":"assistant","content":' +
+      JSON.stringify(final) +
+      '}' +
+      extra +
+      '}],"usage":{"prompt_tokens":20,"completion_tokens":30,"total_tokens":50}}';
+    const f = fixture(),
+      broker = createArtifactBroker(f.runtimeRoot, f.spec.id, key),
+      provider = new TeacherProvider(
+        { deepseek: null, together: 'synthetic' },
+        { fetch: async () => new Response(raw, { headers: { 'content-type': 'application/json' } }) },
+      );
+    const result = await provider.submit(
+      'together',
+      pilotBody('together', pilotPayload('candidate', {}), 'candidate'),
+      broker.train,
+      new AbortController().signal,
+      (send) => send(),
+      { operation: 'candidate', binding: pilotBinding('together', 'candidate') },
+    );
+    assert.equal(result.responseFailureCode, code, name);
+    assert.equal(result.outcome, code === 'NONE' ? 'COMPLETED' : 'FAILED', name);
+    assert.ok(result.rawRef, name);
+    assert.equal(broker.train.read(result.rawRef).toString(), raw, name);
+    assert.equal(result.argumentsRef, null, name);
+    if (code === 'NONE') {
+      assert.ok(result.finalRef, name);
+      assert.equal(broker.train.read(result.finalRef).toString(), final, name);
+      assert.equal(result.returnedModel, MODELS.together, name);
+      assert.deepEqual(result.usage, { input: 20, completion: 30, reasoning: null }, name);
+      assert.equal(result.finishReason, 'stop', name);
+    } else assert.equal(result.finalRef, null, name);
+  }
+});
+
+test(
+  'trusted bridge accepts T11 metadata only with the frozen pilot profile and closes both Node fixture pipes',
+  { timeout: 15000 },
+  async () => {
+    const workerUrl = new URL('../src/wf2-teacher-worker.ts', import.meta.url).href,
+      policyUrl = new URL('../src/wf2-together-pilot.ts', import.meta.url).href,
+      pluginUrl = new URL('../integrations/dsh-teacher-control/index.mjs', import.meta.url).href;
+    const workerSource = `import {serveTeacherControl} from ${JSON.stringify(workerUrl)};import {pilotMetadataProfile,WF2_PILOT_PROFILE_DIGEST} from ${JSON.stringify(policyUrl)};let done=false;const metadata=()=>({profile:pilotMetadataProfile(),campaignStatus:done?'COMPLETED':'ACTIVE',countCompleteness:'CURRENT_AUTHORITY',calls:{deepseek:0,together:done?11:0},candidates:{deepseek:0,together:done?4:0,qualified:done?4:0,quarantined:0},sealed:done,planned:done,manifestFrozen:done,usage:{input:done?220:0,completion:done?330:0,unknown:0},estimatedReserveMicroUsd:done?62367:0});const session=serveTeacherControl(process.stdin,process.stdout,b=>({capability:b.capability,run:{metadataProfileDigest:WF2_PILOT_PROFILE_DIGEST,run:async()=>{done=true},close:()=>{},withdraw:()=>{},metadata}}));await session.closed;process.stdin.destroy();`;
+    const dshSource = `import {apply} from ${JSON.stringify(pluginUrl)};const disposers=[];apply({get:n=>({cmdlineArgs:{get:()=>['--teacher-control']},appExit:n=>{for(const d of disposers)d();process.exitCode=n},appReady:{onReady:f=>{const p=setImmediate(f);return ()=>clearImmediate(p)}}})[n],effect:f=>disposers.push(f())});`;
+    for (const admitted of [true, false]) {
+      const evidenceRoot = realpathSync(mkdtempSync(join(tmpdir(), 'companion-wf2-pilot-bridge-'))),
+        result = await runTeacherBridge({
+          evidenceRoot,
+          deadlineMs: 3000,
+          ...(admitted ? { metadataProfileDigest: WF2_PILOT_PROFILE_DIGEST } : {}),
+          startWorker: (cap) => {
+            const child = spawn(process.execPath, ['--input-type=module', '--eval', workerSource], {
+              stdio: ['pipe', 'pipe', 'pipe'],
+              windowsHide: true,
+            });
+            child.stdin.write(JSON.stringify({ capability: cap }) + '\n');
+            return child;
+          },
+          startDsh: () =>
+            spawn(process.execPath, ['--input-type=module', '--eval', dshSource], {
+              stdio: ['pipe', 'pipe', 'pipe'],
+              windowsHide: true,
+            }),
+          forceClose: async (children) => {
+            for (const child of children) child.kill();
+          },
+        });
+      assert.equal(result.status, admitted ? 'COMPLETED' : 'UNKNOWN_OR_STOPPED');
+      assert.equal(result.completionAcknowledged, admitted);
+      assert.equal(result.forced, false);
+      assert.equal(result.workerClosed, true);
+      assert.equal(result.dshClosed, true);
+      if (admitted) {
+        assert.equal(result.metadata!.profile!.profileDigest, WF2_PILOT_PROFILE_DIGEST);
+        assert.equal(result.metadata!.calls.together, 11);
+        assert.equal(result.responseFailureCode, 'UNKNOWN');
+      } else assert.equal(result.metadata, null);
+    }
+  },
+);
+const oldGoldens = [
+  {
+    provider: 'deepseek',
+    operation: 'seal',
+    beta: '3eaa11107841089d5a3a8ffda4e407d1c81d64a916b2516761051c468a9ee92d',
+    named: '26eeb0e6d18bf13831d2e96d175684cf748cf164315c53774cace4e6a8a94962',
+    betaBinding: '56086ad9907d6acb06fee442c7e6da4a2267e17ff2307125dd73dddfd39cfe65',
+    namedBinding: '432b10a712b71d9b215798ef162160099f3d5e1b7e3d79a8f2d3ac11107e477e',
+  },
+  {
+    provider: 'deepseek',
+    operation: 'plan',
+    beta: '38772a4a90e17341ff2c6340b30d0e194bb5a31a2341a14b69c345dd241b7878',
+    named: '28913007f352fecc6029f789f8d1d67974e3f7536778c13cde918a4f4ef52e02',
+    betaBinding: '14d6270e42fadeb80087cb0341959a456581be6bfb91c734ad832493828a0bc3',
+    namedBinding: 'a18323b7d8d04d0c5c2dd709faa699d9dd8b820939209ea62474231794a7fc83',
+  },
+  {
+    provider: 'deepseek',
+    operation: 'rubric',
+    beta: 'd76c173448974fecb4732dcf9709d071ceebdd8f7cb8205db94844e3cdeac1c3',
+    named: '84fd2ba77e0e4e01c269581838d3e37a7eebb0e4be092ff1621b933947f31576',
+    betaBinding: '2517204c1f322ddacf53f51da3191310c3ecd70965802b09e92e4d1dd0f7279a',
+    namedBinding: 'ff2c10756d6429df90c7bd431b91d1f13bcdfbd74598ea3613da645348101a7e',
+  },
+  {
+    provider: 'deepseek',
+    operation: 'candidate',
+    beta: '8fe25e0400932e66364de6a353a749e794ed8eb08dee086050f865127bcea5df',
+    named: 'de16b1942b63166c321531ae5272a60ee7722d563176c8dfbcb7b50bf7b4957c',
+    betaBinding: 'a77f2528a4799c26fa4ad37dd88bcd15a4e637abff1c3e923b3b2302bde3edf6',
+    namedBinding: '606e14b5b4a4e7179550b49dbe243bc22fb688a71f492f0f2a02c66e31bee35c',
+  },
+  {
+    provider: 'deepseek',
+    operation: 'review',
+    beta: '8f77828efe06389abf36f8acd9ea2b738c0c6e558b632a9b54e14c639bd4af6c',
+    named: '1697c6e1f94bb6eb4f4ae9c15715fef67b16b83a079b4b828be6cb463a2148a6',
+    betaBinding: '950e4d7aa85b0a7e778d632c772f1fa7ceff64069f4ea1ca52fc815d18a26800',
+    namedBinding: 'd7f764c497dcc18c1b0937a208b3d5f5aaad263e50387206fd10c93647f3be24',
+  },
+  {
+    provider: 'deepseek',
+    operation: 'comparison_candidate',
+    beta: '9f2bb1e560cd6532c9959cffe88db46446fc6c9b72fbaccfe6fe00bc61e461ee',
+    named: 'aeb8759ed1d07ea9a64c7b4dd91e7e18ac0025088df49a1c920e6dc11de9ee81',
+    betaBinding: 'e16ca75ce14890bfd7526651ef0440a77c4bd4a09095d73ef8a73ac0ce3a572b',
+    namedBinding: '50f77507a745d25ee872541762aef59852e074439a5be8ad7db1a5932f351d67',
+  },
+  {
+    provider: 'deepseek',
+    operation: 'comparison_review',
+    beta: 'd3465f415a5ab700e048ade3bceee2808757504337f51045016a31684f9a3895',
+    named: 'e43d896053115d149e94282c03360814325c04570d7741659f8344a23baf7361',
+    betaBinding: 'd131b248c02844c191ffc215211ccbec4231e3bb4f29c65bdc9d08fc6bd6cd0b',
+    namedBinding: '0ec94b821325e2ea26fb4f866579e623ae60c060dbf1c1e906b754f8ea80d95f',
+  },
+  {
+    provider: 'together',
+    operation: 'rubric',
+    beta: 'ea3787d6bea7aacfd691762becd25a77ce88ca769a92e74ce7c4c8d87e605da8',
+    named: 'ea3787d6bea7aacfd691762becd25a77ce88ca769a92e74ce7c4c8d87e605da8',
+    betaBinding: 'f1631f43cd4c810e428d7e4f5fa818c74d06241ca22f3763fb18e9308e2dc526',
+    namedBinding: '2334a467de65e486a5304e7d15afd77780122c961b4ae638e3e0fb95cd6985c8',
+  },
+  {
+    provider: 'together',
+    operation: 'candidate',
+    beta: '3a8656dfb2cd0da262dfbc669e65acb18e541be779704390594423e2c2257987',
+    named: '3a8656dfb2cd0da262dfbc669e65acb18e541be779704390594423e2c2257987',
+    betaBinding: '0ef75ffa7fe8be0b153858478f15eeac35dda03ad4532dda99a32fa2524d924f',
+    namedBinding: '7b1b825db202654f4861ba6d1ed868e6e5c9b8ff881bc648e0763f992ec97e05',
+  },
+  {
+    provider: 'together',
+    operation: 'review',
+    beta: 'd7c91991f2c5b86503ebddac46628d07135a52f4014d76df1dd7bb983ce05f76',
+    named: 'd7c91991f2c5b86503ebddac46628d07135a52f4014d76df1dd7bb983ce05f76',
+    betaBinding: '49ef58b3f395085426fbb6f0b72b92dee2db1ac6ec10df85e134e96e474fb270',
+    namedBinding: '8cd53dc17855d692b644ef9fabf784b669511a8620a03b066874cdee5e7261c6',
+  },
+  {
+    provider: 'together',
+    operation: 'comparison_candidate',
+    beta: 'f15c7a831b9736690e08bb69cab320a58038c22fd4d6bc640918252df2abc7cf',
+    named: 'f15c7a831b9736690e08bb69cab320a58038c22fd4d6bc640918252df2abc7cf',
+    betaBinding: '0ef75ffa7fe8be0b153858478f15eeac35dda03ad4532dda99a32fa2524d924f',
+    namedBinding: '7b1b825db202654f4861ba6d1ed868e6e5c9b8ff881bc648e0763f992ec97e05',
+  },
+  {
+    provider: 'together',
+    operation: 'comparison_review',
+    beta: '81445d0554d6b79410a1867782bc5f6d410a996d67ddc0f345eb44345b0209bb',
+    named: '81445d0554d6b79410a1867782bc5f6d410a996d67ddc0f345eb44345b0209bb',
+    betaBinding: '49ef58b3f395085426fbb6f0b72b92dee2db1ac6ec10df85e134e96e474fb270',
+    namedBinding: '8cd53dc17855d692b644ef9fabf784b669511a8620a03b066874cdee5e7261c6',
+  },
+] as const;
