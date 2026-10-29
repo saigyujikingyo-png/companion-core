@@ -1,10 +1,10 @@
 import { canonical,hash,shape,stop } from './wf1-json.ts';
-import { parseProductionJson,PRODUCTION,validateProductionCandidate,validateProductionRegistry } from './corpus-production-types.ts';
+import { parseProductionJson,productionAttemptPending,PRODUCTION,validateProductionCandidate,validateProductionRegistry } from './corpus-production-types.ts';
 import type { Item,ProductionState,ScopedRef } from './corpus-production-types.ts';
 import type { ProductionStore } from './corpus-production-store.ts';
 import { verifyProduction } from './corpus-production-runner.ts';
 
-export function settledProduction(store:ProductionStore){const state=verifyProduction(store);if(state.status==='ACTIVE'||state.attempts.some(a=>a.serviceMs===null))stop('CPR_ACTIVE');return state;}
+export function settledProduction(store:ProductionStore){const state=verifyProduction(store);if(state.status==='ACTIVE'||state.attempts.some(a=>productionAttemptPending(state.spec,a)))stop('CPR_ACTIVE');return state;}
 export function eligibleItems(store:ProductionStore,state:ProductionState){const registry=validateProductionRegistry(parseProductionJson(store.read(state.registryRef).toString('utf8')),state.spec);return state.items.filter(i=>i.status==='ACCEPTED'&&!state.heldFamilies.includes(registry.slots[i.ordinal]!.familyId));}
 export function productionTextPair(store:ProductionStore,item:Item){if(!item.rowRef)stop('CPR_ROW');const bytes=store.read(item.rowRef),row=parseProductionJson(bytes.toString('utf8')) as unknown as {candidate:unknown};const candidate=validateProductionCandidate(row.candidate,item.unitId);return {rowDigest:hash(bytes),user:candidate.prompt,assistant:candidate.response};}
 type Shard={version:'CorpusProductionShard/0.1';index:number;poolId:string;split:'train'|'dev';rowRefs:ScopedRef[];unitIds:string[];jsonlRef:ScopedRef;jsonlDigest:string;bytes:number;studentTargetDigest:string;factoryBaselineDigest:string;purposeDigest:string;trainingReady:false};
@@ -15,7 +15,7 @@ function groupRows(store:ProductionStore,state:ProductionState){
     for(const item of items.filter(i=>i.poolId===pool.poolId&&registry.slots[i.ordinal]!.split===split)){const line=shardLine(store,item),bytes=Buffer.byteLength(line);if(bytes>PRODUCTION.shardBytes)stop('CPR_LENGTH');if(group.rows.length===PRODUCTION.shardRows||group.bytes+bytes>PRODUCTION.shardBytes){groups.push(group);group={poolId:pool.poolId,split,rows:[],lines:[],bytes:0};}group.rows.push(item);group.lines.push(line);group.bytes+=bytes;}if(group.rows.length)groups.push(group);
   }return {items,groups};
 }
-function exportManifest(state:ProductionState,rows:number){return {version:'CorpusProductionExport/0.1',jobId:state.spec.jobId,shards:state.shards,tokenRefs:state.tokenRefs,rows,studentTargetDigest:state.spec.studentTargetDigest,factoryBaselineDigest:state.spec.factoryBaselineDigest,purposeDigest:state.spec.purposeDigest,evidenceClass:'MODEL_REVIEWED',packing:'OFF',trainingReady:false,trainingJobPolicy:'NOT_AUTHORIZED'};}
+function exportManifest(state:ProductionState,rows:number){return {version:state.spec.version==='CorpusProduction/0.2'?'CorpusProductionExport/0.2':'CorpusProductionExport/0.1',jobId:state.spec.jobId,shards:state.shards,tokenRefs:state.tokenRefs,rows,studentTargetDigest:state.spec.studentTargetDigest,factoryBaselineDigest:state.spec.factoryBaselineDigest,purposeDigest:state.spec.purposeDigest,evidenceClass:'MODEL_REVIEWED',packing:'OFF',trainingReady:false,trainingJobPolicy:'NOT_AUTHORIZED'};}
 /** Immutable row/byte bounded shards, each belonging to exactly one pool and split. */
 export function exportProduction(store:ProductionStore){
   store.check();const state=settledProduction(store),{items,groups}=groupRows(store,state);

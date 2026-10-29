@@ -2,6 +2,14 @@
 
 这一独立切片为已结束的生产 job 追加模型质量意见和筛选清单。首个实际配置拟覆盖原 127 条 eligible 文本，代码支持冻结的 1–192 条 census。原接受记录、被拒内容、shard 与 token 回执不改写。作者验证只用独立 TEMP 合成数据；实际 QA、宿主完整链、新提交 CI 和训练分别验收。
 
+## 新 job 显式 policy v2
+
+`CorpusQualityAudit/0.2` 使用独立 `QA_V2_PROFILE_DIGEST` 并要求 `execution.concurrency`，保留单物理 job 的 192 行和 wire/token/storage/期限限制。金额与总调用数只计量，planned operation/case 仍只消费一次。rubric 与 verdict 都使用[生产 v2 的同 attempt raw 缺报证明](CORPUS-PRODUCTION.md#explicit-policy-v2-for-new-jobs)：仅完整可信输出且实际 usage absent/null 可作为 UNREPORTED 接受；坏 usage、矛盾标签和 raw/final 不一致不能冒充缺报。生成、冷验与 export 使用同一判断。HTTP/格式或可信 unknown 只 HOLD 相关行；rubric 失败影响依赖该 rubric 的全部行。身份、来源、权限及存储完整性仍 fence job。独占 resume 的 `RECOVER_UNKNOWN` 记录本地决定，serviceMs 为 null，原请求不重发，迟到结果不能升级接受。
+
+v2 生产 qualified row/export 的 0.2 版本可以进入新的选择与 QA 链。归档描述符必须显式选择 `QA_POLICY_V2` 和新 `QA_INDEX_ARCHIVE_V2_PROFILE_DIGEST`；它绑定 exact spec/build/profile、terminal refs/head、冷验收据摘要与当前授权。包含该输入的 assembly 使用新的 `QA_ARCHIVE_ASSEMBLY_V2_POLICY_PROFILE_DIGEST`，沿用结构未变的 0.2 wire；冷 reader 重新计算并核对精确 profile，不接受冒名旧 F1/F2。旧 F1/F2 固定签名与 profile 未修改。
+
+完整索引继续保留 PASS、REJECT、HOLD、UNCERTAIN 节点用于跨批连通去重，最终 eligible manifest 只是该完整索引的选择结果。归档 reader 的新 profile 仍只读 metadata/index/selection 与末端事件，不读 attempts/cases 表、provider raw/reasoning/rubric/verdict 正文或旧教材；它依赖受信宿主独立 pin 的 descriptor 和 cold receipt，摘要本身不是签名。缺 usage 的 raw 证明发生于原 production/QA 的当前 attempt 合法读取域，不扩张后续索引授权。新增测试全部为合成数据，不改变真实批次验收或 Student 训练状态。
+
 ## 来源与读取边界
 
 受信 launcher 在旧 authority 仍可合法 inspect 时，通过 `prepareQualitySelection` 读取快照、registry、export、所选合格 row/candidate 及对应 token 收据，冻结旧 job/spec/build/profile/head、ledger/authority 文件摘要、export 摘要和逐条精确 refs/digests。它不调用 `verifyProduction`，不读取旧 provider 请求、raw、reasoning、计划/旧评分正文、被排除候选或 sealed 材料。新独立 selection/read grant 明确当前 read/retain、派生 review/training 用途；新 `openQualityArchive` 只暴露所选 case ID 的读取，不暴露任意 ref 解密。

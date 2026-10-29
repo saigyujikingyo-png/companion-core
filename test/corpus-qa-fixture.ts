@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { nativeProduction } from './corpus-policy-v2-fixture.ts';
 import { mkdirSync,readFileSync,writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,13 +13,13 @@ import { TEACHER_TOKENIZER_ASSETS } from '../src/corpus-teacher-tokenizer.ts';
 import { openProductionJob } from '../src/corpus-production-store.ts';
 import { prepareQualitySelection,openQualityArchive } from '../src/corpus-qa-source.ts';
 import { openQualityAudit } from '../src/corpus-qa-store.ts';
-import { QA_PROFILE_DIGEST,QA_TARGET_BASELINE_DIGEST,auditProvider } from '../src/corpus-qa-types.ts';
+import { QA_PROFILE_DIGEST,QA_V2_PROFILE_DIGEST,QA_TARGET_BASELINE_DIGEST,auditProvider } from '../src/corpus-qa-types.ts';
 import type { ArchiveReadGrant,AuditAdmission,AuditSpec,QaPurposeManifest,QaRoute } from '../src/corpus-qa-types.ts';
 import { runQualityAudit } from '../src/corpus-qa-runner.ts';
 import type { QaTransport } from '../src/corpus-qa-runner.ts';
 
-export async function qaFixture(count=8,rejectOriginal?:number,highPrices=false,buildDigest=hash('qa synthetic build')){
-  const old=productionFixture(count);await productionRun(old,productionMock(old,rejectOriginal===undefined?{}:{reject:rejectOriginal}));const state=old.store.snapshot()!,items=state.items.filter(i=>i.status==='ACCEPTED');
+export async function qaFixture(count=8,rejectOriginal?:number,highPrices=false,buildDigest=hash('qa synthetic build'),policyV2:boolean|'known'=false){
+  const old=productionFixture(count,undefined,!!policyV2);if(policyV2){const m=nativeProduction({usage:policyV2==='known'?'known':'missing'});await import('../src/corpus-production-runner.ts').then(({runCorpusProduction})=>runCorpusProduction(old.spec,{store:old.store,objective:old.objective,registry:old.registry,transport:m.transport}));}else await productionRun(old,productionMock(old,rejectOriginal===undefined?{}:{reject:rejectOriginal}));const state=old.store.snapshot()!,items=state.items.filter(i=>i.status==='ACCEPTED');
   // Authenticated synthetic receipt declarations for archive/QA binding tests.
   // They are not a tokenizer correctness test; real official batch tests remain separate.
   const profile={version:'CorpusTokenizer/0.1',model:STUDENT_TARGET.repo,revision:STUDENT_TARGET.revision,assetRoot:join(old.base,'synthetic-public-assets'),...TEACHER_TOKENIZER_ASSETS,runtime:{python:'3.12.10',tokenizers:'0.23.3',jinja2:'3.1.6',markupsafe:'3.0.4'},templatePolicy:'SFT_USER_ASSISTANT_NO_THINKING/1',addSpecialTokens:false,maxInputBytes:65536,maxTokens:65536,officialPipelineParity:'NOT_VALIDATED'};
@@ -28,6 +29,7 @@ export async function qaFixture(count=8,rejectOriginal?:number,highPrices=false,
   const purposes:QaPurposeManifest={version:'CorpusQualityPurposes/0.1',revision:'synthetic-qa-v1',grants:[...old.purposes.grants,...(['review','training'] as const).map(purpose=>({grantId:'qa-'+purpose,route:reviewer,purpose,decision:'ALLOW' as const,termsEvidence:{ref:'https://example.invalid/synthetic-scoped-terms',version:'synthetic',digest:hash('synthetic scope')},parentGrantIds:['training']}))]};
   const readGrant:ArchiveReadGrant={version:'CorpusArchiveReadGrant/0.1',grantId:'synthetic-new-grant',revision:1,selectionDigest:hash(canonical(selection)),purposeDigest:hash(canonical(purposes)),sourcePurposeDigest:old.spec.purposeDigest,readAllowed:true,retainAllowed:true,validFrom:now-1000,expiresAt:now+7200000,scope:'SELECTED_ELIGIBLE_ONLY'};
   const spec:AuditSpec={version:'CorpusQualityAudit/0.1',auditId:'synthetic-qa',buildDigest,profileDigest:QA_PROFILE_DIGEST,selectionDigest:hash(canonical(selection)),populationDigest:selection.populationDigest,readGrantDigest:hash(canonical(readGrant)),purposeDigest:hash(canonical(purposes)),objectiveDigest:hash(old.objective),baselineDigest:old.spec.factoryBaselineDigest,auditTargetBaselineDigest:QA_TARGET_BASELINE_DIGEST,studentTargetDigest:old.spec.studentTargetDigest,storageBindingDigest:bindTrainingRoot(old.options.approvedTrainingRoot,runtimeRoot).storageBindingDigest,authorityRevision:1,runtimeId:'synthetic-qa-runtime',createdAt:now,expiresAt:now+7200000,rowCount:selection.entries.length,coordinator:old.spec.coordinator,reviewer,prices:{deepseek:highPrices?{snapshotId:'synthetic-high',inputMicroUsdPerMillion:1000000000,completionMicroUsdPerMillion:1000000000}:old.spec.price,together:{snapshotId:'synthetic-price',inputMicroUsdPerMillion:150000,completionMicroUsdPerMillion:600000}}};
+  if(policyV2)Object.assign(spec,{version:'CorpusQualityAudit/0.2',profileDigest:QA_V2_PROFILE_DIGEST,execution:{concurrency:1}});
   const admission:AuditAdmission={readGrant,purposes,sourceAllowed:true,retainAllowed:true},authorityPath=join(old.base,'qa-authority.json');writeFileSync(authorityPath,canonical({schemaVersion:'wf1-host/1',campaignId:spec.auditId,revision:1,runtimeId:spec.runtimeId,status:'ACTIVE',expiresAt:spec.expiresAt,head:null,rights:{seal:true,coordinate:true,generate:true,review:true,retain:true}}));
   const archiveOptions={approvedTrainingRoot:old.options.approvedTrainingRoot,sourceRuntimeRoot:old.options.runtimeRoot,sourceAuthorityPath:old.options.authorityPath,sourceSpec:old.spec,selection,spec,key:Buffer.alloc(32,73),admission:()=>admission},source=openQualityArchive(archiveOptions),storeOptions={approvedTrainingRoot:old.options.approvedTrainingRoot,runtimeRoot,authorityPath,spec,key:Buffer.alloc(32,87),admission:()=>admission,sourceCheck:source.check},store=openQualityAudit({...storeOptions,mode:'create'});
   return {old,selection,spec,admission,source,store,archiveOptions,storeOptions,readRefs,objective:old.objective,oldFileHashes:{ledger:hash(readFileSync(join(old.options.runtimeRoot,'corpus-production.sqlite'))),authority:hash(readFileSync(old.options.authorityPath))}};
