@@ -1,5 +1,7 @@
 # 实施与持续开发路线
 
+**新 job 执行策略 v2（本片实现，验收按精确源码记录）：** [production v2](CORPUS-PRODUCTION.md#explicit-policy-v2-for-new-jobs)与[QA v2](CORPUS-QUALITY-AUDIT.md#新-job-显式-policy-v2)显式选择 accounting-only、同 attempt raw 证明的 usage 缺报准入、可信 unknown 局部隔离和不重发恢复；完整索引使用独立 profile 延续跨批去重。旧 v1 与冻结批次不迁移。共享 scheduler、可扩展 durable logical campaign、多 mentor/macro rounds 是下一片；本片仍保持物理 192 上限，不启动 Student 训练。
+
 **独立追加 QA（开发/合成验证中）：** [CorpusQualityAudit/0.1](CORPUS-QUALITY-AUDIT.md)以新 selection/read grant 和新 once 账本审阅已选 eligible 文本，DS 制定 rubric、Together GPT-OSS 盲审，追加筛选清单和 scoped 跨 job 指纹索引；旧接受记录不改。新增[QA 目标基线](AUDIT-TARGET-BASELINE.md)与历史生成基线分开绑定。实际 QA、宿主/CI 与训练仍分别验收。
 
 **后续里程碑：无外部输入的自主唤醒与休息（待实现/验收，首训覆盖待做）。** 首次上电即使用户尚未输入第一条消息，也应可由内部状态、记忆和目标演化获得唤醒机会，自选思考、探索、行动、发声或安静，并能休息后再醒。验收必须在没有外部输入的条件下记录这些选择及真实执行结果；固定开场白或机械定时输出不算通过，内部唤醒机会不等于必须输出。本里程碑不阻塞当前生产/QA，不授予常驻、无限推理或额外工具权限，当前宿主不因此改动。

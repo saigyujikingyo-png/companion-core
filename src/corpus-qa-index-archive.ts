@@ -1,3 +1,4 @@
+import { QA_V2_PROFILE_DIGEST,validateAuditSpec } from './corpus-qa-types.ts';
 import { createDecipheriv,hkdfSync } from 'node:crypto';
 import { existsSync,lstatSync,readFileSync } from 'node:fs';
 import { dirname,join } from 'node:path';
@@ -14,8 +15,10 @@ import { legacyJson,legacyRef,legacySelection,legacySpec,QA_LEGACY_F1,QA_LEGACY_
 export const QA_INDEX_ARCHIVE_SCOPE='QA_INDEX_MANIFEST_SELECTION_METADATA_ONLY';
 export const QA_INDEX_ARCHIVE_PROFILE_DIGEST=hash(canonical({version:'QaIndexArchive/0.1',legacy:QA_LEGACY_F1,schema:QA_LEGACY_SCHEMA,scope:QA_INDEX_ARCHIVE_SCOPE,maxInputs:8,maxRows:192,chunkRows:32,terminal:['INDEX','MANIFEST']}));
 export const QA_INDEX_ARCHIVE_F2_PROFILE_DIGEST=hash(canonical({version:'QaIndexArchive/0.1',legacy:QA_LEGACY_F2,schema:QA_LEGACY_SCHEMA,scope:QA_INDEX_ARCHIVE_SCOPE,maxInputs:8,maxRows:192,chunkRows:32,terminal:['INDEX','MANIFEST']}));
+export const QA_INDEX_ARCHIVE_V2_PROFILE_DIGEST=hash(canonical({version:'QaIndexArchive/0.2',qaProfile:QA_V2_PROFILE_DIGEST,schema:QA_LEGACY_SCHEMA,scope:QA_INDEX_ARCHIVE_SCOPE,maxInputs:8,maxRows:192,chunkRows:32,terminal:['INDEX','MANIFEST']}));
+export const qaArchiveProfile=(profile:'QA_F1'|'QA_F2'|'QA_POLICY_V2')=>profile==='QA_F1'?QA_INDEX_ARCHIVE_PROFILE_DIGEST:profile==='QA_F2'?QA_INDEX_ARCHIVE_F2_PROFILE_DIGEST:QA_INDEX_ARCHIVE_V2_PROFILE_DIGEST;
 export type QaIndexArchiveDescriptor={
-  version:'QaIndexArchiveDescriptor/0.1';legacyProfile:'QA_F1'|'QA_F2';readerBuildDigest:string;archiveProfileDigest:string;
+  version:'QaIndexArchiveDescriptor/0.1';legacyProfile:'QA_F1'|'QA_F2'|'QA_POLICY_V2';readerBuildDigest:string;archiveProfileDigest:string;
   spec:AuditSpec;specDigest:string;source:AuditSource;
   ledgerRawDigest:string;authorityRawDigest:string;authorityRevision:number;authorityStatus:'ACTIVE'|'PAUSED'|'REVOKED';
   committedHead:string;committedSequence:number;coldReceiptRawDigest:string;indexDigest:string;
@@ -43,9 +46,9 @@ function same(a:unknown,b:unknown){if(canonical(a)!==canonical(b))stop('CQA_ARCH
 function descriptor(input:unknown,expected:string,readerBuildDigest:string):QaIndexArchiveDescriptor {
   const d=shape(copyJson(input),['version','legacyProfile','readerBuildDigest','archiveProfileDigest','spec','specDigest','source','ledgerRawDigest','authorityRawDigest','authorityRevision','authorityStatus','committedHead','committedSequence','coldReceiptRawDigest','indexDigest','indexRef','manifestRef','selectionRef']);
   digest(expected);digest(readerBuildDigest);
-  const profile=oneOf(d.legacyProfile,['QA_F1','QA_F2']);
-  if(hash(canonical(d))!==expected||d.version!=='QaIndexArchiveDescriptor/0.1'||d.archiveProfileDigest!==(profile==='QA_F1'?QA_INDEX_ARCHIVE_PROFILE_DIGEST:QA_INDEX_ARCHIVE_F2_PROFILE_DIGEST)||d.readerBuildDigest!==readerBuildDigest)stop('CQA_ARCHIVE_DESCRIPTOR');
-  const spec=legacySpec(d.spec,profile);if(hash(canonical(spec))!==d.specDigest)stop('CQA_ARCHIVE_BINDING');
+  const profile=oneOf(d.legacyProfile,['QA_F1','QA_F2','QA_POLICY_V2']);
+  if(hash(canonical(d))!==expected||d.version!=='QaIndexArchiveDescriptor/0.1'||d.archiveProfileDigest!==qaArchiveProfile(profile)||d.readerBuildDigest!==readerBuildDigest)stop('CQA_ARCHIVE_DESCRIPTOR');
+  const spec=profile==='QA_POLICY_V2'?validateAuditSpec(d.spec):legacySpec(d.spec,profile);if(profile==='QA_POLICY_V2'&&spec.version!=='CorpusQualityAudit/0.2')stop('CQA_ARCHIVE_PROFILE');if(hash(canonical(spec))!==d.specDigest)stop('CQA_ARCHIVE_BINDING');
   for(const k of ['ledgerRawDigest','authorityRawDigest','committedHead','coldReceiptRawDigest','indexDigest'])digest(d[k]);integer(d.authorityRevision,spec.authorityRevision);oneOf(d.authorityStatus,['ACTIVE','PAUSED','REVOKED']);integer(d.committedSequence,3,2048);
   const s=shape(d.source,['jobId','specDigest','buildDigest','profileDigest','committedHead','ledgerFileDigest','authorityFileDigest','exportRef','exportDigest','registryDigest','purposeDigest','tokenizerProfileDigest','parentGrantIds']);id(s.jobId);for(const [k,v]of Object.entries(s))if(!['jobId','exportRef','parentGrantIds'].includes(k))digest(v);list(s.parentGrantIds,32).forEach(id);legacyRef(s.exportRef);
   refKind(d.indexRef,'corpus-qa-dedup-index');refKind(d.manifestRef,'corpus-qa-selection-manifest');refKind(d.selectionRef,'corpus-qa-selection');return d as QaIndexArchiveDescriptor;

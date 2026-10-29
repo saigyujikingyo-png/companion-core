@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { hash,stop } from '../src/wf1-json.ts';
+import { fixture } from './corpus-production-fixture.ts';
+import { qaFixture } from './corpus-qa-fixture.ts';
+import { nativeProduction,nativeQa } from './corpus-policy-v2-fixture.ts';
+import { runCorpusProduction } from '../src/corpus-production-runner.ts';
+import { runQualityAudit } from '../src/corpus-qa-runner.ts';
+import type { ArtifactPort } from '../src/wf1-storage.ts';
+
+function failBusinessRead(store:{port:(bucket:string)=>ArtifactPort}){
+  const port=store.port.bind(store),counts=new Map<string,number>();let failed=false;
+  store.port=bucket=>{const p=port(bucket);return {...p,read:ref=>{if(ref.kind==='native-final'){const count=(counts.get(ref.id)??0)+1;counts.set(ref.id,count);if(count===3&&!failed){failed=true;stop('WF1_SYNTHETIC_READBACK');}}return p.read(ref);}};};
+  return ()=>failed;
+}
+test('production v2 controlled business readback failure escapes output-schema isolation',async()=>{const f=fixture(8,undefined,true),failed=failBusinessRead(f.store),m=nativeProduction();try{const s=await runCorpusProduction(f.spec,{store:f.store,objective:f.objective,registry:f.registry,transport:m.transport});assert.ok(failed());assert.equal(s.status,'FENCED');assert.equal(m.calls.length,1);assert.ok(!s.failureCodes.CPR_PLAN_ITEM);}finally{f.store.close();}});
+test('QA v2 controlled business readback failure escapes rubric-schema isolation',async()=>{const f=await qaFixture(8,undefined,false,hash('qa io synthetic'),true),failed=failBusinessRead(f.store),m=nativeQa();try{const s=await runQualityAudit(f.spec,{store:f.store,source:f.source,selection:f.selection,objective:f.objective,transport:m.transport});assert.ok(failed());assert.equal(s.status,'FENCED');assert.equal(m.calls.length,1);assert.ok(!s.failureCodes.CQA_RUBRIC_FORMAT);}finally{f.store.close();f.source.close();}});
+test('QA v2 verdict source read failure escapes verdict-schema isolation',async()=>{const f=await qaFixture(8,undefined,false,hash('qa source io synthetic'),true),m=nativeQa(),read=f.source.read.bind(f.source),counts=new Map<string,number>();let failed=false;const source={...f.source,read:(caseId:string)=>{const count=(counts.get(caseId)??0)+1;counts.set(caseId,count);if(count===2&&!failed){failed=true;stop('CQA_SYNTHETIC_SOURCE_READ');}return read(caseId);}};try{const s=await runQualityAudit(f.spec,{store:f.store,source,selection:f.selection,objective:f.objective,transport:m.transport});assert.ok(failed);assert.equal(s.status,'FENCED');assert.equal(m.calls.filter(c=>c.operation==='review').length,1);assert.ok(!s.failureCodes.CQA_VERDICT_FORMAT);}finally{f.store.close();f.source.close();}});
+for(const outcome of ['SUBMIT_UNKNOWN','HTTP_FAILURE'] as const)test('v2 '+outcome+' with damaged observed artifact fences before another unit sends',async()=>{
+  const f=fixture(8,undefined,true),m=nativeProduction(),port=f.store.port.bind(f.store);let damaged:string|undefined,failed=false;f.store.port=bucket=>{const p=port(bucket);return {...p,read:ref=>{if(ref.id===damaged&&!failed){failed=true;stop('WF1_SYNTHETIC_PARTIAL_ARTIFACT');}return p.read(ref);}};};
+  try{const s=await runCorpusProduction(f.spec,{store:f.store,objective:f.objective,registry:f.registry,transport:async r=>{const result=await m.transport(r);if(r.operation==='candidate'&&r.index===0){damaged=result.rawRef!.id;return {...result,outcome:outcome==='SUBMIT_UNKNOWN'?'SUBMIT_UNKNOWN':'FAILED',httpStatus:outcome==='SUBMIT_UNKNOWN'?200:503,responseFailureCode:outcome==='SUBMIT_UNKNOWN'?'TRANSPORT_UNKNOWN':'HTTP_STATUS'};}return result;}});assert.ok(failed);assert.equal(s.status,'FENCED');assert.equal(m.calls.filter(c=>c.operation==='candidate').length,1);assert.equal(m.calls.filter(c=>c.operation==='review').length,0);}finally{f.store.close();}
+});
+for(const usage of ['known','missing'] as const)test('v2 '+usage+' usage cannot qualify business JSON carrying an explicit native refusal',async()=>{const f=fixture(8,undefined,true),m=nativeProduction({usage,change:r=>{if(r.operation==='candidate'&&r.index===0)r.envelope.choices[0].message.refusal='SYNTHETIC refusal';}});try{const s=await runCorpusProduction(f.spec,{store:f.store,objective:f.objective,registry:f.registry,transport:m.transport});assert.equal(s.status,'COMPLETED');assert.equal(s.counts.uniqueEligible,4);const bad=f.store.snapshot()!.attempts.find(a=>a.operation==='candidate'&&a.index===0)!;assert.equal(bad.result!.responseFailureCode,'INCOMPLETE_FINAL');assert.equal(bad.result!.usageParseCode,usage==='known'?'VALID':'MISSING_OR_NULL');assert.ok(s.failureCodes.CPR_OUTPUT_INVALID);}finally{f.store.close();}});

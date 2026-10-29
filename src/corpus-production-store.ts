@@ -6,7 +6,7 @@ import { canonical,copyJson,hash,id,integer,shape,stop } from './wf1-json.ts';
 import { createArtifactBroker,HostAuthority } from './wf1-storage.ts';
 import type { ArtifactPort } from './wf1-storage.ts';
 import { requireTrainingBinding } from './wf2-training-root.ts';
-import { attemptReservation,parseProductionJson,PRODUCTION,requirePurposes,validateProductionRegistry,validateProductionSpec,validatePurposes,worstCalls } from './corpus-production-types.ts';
+import { attemptReservation,productionAttemptPending,parseProductionJson,PRODUCTION,requirePurposes,validateProductionRegistry,validateProductionSpec,validatePurposes,worstCalls } from './corpus-production-types.ts';
 import type { Attempt,Item,ProductionAdmission,ProductionEvent,ProductionRegistry,ProductionSpec,ProductionState,ScopedRef } from './corpus-production-types.ts';
 
 export type ProductionStoreOptions={approvedTrainingRoot:string;runtimeRoot:string;authorityPath:string;spec:ProductionSpec;key:Uint8Array;mode:'create'|'resume'|'inspect';admission:()=>ProductionAdmission;now?:()=>number};
@@ -27,12 +27,13 @@ function reduce(current:ProductionState|null,event:ProductionEvent,spec:Producti
   if(!current)stop('CPR_STATE');const s=structuredClone(current),d=event.data as Record<string,unknown>;
   if(event.kind==='PLAN'){shape(d,['id','ref','code']);const p=s.plans.find(p=>p.id===d.id);if(!p||p.ref||p.code)stop('CPR_CAS');p.ref=d.ref as ScopedRef|null;p.code=d.code as string|null;if(p.ref)scoped(p.ref);}
   else if(event.kind==='CONSUME'){
-    const a=d as unknown as Attempt;if(s.status!=='ACTIVE'||s.attempts.some(v=>v.id===a.id)||a.result!==null||a.serviceMs!==null||a.settledAtMs!==null||a.reservedMicroUsd!==attemptReservation(spec)||s.attempts.length>=worstCalls(spec)||s.attempts.reduce((n,v)=>n+v.reservedMicroUsd,0)+a.reservedMicroUsd>spec.budgetMicroUsd)stop('CPR_ONCE');
+    const a=d as unknown as Attempt;if(s.status!=='ACTIVE'||s.attempts.some(v=>v.id===a.id)||a.result!==null||a.serviceMs!==null||a.settledAtMs!==null||a.reservedMicroUsd!==attemptReservation(spec)||spec.version==='CorpusProduction/0.1'&&(s.attempts.length>=worstCalls(spec)||s.attempts.reduce((n,v)=>n+v.reservedMicroUsd!,0)+a.reservedMicroUsd!>spec.budgetMicroUsd!))stop('CPR_ONCE');
     if(!['plan','candidate','review'].includes(a.operation)||a.itemIds.length===0||new Set(a.itemIds).size!==a.itemIds.length||a.itemIds.some(unit=>!s.items.some(i=>i.unitId===unit)||s.attempts.some(old=>old.operation===a.operation&&old.itemIds.includes(unit))))stop('CPR_ONCE');
     const cap=a.operation==='plan'?16:4;if(a.itemIds.length>cap||a.operation==='candidate'&&a.itemIds.length!==4)stop('CPR_BATCH');
     if(a.operation!=='plan'&&a.itemIds.some(unit=>s.items.find(i=>i.unitId===unit)!.status!==(a.operation==='candidate'?'PLANNED':'CANDIDATE')))stop('CPR_CAS');
     artifactRef(a.requestRef);id(a.id);s.attempts.push(a);
-  }else if(event.kind==='SETTLE'){shape(d,['id','result','serviceMs','settledAtMs']);const a=s.attempts.find(a=>a.id===d.id);if(!a||a.serviceMs!==null)stop('CPR_CAS');integer(d.serviceMs);integer(d.settledAtMs,a.consumedAtMs);a.settledAtMs=Number(d.settledAtMs);a.result=d.result as Attempt['result'];a.serviceMs=Number(d.serviceMs);}
+  }else if(event.kind==='RECOVER_UNKNOWN'){shape(d,['id','decidedAtMs']);const a=s.attempts.find(a=>a.id===d.id);if(spec.version!=='CorpusProduction/0.2'||!a||!productionAttemptPending(spec,a)||a.result!==null)stop('CPR_CAS');a.settledAtMs=integer(d.decidedAtMs,a.consumedAtMs);a.serviceMs=null;a.settlementSource='RECOVERY_UNKNOWN';
+  }else if(event.kind==='SETTLE'){shape(d,['id','result','serviceMs','settledAtMs']);const a=s.attempts.find(a=>a.id===d.id);if(!a||!productionAttemptPending(spec,a))stop('CPR_CAS');integer(d.serviceMs);integer(d.settledAtMs,a.consumedAtMs);a.settledAtMs=Number(d.settledAtMs);a.result=d.result as Attempt['result'];a.serviceMs=Number(d.serviceMs);}
   else if(event.kind==='ITEM'){
     shape(d,['expected','item']);const next=d.item as Item,old=s.items[next.ordinal];if(!old||old.unitId!==next.unitId||old.poolId!==next.poolId||old.status!==d.expected||!['PLANNED','CANDIDATE'].includes(old.status)||!['CANDIDATE','ACCEPTED','QUARANTINED'].includes(next.status))stop('CPR_CAS');
     if(next.status==='ACCEPTED'&&(s.status!=='ACTIVE'||old.status!=='CANDIDATE'||!next.rowRef||!next.reviewRef||s.items.some(i=>i.status==='ACCEPTED'&&(i.exactDigest===next.exactDigest||i.normalizedDigest===next.normalizedDigest||i.promptDigest===next.promptDigest))))stop('CPR_DUPLICATE');
@@ -42,13 +43,13 @@ function reduce(current:ProductionState|null,event:ProductionEvent,spec:Producti
   else if(event.kind==='SHARD'){shape(d,['ref']);const ref=scoped(d.ref as ScopedRef);if(s.shards.some(v=>v.ref.id===ref.ref.id))stop('CPR_CAS');s.shards.push(ref);}
   else if(event.kind==='TOKENS'){shape(d,['ref']);const ref=scoped(d.ref as ScopedRef);if(s.tokenRefs.some(v=>v.ref.id===ref.ref.id))stop('CPR_CAS');s.tokenRefs.push(ref);}
   else if(event.kind==='EXPORT'){shape(d,['ref']);if(s.exportRef)stop('CPR_CAS');s.exportRef=scoped(d.ref as ScopedRef);}
-  else if(event.kind==='FINISH'){shape(d,['status','code','wallMs','cpuMicros','peakRss']);if(!['COMPLETED','FENCED'].includes(String(d.status))||s.status==='FENCED'&&d.status!=='FENCED')stop('CPR_CAS');if(d.status==='COMPLETED'&&(s.items.some(i=>!['ACCEPTED','QUARANTINED'].includes(i.status))||s.attempts.some(a=>a.serviceMs===null)))stop('CPR_PENDING');s.status=d.status as ProductionState['status'];s.code=d.code as string|null;for(const key of ['wallMs','cpuMicros','peakRss'] as const){integer(d[key]);s[key]=Number(d[key]);}}
+  else if(event.kind==='FINISH'){shape(d,['status','code','wallMs','cpuMicros','peakRss']);if(!['COMPLETED','FENCED'].includes(String(d.status))||s.status==='FENCED'&&d.status!=='FENCED')stop('CPR_CAS');if(d.status==='COMPLETED'&&(s.items.some(i=>!['ACCEPTED','QUARANTINED'].includes(i.status))||s.attempts.some(a=>productionAttemptPending(spec,a))))stop('CPR_PENDING');s.status=d.status as ProductionState['status'];s.code=d.code as string|null;for(const key of ['wallMs','cpuMicros','peakRss'] as const){integer(d[key]);s[key]=Number(d[key]);}}
   else stop('CPR_EVENT');return s;
 }
 
 /** Job-local append-only encrypted events with narrow indexed projections. No retry lease. */
 export class ProductionStore {
-  readonly spec:ProductionSpec;readonly mode:ProductionStoreOptions['mode'];#o:ProductionStoreOptions;#key:Buffer;#host:HostAuthority;#db!:DatabaseSync;#owner:DatabaseSync;#brokers=new Map<string,ArtifactPort>();#state:ProductionState|null=null;#sequence=0;#head='0'.repeat(64);#stamp='';#closed=false;#broken=false;#loading=true;#parents:string[]=[];
+  readonly spec:ProductionSpec;readonly mode:ProductionStoreOptions['mode'];#o:ProductionStoreOptions;#key:Buffer;#host:HostAuthority;#db!:DatabaseSync;#owner:DatabaseSync;#brokers=new Map<string,ArtifactPort>();#state:ProductionState|null=null;#sequence=0;#head='0'.repeat(64);#stamp='';#closed=false;#broken=false;#loading=true;#recoverable=new Set<string>();#parents:string[]=[];
   constructor(options:ProductionStoreOptions){
     if(!(options.key instanceof Uint8Array)||options.key.length!==32)stop('CPR_KEY');this.#key=Buffer.from(options.key);try{this.#o={...options,key:this.#key};this.mode=options.mode;this.spec=validateProductionSpec(options.spec);requireTrainingBinding(options.approvedTrainingRoot,options.runtimeRoot,this.spec.storageBindingDigest,options.authorityPath);const now=options.now??Date.now;this.#host=new HostAuthority(options.authorityPath,this.spec.jobId,now);const authority=this.#host.read(now(),options.mode!=='inspect');
     if(options.mode!=='inspect'&&(authority.runtimeId!==this.spec.runtimeId||authority.revision!==this.spec.authorityRevision||now()<this.spec.createdAt||now()>=this.spec.expiresAt))stop('CPR_AUTHORITY');this.#admission(options.mode!=='inspect');
@@ -65,7 +66,7 @@ export class ProductionStore {
       }
       if(options.mode!=='create'&&(!this.#state||authority.head!==this.#head))stop('CPR_HEAD');
       if(this.#state){const registry=validateProductionRegistry(parseProductionJson(this.read(this.#state.registryRef).toString('utf8')),this.spec);this.#parents=registry.parentGrantIds;this.#verifyProjection();}
-      this.#loading=false;this.check(options.mode!=='inspect');
+      if(options.mode==='resume'&&this.spec.version==='CorpusProduction/0.2')for(const a of this.#state?.attempts??[])if(productionAttemptPending(this.spec,a))this.#recoverable.add(a.id);this.#loading=false;this.check(options.mode!=='inspect');
     }catch(error){try{this.#db?.close();}catch{}this.#owner.close();throw error;}}catch(error){this.#key.fill(0);throw error;}
   }
   #fileStamp(){const path=join(this.#o.runtimeRoot,'corpus-production.sqlite');plain(path);const s=statSync(path,{bigint:true});return [s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs].join(':');}
@@ -83,10 +84,10 @@ export class ProductionStore {
     const objectiveRef=this.put('meta','corpus-production-objective',objective),registryRef=this.put('meta','corpus-production-registry',canonical(validated));const plans=[];for(let i=0;i<registry.slots.length;i+=16)plans.push({id:'plan:'+i/16,itemIds:registry.slots.slice(i,i+16).map(s=>s.unitId),ref:null,code:null});
     const state:ProductionState={version:'CorpusProductionState/0.1',spec:this.spec,status:'ACTIVE',code:null,objectiveRef,registryRef,plans,attempts:[],items:registry.slots.map(s=>({ordinal:s.ordinal,unitId:s.unitId,poolId:s.poolId,status:'PLANNED',code:null,candidateRef:null,candidateDigest:null,reviewRef:null,rowRef:null,exactDigest:null,normalizedDigest:null,promptDigest:null,sketch:null})),heldFamilies:[],duplicateLinks:[],shards:[],tokenRefs:[],exportRef:null,wallMs:0,cpuMicros:0,peakRss:process.memoryUsage().rss};this.apply('INIT',state);
   }
-  apply(kind:ProductionEvent['kind'],data:unknown){this.check();if(this.#sequence>=4096)stop('CPR_LIMIT');const event={version:'CorpusProductionEvent/0.1' as const,kind,data:copyJson(data)},next=reduce(this.#state,event,this.spec),ref=this.put('event-'+Math.floor(this.#sequence/128),'corpus-production-event',canonical(event)),body=canonical(ref),head=hash(this.#head+'\n'+body);
+  apply(kind:ProductionEvent['kind'],data:unknown){this.check();if(kind==='RECOVER_UNKNOWN'){const id=(data as {id:string}).id;if(this.mode!=='resume'||!this.#recoverable.delete(id))stop('CPR_RECOVERY_OWNER');}if(this.#sequence>=4096)stop('CPR_LIMIT');const event={version:'CorpusProductionEvent/0.1' as const,kind,data:copyJson(data)},next=reduce(this.#state,event,this.spec),ref=this.put('event-'+Math.floor(this.#sequence/128),'corpus-production-event',canonical(event)),body=canonical(ref),head=hash(this.#head+'\n'+body);
     try{this.#db.exec('BEGIN IMMEDIATE');this.#db.prepare('INSERT INTO events VALUES (?,?,?,?)').run(this.#sequence+1,this.#head,body,head);this.#db.prepare('INSERT OR REPLACE INTO metadata VALUES (1,?)').run(canonical(meta(next)));
       if(kind==='INIT')for(const item of next.items)this.#db.prepare('INSERT INTO items VALUES (?,?)').run(item.unitId,canonical(item));
-      if(kind==='CONSUME'||kind==='SETTLE'){const id=(data as {id:string}).id,a=next.attempts.find(a=>a.id===id)!;this.#db.prepare('INSERT OR REPLACE INTO attempts VALUES (?,?)').run(id,canonical(a));}
+      if(kind==='CONSUME'||kind==='SETTLE'||kind==='RECOVER_UNKNOWN'){const id=(data as {id:string}).id,a=next.attempts.find(a=>a.id===id)!;this.#db.prepare('INSERT OR REPLACE INTO attempts VALUES (?,?)').run(id,canonical(a));}
       if(kind==='ITEM'){const item=(data as {item:Item}).item;this.#db.prepare('UPDATE items SET data=? WHERE id=?').run(canonical(item),item.unitId);}
       if(kind==='SHARD'){const r=(data as {ref:ScopedRef}).ref;this.#db.prepare('INSERT INTO shards VALUES (?,?)').run(r.ref.id,canonical(r));}
       this.#db.exec('COMMIT');this.#host.commitHead(this.#sequence?this.#head:null,head);this.#head=head;this.#sequence++;this.#state=next;this.#stamp=this.#fileStamp();this.check();
