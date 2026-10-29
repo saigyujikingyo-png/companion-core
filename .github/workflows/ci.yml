@@ -14,14 +14,18 @@ jobs:
         include:
           - os: windows-latest
             node: '24.16.0'
+            repack_expectation: required-supported
           - os: ubuntu-latest
             node: '24.16.0'
+            repack_expectation: required-supported
           - os: macos-latest
             node: '24.16.0'
+            repack_expectation: required-supported
           - os: ubuntu-latest
             node: '24.x'
+            repack_expectation: metadata-policy
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 20 || 10 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 35 || 10 }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -30,3 +34,5 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+        env:
+          IF9_REPACK_EXPECTATION: ${{ matrix.repack_expectation }}

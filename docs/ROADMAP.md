@@ -14,9 +14,9 @@
 
 **本批 WF2：** [失败诊断](WF2-FAILURE-DIAGNOSTICS.md)已定位旧 medium 的 `WF1_PAIR_BINDING`；[跨模型四单元 canary](WF2-UNIT-PILOT.md)已完成真实运行及冷验。4 seal/4 plan通过，T11/DS1后因第二候选未过精确验算停止，记录1条合格、1条隔离，原协议的四行 manifest 未完成。旧实验保持原结果，CP0采收另外记账；本 canary 不代表256GB首训数据池、Student训练或规模生产已交付。
 
-**当前 IF7：** 原 `06fc8b2` 冻结候选完成独立893/893与typecheck后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker984/984与typecheck通过，形成独立PR候选。精确head的跨平台CI与合并状态以PR实际记录为准，不复用IF0–IF6的 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) CI。[当前证据](AEMC-INFRA-EVIDENCE-IF7.md)区分各层；[架构进度](AEMC-DEVELOPMENT-STATUS.md)仍按18项目标记账。IF7只观察generation、Store image、Safety与authority receipts，不引入GC、rollover或可写次数预测；本轮未部署或启动训练。
+**当前工程基线：** IF9（PR #5）、IF10（#6）、IF11 authority永久冷路由（#12）、当前代fanout（#17）、E1a（#13）及E1b（#16）已合并。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的BCD/共享raw HTTP/E2合并为 `b58310c`，tree与1393项/strict/独审候选一致，push+PR 14/14通过；合并后main 7/7 CI通过。[E3a](ENDOGENOUS-LIFECYCLE.md) 本轮新增 SINGLE_MESSAGE_CONTROL_PROTOTYPE，一生一个入站槽/一次显式consider，接收不等于接单；真实AgentAPI、多消息rollover、ACTION、部署、跨机及训练不在本片接受范围。历史测试数量和成本不跨轮相加。
 
-后续依赖顺序为容量运维协议（保留幂等、UNKNOWN与已消费额度）→ 生产authority/custody与恢复准入 → AR1冻结质量/总成本实验。已有compaction只重建新generation，不释放Store ingress或authority receipts；AR1、生产接线和训练准入仍开放。以下 IF0–IF6 与更早切片保留各自历史验证范围。
+容量路线已有IF9物理压实、IF10 Safety终态冷段和IF11 authority有界永久冷路由；当前代fanout只消除旧代历史对当前512 nodes/2048 edges准入的污染，不释放永久历史。[长期容量设计](LONG-TERM-CAPACITY-DESIGN.md)继续保留Store完整RAM serialize、精确旧键/UNKNOWN、原总限及可信恢复边界；P5冷Store镜像负成本实验暂停，不推广或调参。IF10三组小历史成本为负，较大固定案例只证明有条件的应用写入减少。生产authority/custody与恢复准入独立推进。[三域架构决议](ADR-MEMORY-TOOL-BOUNDARY.md)与[I17](BAYESIAN-RECONSTRUCTION-DESIGN.md)仍按各自冻结入口推进，不以工程接口验收代替认知质量或训练接受。以下更早切片保留当时验证范围，其中旧“持久fanout未实现”时态已被后续实现取代。
 
 [历史 IF3/IF4 组合验收](AEMC-INFRA-EVIDENCE-IF4.md)：822/822、typecheck、两位独立终审与最终成本测量闭合；该记录仅对应IF4冻结源码，不替代当前IF5/IF6证据。
 

@@ -15,6 +15,7 @@ import { RETRIEVAL_LIMITS, copyRetrievalConsumerHandle } from './retrieval-types
 import type { ConsumerRetrievalSnapshot, RetrievalSnapshot } from './retrieval-types.ts';
 import { SCENE_SOURCE_LIMITS } from './scene-authority-types.ts';
 import type { SceneSourceSnapshot } from './scene-authority-types.ts';
+import { ENDOGENOUS_CONTROL_KEY } from './endogenous-durable.ts';
 
 type Row = Record<string, string | number | null>;
 type SourceNode = { meta:CurationNode; body:Evidence|Proposal; parents:SourceRef[] };
@@ -38,10 +39,15 @@ export class MemoryStore {
   #poisoned = false;
   #schema: MemorySchema;
   #fanout: DurableFanout | undefined;
+  #endogenousMutation: ((encoded: string, scope: (id: string) => Scope) => string) | undefined;
+  #onEndogenousInvalidated: (() => void) | undefined;
 
   constructor(path: string, options: { clock?: Clock; image?: Uint8Array;
     persist?: (image: Uint8Array, revocationHighWater: number) => void; assertHealthy?: () => void; onPoison?: () => void;
-    assertCloseAllowed?: () => void; aroundAccess?: AccessGuard; schemaVersion?: MemorySchema; fanoutFault?: (point: FanoutFault) => void } = {}) {
+    assertCloseAllowed?: () => void; aroundAccess?: AccessGuard; schemaVersion?: MemorySchema; fanoutFault?: (point: FanoutFault) => void;
+    endogenousBoot?: (encoded: string, scope: (id: string) => Scope) => string;
+    endogenousMutation?: (encoded: string, scope: (id: string) => Scope) => string; onEndogenousInvalidated?: () => void;
+    bindEndogenousWriter?: (write: (expected: string | null, next: string) => void) => void } = {}) {
     if ((options.image || options.persist) && path !== ':memory:') v.fail('DURABLE_MEMORY_ONLY');
     this.#clock = options.clock ?? clock;
     this.#schema = options.schemaVersion ?? 1;
@@ -78,7 +84,14 @@ export class MemoryStore {
         if (!this.diagnostics().integrity || !this.diagnostics().foreignKeys) v.fail('DURABLE_CORRUPT');
         this.#db.exec("INSERT INTO memory_fts(memory_fts, rank) VALUES('integrity-check',1);");
         // A process restart never revives worker leases, active artifacts or run tickets.
-        const boot = () => this.#db.exec("UPDATE jobs SET lease_owner=NULL,lease_token=NULL,lease_deadline=NULL; UPDATE scopes SET runtime_epoch=runtime_epoch+1; UPDATE artifacts SET status='registered' WHERE status='active';");
+        const boot = () => {
+          const control = this.#one('SELECT value FROM meta WHERE key=?', ENDOGENOUS_CONTROL_KEY)?.value;
+          if (control !== undefined && options.endogenousBoot) {
+            if (typeof control !== 'string') v.fail('E1_CONTROL_INVALID');
+            this.#run('UPDATE meta SET value=? WHERE key=?', options.endogenousBoot(control, id => this.#scope(id)), ENDOGENOUS_CONTROL_KEY);
+          }
+          this.#db.exec("UPDATE jobs SET lease_owner=NULL,lease_token=NULL,lease_deadline=NULL; UPDATE scopes SET runtime_epoch=runtime_epoch+1; UPDATE artifacts SET status='registered' WHERE status='active';");
+        };
         if (this.#fanout) this.#access(() => this.#transaction(boot, false, 'boot')); else boot();
       }
       this.#persist = options.persist;
@@ -86,6 +99,9 @@ export class MemoryStore {
       this.#onPoison = options.onPoison;
       this.#assertCloseAllowed = options.assertCloseAllowed;
       this.#aroundAccess = options.aroundAccess;
+      this.#endogenousMutation = options.endogenousMutation;
+      this.#onEndogenousInvalidated = options.onEndogenousInvalidated;
+      options.bindEndogenousWriter?.((expected, next) => this.#compareEndogenousControl(expected, next));
     } catch (error) { this.#db.close(); throw error; }
   }
 
@@ -118,6 +134,17 @@ export class MemoryStore {
       const before = this.#one('SELECT total_changes() AS n')!.n;
       this.#fanout?.begin(phase, frozenAsOf);
       const result = body();
+      if (!readOnly && this.#endogenousMutation) {
+        const control = this.#one('SELECT value FROM meta WHERE key=?', ENDOGENOUS_CONTROL_KEY)?.value;
+        if (control !== undefined) {
+          if (typeof control !== 'string') v.fail('E1_CONTROL_INVALID');
+          const next = this.#endogenousMutation(control, id => this.#scope(id));
+          if (next !== control) {
+            this.#onEndogenousInvalidated?.();
+            this.#run('UPDATE meta SET value=? WHERE key=?', next, ENDOGENOUS_CONTROL_KEY);
+          }
+        }
+      }
       if (!readOnly) this.#fanout?.finish(before !== this.#one('SELECT total_changes() AS n')!.n);
       const changed = !readOnly && before !== this.#one('SELECT total_changes() AS n')!.n;
       // FTS5 flushes pending index changes during COMMIT. Serializing before it
@@ -136,6 +163,23 @@ export class MemoryStore {
     } finally { this.#fanout?.end(); }
   }
   snapshot(): Uint8Array { return this.#access(() => this.#db.serialize()); }
+  /** Fixed metadata cell only; this confers no execution authority on raw/legacy stores. */
+  endogenousControl(): string | null {
+    return this.#access(() => {
+      const value = this.#one('SELECT value FROM meta WHERE key=?', ENDOGENOUS_CONTROL_KEY)?.value;
+      if (value === undefined) return null;
+      if (typeof value !== 'string' || Buffer.byteLength(value) > 16_384) v.fail('E1_CONTROL_LIMIT');
+      return value;
+    });
+  }
+  #compareEndogenousControl(expected: string | null, next: string): void {
+    if (typeof next !== 'string' || Buffer.byteLength(next) > 16_384) v.fail('E1_CONTROL_LIMIT');
+    this.#tx(() => {
+      const actual = this.#one('SELECT value FROM meta WHERE key=?', ENDOGENOUS_CONTROL_KEY)?.value ?? null;
+      if (actual !== expected) v.fail('E1_CONTROL_CAS');
+      this.#run('INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', ENDOGENOUS_CONTROL_KEY, next);
+    });
+  }
   #revocationHighWater(): number { return this.#one('SELECT coalesce(max(id),0) AS n FROM revocations')!.n as number; }
   revocationHighWater(): number { return this.#access(() => this.#revocationHighWater()); }
   #digest(value: unknown): string { return createHmac('sha256', this.#key).update(JSON.stringify(value)).digest('hex'); }

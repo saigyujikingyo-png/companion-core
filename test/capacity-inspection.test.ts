@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {TestContext} from 'node:test';
-import {mkdirSync,mkdtempSync,opendirSync,realpathSync,readdirSync,readFileSync,renameSync,statSync,writeFileSync} from 'node:fs';
+import {Dir,mkdirSync,mkdtempSync,realpathSync,readdirSync,readFileSync,renameSync,statSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
@@ -182,15 +182,38 @@ test('another vault pending allows ACTIVE diagnostics without consuming its comp
 
 test('directory scanning reports exact totals or explicit lower bounds with a strictly lower budget',t=>{
   const f=fixture(t,1,true);writeFileSync(join(f.config.directory,'synthetic-retained-note'),Buffer.from('not disposable garbage'));
-  const before=files(f.config.directory),stream=opendirSync(f.config.directory,{bufferSize:1});
-  let firstBytes:number;
-  try{const first=stream.readSync();assert.ok(first);firstBytes=statSync(join(f.config.directory,first.name)).size;}finally{stream.closeSync();}
-  const full=AnchoredVault.inspectCapacity(f.request),partial=AnchoredVault.inspectCapacity({...f.request,directoryEntryLimit:1});
+  const before=files(f.config.directory),full=AnchoredVault.inspectCapacity(f.request),readSync=Dir.prototype.readSync;
+  const observedSizes:number[]=[];let partial:ReturnType<typeof AnchoredVault.inspectCapacity>;
+  try{Dir.prototype.readSync=function(){const entry=readSync.call(this);
+    if(this.path===f.config.directory&&entry!==null)observedSizes.push(statSync(join(f.config.directory,entry.name)).size);
+    return entry;
+  };partial=AnchoredVault.inspectCapacity({...f.request,directoryEntryLimit:1});
+  }finally{Dir.prototype.readSync=readSync;}
+  assert.equal(observedSizes.length,1);
   assert.equal(full.generation!.directory.complete,true);assert.equal(full.generation!.directory.totalEntries,before.length);
   assert.equal(full.generation!.directory.totalBytes,before.reduce((n,x)=>n+x.bytes.length,0));
-  const scan=partial.generation!.directory;assert.equal(scan.complete,false);assert.equal(scan.entriesObserved,1);assert.equal(scan.totalEntries,null);assert.equal(scan.totalBytes,null);assert.equal(scan.observedBytes,firstBytes);assert.ok(scan.observedBytes<=full.generation!.directory.totalBytes!);
+  const scan=partial.generation!.directory;assert.equal(scan.complete,false);assert.equal(scan.entriesObserved,1);assert.equal(scan.totalEntries,null);assert.equal(scan.totalBytes,null);assert.ok(Number.isSafeInteger(scan.observedBytes)&&scan.observedBytes>=0);assert.equal(scan.observedBytes,observedSizes[0]);assert.ok(scan.observedBytes<=full.generation!.directory.totalBytes!);
   assert.equal(partial.generation!.otherGenerationsAndBackups,'unmeasured');assert.deepEqual(files(f.config.directory),before);
   assert.throws(()=>{(full as any).currentHead.sequence=0;},TypeError);assert.throws(()=>{(full as any).authority.blockers.push('READY');},TypeError);
+  assert.deepEqual(AnchoredVault.inspectCapacity(f.request),full);
+});
+
+for(const firstBytes of [0,17])test(`bounded directory scan measures a real ${firstBytes}-byte first file without reading a second entry`,t=>{
+  const f=fixture(t,1,true),name=`synthetic-first-${firstBytes}`;writeFileSync(join(f.config.directory,name),Buffer.alloc(firstBytes,97));
+  const selected=readdirSync(f.config.directory,{withFileTypes:true}).find(entry=>entry.name===name)!;assert.equal(selected.isFile(),true);
+  const before=files(f.config.directory),authority=files(f.authority.directory),full=AnchoredVault.inspectCapacity(f.request),readSync=Dir.prototype.readSync;
+  let reads=0,partial:ReturnType<typeof AnchoredVault.inspectCapacity>;
+  try{Dir.prototype.readSync=function(){
+    if(this.path!==f.config.directory)return readSync.call(this);
+    assert.equal(++reads,1,'entryLimit=1 must not request another directory entry');return selected;
+  };partial=AnchoredVault.inspectCapacity({...f.request,directoryEntryLimit:1});
+  }finally{Dir.prototype.readSync=readSync;}
+  assert.equal(reads,1);const scan=partial.generation!.directory;
+  assert.equal(scan.entriesObserved,1);assert.equal(scan.complete,false);assert.equal(scan.totalEntries,null);assert.equal(scan.totalBytes,null);
+  assert.equal(scan.observedBytes,statSync(join(f.config.directory,name)).size);assert.equal(scan.observedBytes,firstBytes);
+  assert.ok(scan.observedBytes<=full.generation!.directory.totalBytes!);assert.equal(full.generation!.directory.complete,true);
+  assert.equal(full.generation!.directory.totalEntries,before.length);assert.equal(full.generation!.directory.totalBytes,before.reduce((n,file)=>n+file.bytes.length,0));
+  assert.deepEqual(files(f.config.directory),before);assert.deepEqual(files(f.authority.directory),authority);
   assert.deepEqual(AnchoredVault.inspectCapacity(f.request),full);
 });
 

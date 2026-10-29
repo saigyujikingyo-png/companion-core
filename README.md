@@ -8,7 +8,7 @@
 
 [WF2 教师控制与小批验收](docs/WF2-VALIDATION.md)已补齐失败诊断，并实现 [跨模型四单元 canary](docs/WF2-UNIT-PILOT.md)。真实 .8 完成4个密封单元和4个计划单元，调用 Together 11次、DeepSeek 1次后因第二候选未通过精确验算停止：已记录1条合格候选、1条隔离候选，原协议的四行 manifest 未完成。978项本地测试及独立审查通过；后续 CP0 单行采收独立记账，Student 推理/训练未执行，教学数据保持私有。
 
-[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF6 已通过 [PR #1](https://github.com/saigyujikingyo-png/companion-core/pull/1) 合并（`06fc8b2`），合并前后四平台 CI 均通过。[IF7 容量检查 API](docs/CAPACITY-INSPECTION.md)原冻结候选通过独立893/893与类型检查后，已整合包含WF2的 `main`（`87eab00`）；新组合实际单worker **984/984 与类型检查**通过。当前为独立PR候选，精确head的跨平台CI与合并状态以该PR实际记录为准；具体分层见 [IF7 证据](docs/AEMC-INFRA-EVIDENCE-IF7.md)。本轮未部署或启动训练，完整目标仍 IN_PROGRESS / TRAINING_NOT_ADMITTED。
+[当前架构进度](docs/AEMC-DEVELOPMENT-STATUS.md)：IF0–IF11 的本机子集已进入 main，包括 [IF9 Store 物理压实](docs/CAPACITY-REPACK.md)（PR #5）、[IF10 Safety 终态冷段](docs/SAFETY-COLD-SEGMENT.md)（#6）、IF11 authority 有界永久冷路由（#12）；当前 generation fanout（#17）、E1a（#13）与 E1b（#16）也已合并。[PR #21](https://github.com/saigyujikingyo-png/companion-core/pull/21) 的 BCD/共享 raw HTTP/E2 TEXT Host 于2026-10-28合并为 `b58310c`（tree `c89ff674`，与1393项/strict/独审候选相同），push+PR 14/14 CI通过，合并后main 7/7 CI通过。E3a 为本次 [SINGLE_MESSAGE_CONTROL_PROTOTYPE](docs/ENDOGENOUS-LIFECYCLE.md) 候选，不是长期收件队列或真实 AgentAPI 部署。[长期容量](docs/LONG-TERM-CAPACITY-DESIGN.md)仍有整库RAM镜像、16MiB图、8192 Safety总数及authority四个不可复用槽等硬界；P5 Store冷镜像负成本实验暂停，未推广。既有成本/阴性证据保留；真实新provider/Host部署、跨机和训练没有由本轮合成验证取得接受。
 
 [IF3/IF4 历史组合证据](docs/AEMC-INFRA-EVIDENCE-IF4.md)保留该旧源码的822/822、类型检查、独立审查与成本结果；[IF5/IF6 本机组合证据](docs/AEMC-INFRA-EVIDENCE-IF6.md)保留874/874及成本测量，后续提交与合并结果以 IF7 证据为准。本批未启动训练。
 

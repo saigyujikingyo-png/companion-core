@@ -1,0 +1,39 @@
+# 长期精确账本容量路线
+
+2026-10-28状态：IF9 Store物理压实/packed Safety（PR #5）、[IF10终态冷段](SAFETY-COLD-SEGMENT.md)（#6）与IF11 authority有界永久冷路由（#12）已合并；原[分层证据](AEMC-INFRA-EVIDENCE-IF10.md)保留当时本机1098项/成本/未提交的历史时态。当前代fanout（#17）只限制当前代准入扫描，不清理永久history。Store仍完整RAM serialize、16MiB图；Safety总8192与完整4MiB；authority四个不可复用slot；4096 commits/256MiB目录等原界保持。P5 Store冷镜像负成本实验暂停，不推广/调参；retained其他generation/backup仍unmeasured，无自动GC。下方拟定合同保留2026-10-27方案时态，已实现部分以最终合同为准。精确控制面与[允许有损的内在痕迹](ADR-MEMORY-TOOL-BOUNDARY.md)分开，不通过丢幂等/UNKNOWN/撤销或提高上限取得收益。
+
+## 取舍和先后
+
+新增独立 `inspectRetainedRoots` 可对调用方显式列出的最多8个叶目录做有界元数据观测，见[容量检查](CAPACITY-INSPECTION.md#explicit-retained-roots)。它不证明目录归属或列表完整性；全局其他generation/backup仍为unmeasured，不与当前代报告自动求全库总量，不提供物理占盘、可回收量或GC。P5冷Store实验继续暂停，既有容量上限与精确控制合同不变。
+
+| 路线 | 决定与原因 |
+| --- | --- |
+| Safety不可变终态单冷段 | IF10已合并；热冷精确查回保持。三组负结果及一个有条件应用写入收益保留，不保证总成本下降 |
+| Store tombstone/整图冷迁 | 未推广；P5冷镜像负成本实验暂停，Store仍全库RAM serialize。ingress/依赖/outbox/consumer闭包和永久旧键不能被清表替代 |
+| authority跨代永久索引路由 | IF11有界实现已合并，含永久索引归档/精确查回/可信根；四个不可复用slot，不是无限容量或自动GC |
+
+有限空间的精确映射不能无限记住任意新ID；Bloom过滤器、TTL遗忘或仅查询热区均不能替代永久重复/冲突判定。IF8复用回执页，IF9减少镜像碎片与Safety编码成本，都未解决无限历史。
+
+## 单冷段的拟定合同
+
+拟议 `archiveTerminalSafety` 显式维护只读exact current，不boot/sweep，使用新目标、新instance、ownerEpoch+1及现有PREPARED/publish/finalize。仅 `failed`、`unknown`、`acknowledged && feedbackConsumed` 可冷迁；pending/ready/taken和未消费反馈的acknowledged保持热区。UNKNOWN归档不等于已解决。
+
+保留每条完整entry JSON、原ordinal、request key/fingerprint/state/deliveryId/reserved/feedback，以及所有全局reserved/lastSourceRef/lastWall/lastAcknowledgedDeliveryId。固定STRICT SQLite段在RAM构造，request key精确主键、非null delivery唯一、ordinal完整；候选使用WITHOUT ROWID，实际收益须测。首片总条目仍≤8192，冷SQLite明文≤8MiB；AEAD密文另设由nonce/tag/framing精确推导的界，不能把明密文界混用。maxCalls≤32、image16MiB、目录256MiB、回放64MiB保持。
+
+一个不可变加密 `safety-<cipherDigest>.bin`，后续维护合并旧冷段与新终态成一个新generation冷段，保留旧文件。以不循环的vault/generation/keyEpoch/用途绑定AAD，再由generation head身份固定描述，并由加密record/frame的认证链绑定最终cipherDigest、字节数、格式、计数和逻辑摘要；head身份字段本身不是加密载荷。**冷段根必须固定在generation identity及authority普通write身份比较中**，普通write或提前base不能改根。
+
+归档转换的前后快照必须按原序重建为完全相同的Safety。后续查询验证当前head对应的热冷并集，允许合法热区新写及状态变化，冷段自身内容保持不变：key与非null delivery全局唯一；ordinal无缺失或重复；索引列与JSON一致。缺文件、索引缺行、重复或不符均为corruption，不得当作不存在；缓存不能代替提交前必需文件闭包核查。
+
+所有claim/reserve/terminal/feedback/delivery唯一性/status经统一SafetyLedger双读接口；不做双写。计数与8192门使用hot+cold总数。保持现有错误优先序：claim先判重复/冲突再判满；reserve先判额度；冷terminal同状态同delivery无写返回、不升温或创建替代entry；冷已消费反馈仍拒绝重复消费。
+
+新profile最多**含base共15帧**，即14delta；一个冷段只读取和累计计费一次。备份manifest最多 `2×15+1=31` 个数据文件，两个备份说明文件另列；须同步改白名单及精确闭包校验。冷库只在RAM按严格已知layout打开/查询，不产生明文临时文件；若仍整体解密冷段，不声称按需RAM收益。展开前验证各descriptor与剩余总预算，包含SQLite冷段、image patch和热Safety。
+
+持久化冷段与full base后才PREPARED；reconcile仅验证并发布冻结输出，不重新选择条目。PREPARED缺必需文件保持未决；finalize失回应时同operationId返回原receipt。backup必须自包含冷段；rekey验证后用新DEK重加密，新目标不能依赖旧DEK。legacy admission、来源唯一槽、旧源fencing和跨vault pending门均保持。
+
+## 实施前需冻结的接受出口
+
+公开API生成三类可迁终态与不可迁未消费反馈；满8192下旧ID同载荷/异载荷、UNKNOWN重试、delivery冲突与反馈错误均保持。注入冷段缺失、替换、错vault/epoch、索引缺行及热冷重复，必须拒绝。真实子进程在PREPARED、发布中、finalize失回应死亡；双进程竞争、旧源fencing、完整backup/rekey/restore/legacy链都纳入。
+
+相同合法合成历史与IF9比较**完整base、之后固定次数写入、完整备份、恢复时间和峰值内存**，不只报热数组变小；小冷段可能因SQLite索引与额外文件更贵，结果如实保留。至少一个纵向测试贯通归档→冷键冲突/终态重试→热反馈完成→backup→rekey→restore。不得用结构注入8192替代完整业务历史，也不将该首片称为突破8192或十年容量验收。
+
+[SQLite WITHOUT ROWID](https://www.sqlite.org/withoutrowid.html)可减少非整数主键的重复B-tree；[deserialize](https://www.sqlite.org/c3ref/deserialize.html)与[Node24.16 SQLite](https://nodejs.org/download/release/v24.16.0/docs/api/sqlite.html)提供RAM载体基础。[URI immutable](https://www.sqlite.org/uri.html)是文件不变假设，不能替代认证根或fencing。这些资料支持组件选择，不证明以上协议已实现或通过测试。

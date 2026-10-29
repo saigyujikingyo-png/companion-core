@@ -1,0 +1,1330 @@
+{
+  "status": "SYNTHETIC_COMPARISON_ONLY",
+  "protocol": {
+    "families": 8,
+    "queries": 16,
+    "seed": "fixed-no-random-sampling",
+    "ordinalOrder": "fixture-publication-order-for-both",
+    "k1": 1.2,
+    "b": 0.75,
+    "N": "all-documents-including-empty",
+    "queryTerms": "unique",
+    "realModelCalls": 0,
+    "embedding": "NOT_EVALUATED",
+    "PPR": "NOT_EVALUATED",
+    "model": "NOT_EVALUATED",
+    "learning": "NOT_EVALUATED",
+    "Spark": "NOT_EVALUATED"
+  },
+  "sourceSha256": "00e8613c9cd7f4a6473739c976da2e8b7f4f040d272a1ad769b7afcb6ad3738d",
+  "cohortSha256": "5a255028cd94a8e0e4f033c0e964001ef42d0f05a5daec950270e92c0b637869",
+  "summary": {
+    "ar0": {
+      "recallAt1": {
+        "mean": 0.7222222222222222,
+        "denominator": 12
+      },
+      "recallAt3": {
+        "mean": 0.9583333333333334,
+        "denominator": 12
+      },
+      "recallAt8": {
+        "mean": 0.9583333333333334,
+        "denominator": 12
+      },
+      "unknownNonempty": {
+        "numerator": 0,
+        "denominator": 4
+      },
+      "exactRetentionAt1": {
+        "numerator": 7,
+        "denominator": 7
+      },
+      "exactRetentionAt3": {
+        "numerator": 7,
+        "denominator": 7
+      },
+      "exactRetentionAt8": {
+        "numerator": 7,
+        "denominator": 7
+      },
+      "conflictBothAt1": {
+        "numerator": 0,
+        "denominator": 2
+      },
+      "conflictBothAt3": {
+        "numerator": 1,
+        "denominator": 2
+      },
+      "conflictBothAt8": {
+        "numerator": 1,
+        "denominator": 2
+      }
+    },
+    "bm25": {
+      "recallAt1": {
+        "mean": 0.47222222222222215,
+        "denominator": 12
+      },
+      "recallAt3": {
+        "mean": 0.6666666666666666,
+        "denominator": 12
+      },
+      "recallAt8": {
+        "mean": 0.6666666666666666,
+        "denominator": 12
+      },
+      "unknownNonempty": {
+        "numerator": 2,
+        "denominator": 4
+      },
+      "exactRetentionAt1": {
+        "numerator": 4,
+        "denominator": 7
+      },
+      "exactRetentionAt3": {
+        "numerator": 4,
+        "denominator": 7
+      },
+      "exactRetentionAt8": {
+        "numerator": 4,
+        "denominator": 7
+      },
+      "conflictBothAt1": {
+        "numerator": 0,
+        "denominator": 2
+      },
+      "conflictBothAt3": {
+        "numerator": 2,
+        "denominator": 2
+      },
+      "conflictBothAt8": {
+        "numerator": 2,
+        "denominator": 2
+      }
+    }
+  },
+  "rows": [
+    {
+      "family": "frequency-length-tie",
+      "query": "tf-length",
+      "text": "cobalt lamp",
+      "gold": {
+        "id": "tf-length",
+        "text": "cobalt lamp",
+        "status": "supported",
+        "relevantOrdinals": [
+          0,
+          1
+        ]
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "kind": "direct_lexical"
+          },
+          {
+            "ordinal": 1,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 2
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "score": 1.8683871338102342
+          },
+          {
+            "ordinal": 1,
+            "score": 0.9011991336673627
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 2
+        }
+      },
+      "budget": {
+        "snapshotBytes": 2339,
+        "currentSnapshotReservedBytes": 2361,
+        "currentSnapshotBytes": 2339,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7656,
+        "totalBytes": 12334
+      }
+    },
+    {
+      "family": "frequency-length-tie",
+      "query": "stable-tie",
+      "text": "silver bell",
+      "gold": {
+        "id": "stable-tie",
+        "text": "silver bell",
+        "status": "supported",
+        "relevantOrdinals": [
+          2,
+          3
+        ]
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 2,
+            "kind": "direct_lexical"
+          },
+          {
+            "ordinal": 3,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 2
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 2,
+            "score": 1.8165236456053737
+          },
+          {
+            "ordinal": 3,
+            "score": 1.8165236456053737
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 2
+        }
+      },
+      "budget": {
+        "snapshotBytes": 2339,
+        "currentSnapshotReservedBytes": 2361,
+        "currentSnapshotBytes": 2339,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7656,
+        "totalBytes": 12334
+      }
+    },
+    {
+      "family": "rare-identifiers",
+      "query": "rare-exact",
+      "text": "ZXQ917",
+      "gold": {
+        "id": "rare-exact",
+        "text": "ZXQ917",
+        "status": "supported",
+        "relevantOrdinals": [
+          0
+        ],
+        "exactLiteral": "ZXQ917"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "score": 1.006565297551393
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1913,
+        "currentSnapshotReservedBytes": 1935,
+        "currentSnapshotBytes": 1913,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7040,
+        "totalBytes": 10866
+      }
+    },
+    {
+      "family": "rare-identifiers",
+      "query": "hyphen",
+      "text": "ZXQ-917",
+      "gold": {
+        "id": "hyphen",
+        "text": "ZXQ-917",
+        "status": "supported",
+        "relevantOrdinals": [
+          2
+        ],
+        "exactLiteral": "ZXQ-917"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 2,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 2,
+            "score": 1.8662264705952851
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1913,
+        "currentSnapshotReservedBytes": 1935,
+        "currentSnapshotBytes": 1913,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7068,
+        "totalBytes": 10894
+      }
+    },
+    {
+      "family": "fully-unknown",
+      "query": "unknown-word",
+      "text": "quasar",
+      "gold": {
+        "id": "unknown-word",
+        "text": "quasar",
+        "status": "unknown",
+        "relevantOrdinals": []
+      },
+      "ar0": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": false,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "bm25": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": false,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1460,
+        "currentSnapshotReservedBytes": 1482,
+        "currentSnapshotBytes": 1460,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 5808,
+        "totalBytes": 8728
+      }
+    },
+    {
+      "family": "fully-unknown",
+      "query": "unknown-number",
+      "text": "NVC739",
+      "gold": {
+        "id": "unknown-number",
+        "text": "NVC739",
+        "status": "unknown",
+        "relevantOrdinals": [],
+        "exactLiteral": "NVC739"
+      },
+      "ar0": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": false,
+          "exactAt1": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": false,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "bm25": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": false,
+          "exactAt1": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": false,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1460,
+        "currentSnapshotReservedBytes": 1482,
+        "currentSnapshotBytes": 1460,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 5808,
+        "totalBytes": 8728
+      }
+    },
+    {
+      "family": "partially-unknown",
+      "query": "missing-device",
+      "text": "device KLM999",
+      "gold": {
+        "id": "missing-device",
+        "text": "device KLM999",
+        "status": "unknown",
+        "relevantOrdinals": [],
+        "exactLiteral": "KLM999"
+      },
+      "ar0": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": false,
+          "exactAt1": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": false,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "score": 0.45665967762677145
+          },
+          {
+            "ordinal": 1,
+            "score": 0.45665967762677145
+          }
+        ],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": true,
+          "exactAt1": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": false,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 2
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1911,
+        "currentSnapshotReservedBytes": 1933,
+        "currentSnapshotBytes": 1911,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7180,
+        "totalBytes": 11002
+      }
+    },
+    {
+      "family": "partially-unknown",
+      "query": "missing-parcel",
+      "text": "parcel PRT999",
+      "gold": {
+        "id": "missing-parcel",
+        "text": "parcel PRT999",
+        "status": "unknown",
+        "relevantOrdinals": [],
+        "exactLiteral": "PRT999"
+      },
+      "ar0": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": false,
+          "exactAt1": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": false,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 2,
+            "score": 1.0417083100952131
+          }
+        ],
+        "metrics": {
+          "recallAt1": null,
+          "recallAt3": null,
+          "recallAt8": null,
+          "unknownNonempty": true,
+          "exactAt1": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": false,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": false,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1911,
+        "currentSnapshotReservedBytes": 1933,
+        "currentSnapshotBytes": 1911,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7180,
+        "totalBytes": 11002
+      }
+    },
+    {
+      "family": "contradiction",
+      "query": "object-conflict",
+      "text": "ORB61 waterproof",
+      "gold": {
+        "id": "object-conflict",
+        "text": "ORB61 waterproof",
+        "status": "conflict",
+        "relevantOrdinals": [
+          0,
+          1
+        ],
+        "conflictSides": [
+          0,
+          1
+        ],
+        "exactLiteral": "ORB61"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "kind": "direct_lexical"
+          },
+          {
+            "ordinal": 1,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 2
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 2
+          },
+          "conflictBothAt1": false,
+          "conflictBothAt3": true,
+          "conflictBothAt8": true,
+          "distinctRootGroupsAt8": 2
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "score": 0.6231444630140571
+          },
+          {
+            "ordinal": 1,
+            "score": 0.5677993955753087
+          },
+          {
+            "ordinal": 2,
+            "score": 0.1378699577278464
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 2
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 2
+          },
+          "conflictBothAt1": false,
+          "conflictBothAt3": true,
+          "conflictBothAt8": true,
+          "distinctRootGroupsAt8": 3
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1905,
+        "currentSnapshotReservedBytes": 1927,
+        "currentSnapshotBytes": 1905,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7096,
+        "totalBytes": 10906
+      }
+    },
+    {
+      "family": "contradiction",
+      "query": "negative-conflict",
+      "text": "ORB61 not waterproof",
+      "gold": {
+        "id": "negative-conflict",
+        "text": "ORB61 not waterproof",
+        "status": "conflict",
+        "relevantOrdinals": [
+          0,
+          1
+        ],
+        "conflictSides": [
+          0,
+          1
+        ]
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 1,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 0.5,
+          "recallAt8": 0.5,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": false,
+          "conflictBothAt3": false,
+          "conflictBothAt8": false,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 1,
+            "score": 1.4905532322902886
+          },
+          {
+            "ordinal": 0,
+            "score": 0.6231444630140571
+          },
+          {
+            "ordinal": 2,
+            "score": 0.1378699577278464
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.5,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": false,
+          "conflictBothAt3": true,
+          "conflictBothAt8": true,
+          "distinctRootGroupsAt8": 3
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1905,
+        "currentSnapshotReservedBytes": 1927,
+        "currentSnapshotBytes": 1905,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7208,
+        "totalBytes": 11018
+      }
+    },
+    {
+      "family": "shared-root",
+      "query": "supplement",
+      "text": "ARK77",
+      "gold": {
+        "id": "supplement",
+        "text": "ARK77",
+        "status": "supported",
+        "relevantOrdinals": [
+          0,
+          1,
+          2
+        ],
+        "exactLiteral": "ARK77"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "kind": "direct_lexical"
+          },
+          {
+            "ordinal": 2,
+            "kind": "direct_lexical"
+          },
+          {
+            "ordinal": 1,
+            "kind": "shared_root"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.3333333333333333,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 2
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 2
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "score": 0.7102384809025193
+          },
+          {
+            "ordinal": 2,
+            "score": 0.7102384809025193
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.3333333333333333,
+          "recallAt3": 0.6666666666666666,
+          "recallAt8": 0.6666666666666666,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 2
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 2
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "budget": {
+        "snapshotBytes": 2348,
+        "currentSnapshotReservedBytes": 2370,
+        "currentSnapshotBytes": 2348,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7740,
+        "totalBytes": 12436
+      }
+    },
+    {
+      "family": "shared-root",
+      "query": "same-root",
+      "text": "canvas shelter",
+      "gold": {
+        "id": "same-root",
+        "text": "canvas shelter",
+        "status": "supported",
+        "relevantOrdinals": [
+          0,
+          1,
+          2
+        ]
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 1,
+            "kind": "direct_lexical"
+          },
+          {
+            "ordinal": 0,
+            "kind": "shared_root"
+          },
+          {
+            "ordinal": 2,
+            "kind": "shared_root"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.3333333333333333,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 1,
+            "score": 2.2458146075705745
+          }
+        ],
+        "metrics": {
+          "recallAt1": 0.3333333333333333,
+          "recallAt3": 0.3333333333333333,
+          "recallAt8": 0.3333333333333333,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "budget": {
+        "snapshotBytes": 2348,
+        "currentSnapshotReservedBytes": 2370,
+        "currentSnapshotBytes": 2348,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 7992,
+        "totalBytes": 12688
+      }
+    },
+    {
+      "family": "normalization-chinese",
+      "query": "fullwidth-case",
+      "text": "qxr42 blue",
+      "gold": {
+        "id": "fullwidth-case",
+        "text": "qxr42 blue",
+        "status": "supported",
+        "relevantOrdinals": [
+          0
+        ]
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "score": 2.118992135613648
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": null,
+          "exactAt3": null,
+          "exactAt8": null,
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "budget": {
+        "snapshotBytes": 2311,
+        "currentSnapshotReservedBytes": 2333,
+        "currentSnapshotBytes": 2311,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 5556,
+        "totalBytes": 10178
+      }
+    },
+    {
+      "family": "normalization-chinese",
+      "query": "chinese-substring",
+      "text": "星河站",
+      "gold": {
+        "id": "chinese-substring",
+        "text": "星河站",
+        "status": "supported",
+        "relevantOrdinals": [
+          2
+        ],
+        "exactLiteral": "星河站"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 2,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": 0,
+          "recallAt3": 0,
+          "recallAt8": 0,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "budget": {
+        "snapshotBytes": 2311,
+        "currentSnapshotReservedBytes": 2333,
+        "currentSnapshotBytes": 2311,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 5360,
+        "totalBytes": 9982
+      }
+    },
+    {
+      "family": "punctuation-emoji",
+      "query": "punctuation-literal",
+      "text": "***",
+      "gold": {
+        "id": "punctuation-literal",
+        "text": "***",
+        "status": "supported",
+        "relevantOrdinals": [
+          0
+        ],
+        "exactLiteral": "***"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 0,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": 0,
+          "recallAt3": 0,
+          "recallAt8": 0,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1840,
+        "currentSnapshotReservedBytes": 1862,
+        "currentSnapshotBytes": 1840,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 4856,
+        "totalBytes": 8536
+      }
+    },
+    {
+      "family": "punctuation-emoji",
+      "query": "emoji-literal",
+      "text": "🙂",
+      "gold": {
+        "id": "emoji-literal",
+        "text": "🙂",
+        "status": "supported",
+        "relevantOrdinals": [
+          1
+        ],
+        "exactLiteral": "🙂"
+      },
+      "ar0": {
+        "hits": [
+          {
+            "ordinal": 1,
+            "kind": "direct_lexical"
+          }
+        ],
+        "metrics": {
+          "recallAt1": 1,
+          "recallAt3": 1,
+          "recallAt8": 1,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 1
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 1
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 1
+        }
+      },
+      "bm25": {
+        "hits": [],
+        "metrics": {
+          "recallAt1": 0,
+          "recallAt3": 0,
+          "recallAt8": 0,
+          "unknownNonempty": null,
+          "exactAt1": {
+            "eligible": true,
+            "hits": 0
+          },
+          "exactAt3": {
+            "eligible": true,
+            "hits": 0
+          },
+          "exactAt8": {
+            "eligible": true,
+            "hits": 0
+          },
+          "conflictBothAt1": null,
+          "conflictBothAt3": null,
+          "conflictBothAt8": null,
+          "distinctRootGroupsAt8": 0
+        }
+      },
+      "budget": {
+        "snapshotBytes": 1840,
+        "currentSnapshotReservedBytes": 1862,
+        "currentSnapshotBytes": 1840,
+        "retainedSnapshotCopies": 2,
+        "workingBytes": 4828,
+        "totalBytes": 8508
+      }
+    }
+  ]
+}
