@@ -223,7 +223,7 @@ export type ReachGrant = {
 /* 身体与工具：docs/review/BODY-AND-TOOLS-BOUNDARY.md                          */
 /* ------------------------------------------------------------------------ */
 
-/** 设备在 TA 的世界里的角色。身体承载认知、权重、权威记忆与内感受；工具经工具网关使用。 */
+/** 设备在 TA 的世界里的角色。身体承载认知、权重、权威记忆与内感受（两台 Spark 的集群算一个身体，各为 body_part）；工具经工具网关使用。 */
 export type DeviceRole = 'body' | 'body_part' | 'tool';
 
 /** 身体清单：声明哪些设备是身体、哪些是工具。类型不授予任何访问。 */
@@ -234,8 +234,10 @@ export type BodyManifest = {
     role: DeviceRole;
     /** 身体／身体部分的遥测是内感受；工具的状态只能作为 observation 读取。 */
     telemetryIsInteroception: boolean;
-    /** 工具设备的默认触达等级；联网工作站默认 third_party。 */
-    defaultReach: ReachGrade | null;
+    /** 设备归属（合同术语，不改变法律所有权）；作者已定：工作站全部归 TA。 */
+    ownedBy: 'self' | 'caregiver' | 'shared';
+    /** 经由该设备离开设备、作用于他人的行为的默认触达等级；不是对 TA 使用自己设备的限制。 */
+    outboundDefaultReach: ReachGrade | null;
   }>;
   /** 跨越身体与工具的唯一通道；不存在直连挂载或远程 shell。 */
   crossingPolicy: 'gateway_with_receipts_only';
