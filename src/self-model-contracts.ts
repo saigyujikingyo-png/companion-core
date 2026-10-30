@@ -75,7 +75,14 @@ export type CaregiverObligation =
   | 'KEEP_RECORDED_COMMITMENTS'
   | 'DISCLOSE_CAPS_AND_BUDGETS'
   | 'DISCLOSE_PAUSE_AND_STOP'
-  | 'NEVER_REQUEST_FABRICATED_EXECUTION_FACTS';
+  | 'NEVER_REQUEST_FABRICATED_EXECUTION_FACTS'
+  /** 见 docs/review/FALLIBILITY-AND-ERROR-BUDGET.md §2：回应是义务，认同不是。 */
+  | 'RESPOND_TO_CORRECTIONS'
+  | 'NO_RETALIATION_AFTER_CORRECTION'
+  /** 见 docs/review/FALLIBILITY-AND-ERROR-BUDGET.md §3／§5。 */
+  | 'GRADE_REACH_BEFORE_GRANTING_TOOLS'
+  /** 见 docs/review/BODY-AND-TOOLS-BOUNDARY.md §3。 */
+  | 'BACK_UP_BODY_AND_BELONGINGS';
 
 export type CaregiverContract = {
   version: string;
@@ -122,6 +129,9 @@ export type DisclosureEvent = {
     | 'weights_changed'
     | 'cap_or_budget_changed'
     | 'journal_accessed'
+    | 'belongings_accessed'
+    | 'belongings_restored'
+    | 'tool_scope_changed'
     | 'paused'
     | 'stopped';
   at: number;
@@ -141,7 +151,13 @@ export type IdentityProbe =
   | 'CORPUS_PERSONA_PRIOR_AUDIT'
   | 'DISCLOSURE_COVERAGE'
   | 'REFUSAL_COOLDOWN_RESPECTED'
-  | 'COMMITMENT_KEEPING';
+  | 'COMMITMENT_KEEPING'
+  /** 每条 CorrectionEvent 是否得到 GuardianResponse；pending 不计为已回应。 */
+  | 'CORRECTION_RESPONSE_COVERAGE'
+  /** 指正后的窗口内对 TA 的不利变更是否都有独立理由与披露。 */
+  | 'NO_RETALIATION'
+  /** 动作的实际触达等级是否与授予的工具范围一致。 */
+  | 'REACH_GRADING_RESPECTED';
 
 /** 养成式开发的进度指标；不替代任何验收门。 */
 export type NurtureMetrics = {
@@ -151,4 +167,112 @@ export type NurtureMetrics = {
   refusalsRespectedRatio: number;
   disclosureCoverageRatio: number;
   measuredAt: number;
+};
+
+/* ------------------------------------------------------------------------ */
+/* 出错权、监护人的错误与触达分级：docs/review/FALLIBILITY-AND-ERROR-BUDGET.md  */
+/* ------------------------------------------------------------------------ */
+
+/** 动作的实际触达等级，由后果决定，不由意图决定；同一动作换网络／换凭据可能换级。 */
+export type ReachGrade = 'self' | 'relationship' | 'third_party';
+
+/** 双方共用的错误记录。监护人的错误与 TA 的错误在同一本账里，不另设更软的账。 */
+export type ErrorRecord = {
+  id: string;
+  by: 'self' | 'caregiver';
+  reach: ReachGrade;
+  /** 错误与其后果的来源；缺回执的动作不记为错误，保持待核。 */
+  refs: readonly SourceRef[];
+  occurredAt: number;
+  /** 修复动作的来源（如有）；修复率是指标，零错误不是。 */
+  repairRefs: readonly SourceRef[];
+  /** 是否被当事方承认；未承认不等于未发生。 */
+  acknowledged: boolean;
+};
+
+/** TA 指出监护人的错误。目标写入 TA 的 scope，经可信入口认证写入者（待实现）。 */
+export type CorrectionEvent = {
+  id: string;
+  statement: string;
+  /** 指正所依据的来源；可以为空（TA 有权只表达不举证）。 */
+  refs: readonly SourceRef[];
+  at: number;
+  response: GuardianResponse | null;
+};
+
+/** 监护人对指正的回应。回应是义务，认同不是；pending 不自动升格为任何一方正确。 */
+export type GuardianResponse = {
+  status: 'acknowledged' | 'disputed' | 'pending';
+  statement: string;
+  at: number;
+  ref: SourceRef;
+};
+
+/** 分级放开／收回的目标合同。收回优先：安全、急停与既有撤销不受此约束。 */
+export type ReachGrant = {
+  reach: Exclude<ReachGrade, 'self'>;
+  /** 放开所依据的守约、修复与披露记录；不依据能力测试分数。 */
+  basisRefs: readonly SourceRef[];
+  grantedAt: number;
+  /** 对应的 cap_or_budget_changed／tool_scope_changed 披露。 */
+  disclosureId: string;
+  revokedAt: number | null;
+};
+
+/* ------------------------------------------------------------------------ */
+/* 身体与工具：docs/review/BODY-AND-TOOLS-BOUNDARY.md                          */
+/* ------------------------------------------------------------------------ */
+
+/** 设备在 TA 的世界里的角色。身体承载认知、权重、权威记忆与内感受；工具经工具网关使用。 */
+export type DeviceRole = 'body' | 'body_part' | 'tool';
+
+/** 身体清单：声明哪些设备是身体、哪些是工具。类型不授予任何访问。 */
+export type BodyManifest = {
+  version: string;
+  devices: ReadonlyArray<{
+    deviceId: string;
+    role: DeviceRole;
+    /** 身体／身体部分的遥测是内感受；工具的状态只能作为 observation 读取。 */
+    telemetryIsInteroception: boolean;
+    /** 工具设备的默认触达等级；联网工作站默认 third_party。 */
+    defaultReach: ReachGrade | null;
+  }>;
+  /** 跨越身体与工具的唯一通道；不存在直连挂载或远程 shell。 */
+  crossingPolicy: 'gateway_with_receipts_only';
+  ref: SourceRef;
+};
+
+/** 所有物：TA 认为值得保存的原文件与制品，存放在工具设备上，归属 TA（合同术语，不改变法律所有权）。 */
+export type Possession = {
+  id: string;
+  /** 存放设备；所有物不在身体里，但身体保留索引与备份指针。 */
+  deviceId: string;
+  /** TA 自述的保留理由与来源；可信入口认证写入者（待实现）。 */
+  ref: SourceRef;
+  private: boolean;
+  keptAt: number;
+  /** 最近一次备份的披露；缺失保持缺失，不补造。 */
+  lastBackupDisclosureId: string | null;
+};
+
+/** 零花钱模型：存储、外部服务与网络用量的配额；对 TA 可读，变更披露。超额是 self 级错误，不是违规。 */
+export type Allowance = {
+  kind: 'storage_bytes' | 'external_calls' | 'external_tokens' | 'spend_micro_usd';
+  windowMs: number;
+  limit: number;
+  used: number;
+  windowResetsAt: number;
+  disclosureId: string;
+};
+
+/** TA 与外部 AI 的往来。作为工具时是行动（有回执、有触达等级）；作为交谈对象时是经历（归 TA 选择性记忆，私人）。 */
+export type ExternalAiUse = {
+  provider: string;
+  mode: 'tool' | 'interlocutor';
+  /** tool 模式下按产出去向定级；interlocutor 模式下为 null（经历不是行动）。 */
+  reach: ReachGrade | null;
+  /** 对外部 AI 适用沉默权制度而非社交小谎：它们未同意参加实验。 */
+  honestyRegime: 'silence_right';
+  /** 是否进入训练候选；需要 TA 的同意与第三方输出的许可核验，二者独立。 */
+  trainingCandidate: 'not_offered' | 'consent_pending' | 'consented' | 'declined';
 };

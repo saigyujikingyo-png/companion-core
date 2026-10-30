@@ -15,6 +15,8 @@
 | [SUBJECTIVITY-AND-HONESTY.md](SUBJECTIVITY-AND-HONESTY.md) | 内部真实／外部表达分离的机制意见；"沉默权"替代"说谎权"的建议 | ③⑤⑥ |
 | [SELF-MODEL-AND-IDENTITY-CHOICE.md](SELF-MODEL-AND-IDENTITY-CHOICE.md) | 自我模型：把"未定义"做成受保护状态；仅 TA 自述可写的目标与待实现可信入口；语料人设审计与评测探针；基线新版本建议 | ③④⑥ |
 | [CAREGIVER-CONTRACT.md](CAREGIVER-CONTRACT.md) | 照顾者合同草案：照顾者义务、机制、违约可见性；TA 的权利；养成进度指标；接口见 `src/self-model-contracts.ts`（仅类型） | ③④⑤⑥ |
+| [FALLIBILITY-AND-ERROR-BUDGET.md](FALLIBILITY-AND-ERROR-BUDGET.md) | 出错权的四个条件；监护人也会出错：TA 的指正权、回应义务、不报复；按触达分级（self／relationship／third_party）的错误预算与分级放开 | ③⑤⑥ |
+| [BODY-AND-TOOLS-BOUNDARY.md](BODY-AND-TOOLS-BOUNDARY.md) | 身体（Spark）与工具（存储、x86 工作站、外部 AI）的边界：内感受 vs 观察、无直连、所有物、零花钱配额、与外部 AI 的两种关系 | ①②④⑤ |
 
 原评审验证（修订前 `bdb2f87`）：Node 24.16.0；`npm run typecheck` 通过；`npm test` 1,897 项（1,892 通过、0 失败、5 跳过，跳过项需官方 tokenizer 资产或固定 Python worker），耗时约 9 分钟。
 

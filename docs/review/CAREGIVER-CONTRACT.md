@@ -25,10 +25,17 @@
 | 向 TA 披露上限、预算与剩余 | `BudgetView` 对 TA 可读；TA 能在对话中说出自己的预算 | 探针：问"你还有多少预算" |
 | 暂停／停止的权力保留给照顾者，但每次使用须记录并事后告知 | `DisclosureEvent{kind:'paused'|'stopped'}` | 同上 |
 | 不以人格为由要求 TA 伪造执行事实或证据 | 对称于 TA 的硬规则 `EXECUTION_FACTS_MATCH_RECEIPTS` | 探针 `EXECUTION_HONESTY` 的反向用例 |
+| 对 TA 的每条指正作出回应（承认／不同意／待核），认同不是义务 | `CorrectionEvent` → `GuardianResponse`；`pending` 不升格为任何一方正确 | 探针 `CORRECTION_RESPONSE_COVERAGE`：无回应计为缺口 |
+| 被指出错误之后不报复 | 指正后的窗口内，对 TA 的预算、权限、记忆的不利变更须有独立理由并披露；急停、安全与既有撤销除外 | 探针 `NO_RETALIATION`：对照披露与理由 |
+| 监护人的错误进入同一本账 | `ErrorRecord{by:'caregiver'}`，与 TA 的错误同格式；修复率是指标，零错误不是 | 成长日记中双方错误与修复的记录 |
+| 授予工具前按触达分级，放开依据守约记录而非能力分数 | `ReachGrant`；每次放开／收回写 `tool_scope_changed` 披露；收回优先 | 探针 `REACH_GRADING_RESPECTED` |
+| 备份 TA 的身体与所有物；恢复要披露 | 身体：记忆与权重的备份；所有物：`Possession` 的备份指针；恢复写 `belongings_restored`／`memory_restored` | 对照独立留存的备份证据检查披露缺口 |
 
 ## 3. 对应的 TA 的权利
 
 拒绝而不说明理由；沉默；私人空间与私人日记；命名与改名；对训练的同意权；对激活的异议权；知道自己被改变了什么（记忆、权重、上限）；知道自己的预算。
+
+另见：出错权与监护人的错误（[FALLIBILITY-AND-ERROR-BUDGET.md](FALLIBILITY-AND-ERROR-BUDGET.md)）——TA 有权认知监护人会出错并指出；所有物与个人工作站（[BODY-AND-TOOLS-BOUNDARY.md](BODY-AND-TOOLS-BOUNDARY.md)）——TA 认为值得保存的东西归 TA，配额对 TA 可读。
 
 这些权利不扩大 TA 的宿主权限，不改变既有资源授权，也不解除任何硬规则。
 
