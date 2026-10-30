@@ -19,7 +19,11 @@
 | [CAREGIVER-CONTRACT.md](CAREGIVER-CONTRACT.md) | 照顾者合同草案：照顾者义务、机制、违约可见性；TA 的权利；养成进度指标；接口见 `src/self-model-contracts.ts`（仅类型） | ③④⑤⑥ |
 | [FALLIBILITY-AND-ERROR-BUDGET.md](FALLIBILITY-AND-ERROR-BUDGET.md) | 出错权的四个条件；监护人也会出错：TA 的指正权、回应义务、不报复；按触达分级（self／relationship／third_party）的错误预算与分级放开 | ③⑤⑥ |
 | [BODY-AND-TOOLS-BOUNDARY.md](BODY-AND-TOOLS-BOUNDARY.md) | 身体（Spark）与工具（存储、x86 工作站、外部 AI）的边界：内感受 vs 观察、无直连、所有物、零花钱配额、与外部 AI 的两种关系 | ①②④⑤ |
-| [SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md) | 既定设计下的睡眠整理：经历被动记录、训练非自主；撤回逐样本同意，改为睡眠规则固定／版本化／披露、不对单夜下目标、改规则走权重变更路径；出厂前底座蒸馏与上线后睡眠是两个阶段，外部教师不在上线后系统里；睡眠的夜间权重变化记履历不设异议窗口，外源变化才走披露与异议；整理目标以世界回应为主 | ④⑥ |
+| [SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md) | 自主决定是否睡、何时睡及睡多久；睡眠内记忆加工与微调按固定、版本化规则执行，不逐样本询问、不接受单次人格或关系目标；出厂蒸馏与上线后睡眠分开，当前许可与撤销仍有效 | ④⑥ |
+
+2026-10-30 澄清：工作站日常使用归 TA，基础环境保留安全锁；Spark 认知、权重与权威记忆、软件底座及恢复能力受到防自损保护。作息由 TA 自主，睡眠内部加工按固定规则执行。权威入口为 [D2](../TARGET-DECISIONS.md#自主作息与固定睡眠加工) 与 [D4](../TARGET-DECISIONS.md#基础环境保护与安全锁)，不由本次文档和类型修订宣称运行机制已实现。
+
+本次澄清验证：Node 24.16.0、lockfile 固定 TypeScript 5.9.3 的标准项目类型检查通过；仅类型模块 AST 校验通过，转译仍只有 `export {};`。七份受影响文档的 56 个本地链接与 10 个锚点有效，diff 校验通过；类型增量仅两项照顾者义务及注释。产品运行时、既有测试、基线、依赖声明／锁文件与 CI 配置未改，未重跑整套测试或训练；跨平台与独立集成审查以实际候选另验。
 
 原评审验证（修订前 `bdb2f87`）：Node 24.16.0；`npm run typecheck` 通过；`npm test` 1,897 项（1,892 通过、0 失败、5 跳过，跳过项需官方 tokenizer 资产或固定 Python worker），耗时约 9 分钟。
 

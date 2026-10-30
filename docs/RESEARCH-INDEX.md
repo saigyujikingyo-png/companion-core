@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 目标、人格与治理 | [目标决策](TARGET-DECISIONS.md)、[照顾者合同](review/CAREGIVER-CONTRACT.md) | 区分已确认目标、临时监护责任和待实现机制 |
 | 自我模型与身份选择 | [自我模型](review/SELF-MODEL-AND-IDENTITY-CHOICE.md) | 身份自主是目标；声明标签不等于主体认证 |
+| 身体、工具与睡眠 | [身体与工具](review/BODY-AND-TOOLS-BOUNDARY.md)、[睡眠整理](review/SLEEP-CONSOLIDATION.md)、[出错与修复](review/FALLIBILITY-AND-ERROR-BUDGET.md) | 基础环境保留安全锁；作息自主，内部加工固定；出错权不授予破坏底座的权限 |
 | 研究依据与基础设施 | [研究路线](AEMC-INFRA-RESEARCH.md)、[基础设施](AEMC-INFRASTRUCTURE.md) | 设计、候选和具体实现分别阅读 |
 | 实际接线与最小回路 | [接线图](review/ACTUAL-WIRING.md)、[最小认知环](review/MINIMAL-COGNITIVE-LOOP.md) | 类型合同和设计图不代表在线能力已交付 |
 | 状态与长期连续 | [背景状态](BACKGROUND-STATE.md)、[身体状态](BODY-STATE.md)、[长期容量](LONG-TERM-CAPACITY-DESIGN.md) | 生物启发状态不证明体验；成本与恢复证据保留各自范围 |
