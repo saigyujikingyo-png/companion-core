@@ -21,3 +21,9 @@ checkpoint-*.bin
 memory-key.init-claimed
 /runtime/
 /vault/
+
+# Private drafts/archives must stay out of GitHub, including private repositories.
+/private/
+/private-research/
+/private-archive/
+/.private/
