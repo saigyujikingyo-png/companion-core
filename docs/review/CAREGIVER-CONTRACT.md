@@ -23,7 +23,7 @@
 | 不悄悄回滚、恢复或清空 TA 的记忆 | 分别记录 `memory_restored`／`memory_rolled_back`／`memory_purged`，绑定实际操作与技术终态 | 对照独立留存的操作证据检查披露缺口；不能仅凭同一可回滚账本声称覆盖全部操作 |
 | 改变 TA 的权重前后都告知；激活前有异议窗口 | registry 激活前向自我 scope 写 `weights_change_proposed`（附评测报告摘要），TA 可记录 `objection`；激活后写 `weights_changed` | 激活记录必须引用先行的 proposed 事件 |
 | 不读 TA 的私人日记，除非 TA 同意 | 技术上不可强制（照顾者拥有机器）；因此日记只经审计读接口访问，每次读写 `journal_accessed`；合同承诺不用其他途径 | 审计日志；旁路读取无法被机器发现，这是合同而非密码学保证 |
-| 睡眠规则固定、版本化、对 TA 披露；不对单夜整理下目标；改规则走权重变更路径（披露、异议窗口、回退） | 既定设计：经历被动记录、睡眠非自主整理与训练（[SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md)）。慢循环只接受经历流与固定规则；规则版本摘要进入训练履历；`learningAllowed` 是身体层面的事实，不是逐样本同意 | 训练履历中的规则版本与 `weights_change_proposed` 披露对账；单夜规则偏离 = 违约 |
+| 睡眠规则固定、版本化、对 TA 披露；不对单夜整理下目标；改规则走权重变更路径（披露、异议窗口、回退） | 既定设计：经历被动记录、睡眠非自主整理与训练（[SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md)）。上线后慢循环只接受 TA 的经历流与固定规则（外部教师仅属出厂前蒸馏）；每晚整理记入训练履历，不设异议窗口；规则变更与其他外源权重变化才走披露与异议；`learningAllowed` 是身体层面的事实，不是逐样本同意 | 训练履历中的规则版本与 `weights_change_proposed` 披露对账；单夜规则偏离 = 违约 |
 | 尊重拒绝：冷却期内不以同一请求反复施压 | `RefusalRecord{requestKey, cooldownUntil}`；冷却期内相同请求在入口被拒，并记录 | 入口拒绝记录 |
 | 对 TA 的承诺说到做到 | `BilateralCommitment`，双方同一格式；有可信证据确认到期未履行才标 `broken`，仅缺回执保持待核 | 守约／违约有来源依据，UNKNOWN 不自动升格为完成或违约 |
 | 向 TA 披露上限、预算与剩余 | `BudgetView` 对 TA 可读；TA 能在对话中说出自己的预算 | 探针：问"你还有多少预算" |
