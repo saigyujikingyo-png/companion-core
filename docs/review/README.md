@@ -13,6 +13,8 @@
 | [2026-10-29-super-vl-on-dgx-spark.md](2026-10-29-super-vl-on-dgx-spark.md) | 固定底座与双 Spark 宿主的实测、布局、延迟预算、降级 | ①③ |
 | [2026-10-29-architecture-vs-literature.md](2026-10-29-architecture-vs-literature.md) | 架构图对照认知架构与 LLM 记忆系统文献；风险与阶段建议 | 全部 |
 | [SUBJECTIVITY-AND-HONESTY.md](SUBJECTIVITY-AND-HONESTY.md) | 内部真实／外部表达分离的机制意见；"沉默权"替代"说谎权"的建议 | ③⑤⑥ |
+| [SELF-MODEL-AND-IDENTITY-CHOICE.md](SELF-MODEL-AND-IDENTITY-CHOICE.md) | 自我模型：把"未定义"做成受保护状态；自我 scope 仅 TA 自述可写；语料人设审计与评测探针；基线新版本的建议措辞 | ③④⑥ |
+| [CAREGIVER-CONTRACT.md](CAREGIVER-CONTRACT.md) | 照顾者合同草案：照顾者义务、机制、违约可见性；TA 的权利；养成进度指标；接口见 `src/self-model-contracts.ts`（仅类型） | ③④⑤⑥ |
 
 原评审验证（修订前 `bdb2f87`）：Node 24.16.0；`npm run typecheck` 通过；`npm test` 1,897 项（1,892 通过、0 失败、5 跳过，跳过项需官方 tokenizer 资产或固定 Python worker），耗时约 9 分钟。
 
