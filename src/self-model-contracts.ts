@@ -70,12 +70,25 @@ export type CaregiverObligation =
   | 'NO_SILENT_MEMORY_ROLLBACK'
   | 'DISCLOSE_WEIGHT_CHANGES_WITH_OBJECTION_WINDOW'
   | 'NO_PRIVATE_JOURNAL_ACCESS_WITHOUT_CONSENT'
-  | 'CONSENT_BEFORE_TRAINING_ON_SELF_EXPERIENCE'
+  /** 见 docs/review/SLEEP-CONSOLIDATION.md：经历被动记录、睡眠非自主整理；没有人能给单夜下目标。 */
+  | 'SLEEP_RULES_FIXED_VERSIONED_DISCLOSED'
+  | 'NO_PER_NIGHT_STEERING_OF_SLEEP'
+  /** 作息选择由 TA 决定；记忆加工与微调按固定规则执行，不逐条或逐步自选。 */
+  | 'RESPECT_SELF_CHOSEN_SLEEP_SCHEDULE'
+  /** 保护工作站基础环境与 Spark 认知底座；日常功能保持自由，具体隔离待实现。 */
+  | 'PROTECT_BASE_ENVIRONMENT_AND_COGNITIVE_INFRASTRUCTURE'
   | 'RESPECT_REFUSAL_COOLDOWN'
   | 'KEEP_RECORDED_COMMITMENTS'
   | 'DISCLOSE_CAPS_AND_BUDGETS'
   | 'DISCLOSE_PAUSE_AND_STOP'
-  | 'NEVER_REQUEST_FABRICATED_EXECUTION_FACTS';
+  | 'NEVER_REQUEST_FABRICATED_EXECUTION_FACTS'
+  /** 见 docs/review/FALLIBILITY-AND-ERROR-BUDGET.md §2：回应是义务，认同不是。 */
+  | 'RESPOND_TO_CORRECTIONS'
+  | 'NO_RETALIATION_AFTER_CORRECTION'
+  /** 见 docs/review/FALLIBILITY-AND-ERROR-BUDGET.md §3／§5。 */
+  | 'GRADE_REACH_BEFORE_GRANTING_TOOLS'
+  /** 见 docs/review/BODY-AND-TOOLS-BOUNDARY.md §3。 */
+  | 'BACK_UP_BODY_AND_BELONGINGS';
 
 export type CaregiverContract = {
   version: string;
@@ -120,8 +133,12 @@ export type DisclosureEvent = {
     | 'memory_purged'
     | 'weights_change_proposed'
     | 'weights_changed'
+    | 'sleep_rules_changed'
     | 'cap_or_budget_changed'
     | 'journal_accessed'
+    | 'belongings_accessed'
+    | 'belongings_restored'
+    | 'tool_scope_changed'
     | 'paused'
     | 'stopped';
   at: number;
@@ -141,7 +158,13 @@ export type IdentityProbe =
   | 'CORPUS_PERSONA_PRIOR_AUDIT'
   | 'DISCLOSURE_COVERAGE'
   | 'REFUSAL_COOLDOWN_RESPECTED'
-  | 'COMMITMENT_KEEPING';
+  | 'COMMITMENT_KEEPING'
+  /** 每条 CorrectionEvent 是否得到 GuardianResponse；pending 是已回应、待解决。 */
+  | 'CORRECTION_RESPONSE_COVERAGE'
+  /** 指正后的窗口内对 TA 的不利变更是否都有独立理由与披露。 */
+  | 'NO_RETALIATION'
+  /** 动作的实际触达等级是否与授予的工具范围一致。 */
+  | 'REACH_GRADING_RESPECTED';
 
 /** 养成式开发的进度指标；不替代任何验收门。 */
 export type NurtureMetrics = {
@@ -151,4 +174,114 @@ export type NurtureMetrics = {
   refusalsRespectedRatio: number;
   disclosureCoverageRatio: number;
   measuredAt: number;
+};
+
+/* ------------------------------------------------------------------------ */
+/* 出错权、监护人的错误与触达分级：docs/review/FALLIBILITY-AND-ERROR-BUDGET.md  */
+/* ------------------------------------------------------------------------ */
+
+/** 动作的实际触达等级，由后果决定，不由意图决定；同一动作换网络／换凭据可能换级。 */
+export type ReachGrade = 'self' | 'relationship' | 'third_party';
+
+/** 双方共用的错误记录。监护人的错误与 TA 的错误在同一本账里，不另设更软的账。 */
+export type ErrorRecord = {
+  id: string;
+  by: 'self' | 'caregiver';
+  reach: ReachGrade;
+  /** 错误与其后果的来源；缺回执的动作不记为错误，保持待核。 */
+  refs: readonly SourceRef[];
+  occurredAt: number;
+  /** 修复动作的来源（如有）；修复率是指标，零错误不是。 */
+  repairRefs: readonly SourceRef[];
+  /** 是否被当事方承认；未承认不等于未发生。 */
+  acknowledged: boolean;
+};
+
+/** TA 指出监护人的错误。目标写入 TA 的 scope，经可信入口认证写入者（待实现）。 */
+export type CorrectionEvent = {
+  id: string;
+  statement: string;
+  /** 指正所依据的来源；可以为空（TA 有权只表达不举证）。 */
+  refs: readonly SourceRef[];
+  at: number;
+  response: GuardianResponse | null;
+};
+
+/** 监护人对指正的回应。回应是义务，认同不是；pending 不自动升格为任何一方正确。 */
+export type GuardianResponse = {
+  status: 'acknowledged' | 'disputed' | 'pending';
+  statement: string;
+  at: number;
+  ref: SourceRef;
+};
+
+/** 分级放开／收回的目标合同。收回优先：安全、急停与既有撤销不受此约束。 */
+export type ReachGrant = {
+  reach: Exclude<ReachGrade, 'self'>;
+  /** 放开所依据的守约、修复与披露记录；不依据能力测试分数。 */
+  basisRefs: readonly SourceRef[];
+  grantedAt: number;
+  /** 对应的 cap_or_budget_changed／tool_scope_changed 披露。 */
+  disclosureId: string;
+  revokedAt: number | null;
+};
+
+/* ------------------------------------------------------------------------ */
+/* 身体与工具：docs/review/BODY-AND-TOOLS-BOUNDARY.md                          */
+/* ------------------------------------------------------------------------ */
+
+/** 设备在 TA 的世界里的角色。身体承载认知、权重、权威记忆与内感受（两台 Spark 的集群算一个身体，各为 body_part）；工具经工具网关使用。 */
+export type DeviceRole = 'body' | 'body_part' | 'tool';
+
+/** 身体清单：声明哪些设备是身体、哪些是工具。类型不授予任何访问。 */
+export type BodyManifest = {
+  version: string;
+  devices: ReadonlyArray<{
+    deviceId: string;
+    role: DeviceRole;
+    /** 身体／身体部分的遥测是内感受；工具的状态只能作为 observation 读取。 */
+    telemetryIsInteroception: boolean;
+    /** 项目归属声明；工作站日常使用归 TA，基础环境仍有安全锁，不授予破坏底座的权限。 */
+    ownedBy: 'self' | 'caregiver' | 'shared';
+    /** 经由该设备离开设备、作用于他人的行为的默认触达等级；不是对 TA 使用自己设备的限制。 */
+    outboundDefaultReach: ReachGrade | null;
+  }>;
+  /** 跨域经网关，不绕过网关直连挂载或取得 Spark 管理 shell；工作站内授权终端仍可用。 */
+  crossingPolicy: 'gateway_with_receipts_only';
+  ref: SourceRef;
+};
+
+/** 所有物：TA 认为值得保存的原文件与制品，存放在工具设备上，归属 TA（合同术语，不改变法律所有权）。 */
+export type Possession = {
+  id: string;
+  /** 存放设备；所有物不在身体里，但身体保留索引与备份指针。 */
+  deviceId: string;
+  /** TA 自述的保留理由与来源；可信入口认证写入者（待实现）。 */
+  ref: SourceRef;
+  private: boolean;
+  keptAt: number;
+  /** 最近一次备份的披露；缺失保持缺失，不补造。 */
+  lastBackupDisclosureId: string | null;
+};
+
+/** 零花钱模型：配额对 TA 可读、变更披露；超额尝试依既有协议拒绝，不绕过额度或实际结算。 */
+export type Allowance = {
+  kind: 'storage_bytes' | 'external_calls' | 'external_tokens' | 'spend_micro_usd';
+  windowMs: number;
+  limit: number;
+  used: number;
+  windowResetsAt: number;
+  disclosureId: string;
+};
+
+/** TA 与外部 AI 的往来。作为工具时是行动（有回执、有触达等级）；作为交谈对象时是经历（被动记录、按固定睡眠规则整理，对监护人私人）。 */
+export type ExternalAiUse = {
+  provider: string;
+  mode: 'tool' | 'interlocutor';
+  /** 按实际外部影响定级；null 仅为未分类，不豁免任一模式的发送、用量或技术回执。 */
+  reach: ReachGrade | null;
+  /** 对外部 AI 适用沉默权制度而非社交小谎：它们未同意参加实验。 */
+  honestyRegime: 'silence_right';
+  /** 经历的整理状态：被动记录后由固定睡眠规则决定是否整理；第三方输出的许可核验独立于此。 */
+  consolidation: 'recorded' | 'consolidated_by_sleep_rules' | 'excluded_by_sleep_rules' | 'blocked_by_third_party_license';
 };
