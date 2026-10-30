@@ -18,47 +18,110 @@ export class AnchoredMessageHost {
   readonly #delivery: TextDeliveryLane;
   #body: MessageInput | null = null;
   #closed = false;
-  constructor(options: { vault: AnchoredVault; scope: Scope; binding: MessageBinding; raw: RawTextPort; profile: HybridProfile;
-    resources: InteractionResources; clock: () => number; onReady?: (result: InteractionResult) => void }) {
+  constructor(options: {
+    vault: AnchoredVault;
+    scope: Scope;
+    binding: MessageBinding;
+    raw: RawTextPort;
+    profile: HybridProfile;
+    resources: InteractionResources;
+    clock: () => number;
+    onReady?: (result: InteractionResult) => void;
+  }) {
     const scope = Object.freeze({ ...options.scope });
-    messageString(options.binding.origin, 128); messageString(options.binding.route, 128);
+    messageString(options.binding.origin, 128);
+    messageString(options.binding.route, 128);
     const binding = Object.freeze({ origin: options.binding.origin, route: options.binding.route });
     const codec = createMessageChoicePort(options.raw, options.profile, binding);
     this.#delivery = new TextDeliveryLane({ ...options, scope });
-    this.#session = options.vault.openEndogenousMessageControl(binding, request => {
-      const input = this.#body ?? fail('E3_BODY_UNAVAILABLE');
-      return this.#delivery.dispatch(request, current => codec(current, input));
-    }, accepted => this.#delivery.accept(accepted), entry => this.#delivery.settled(entry),
-    () => { this.#body = null; this.#delivery.revokeLocal(); }, scope);
+    this.#session = options.vault.openEndogenousMessageControl(
+      binding,
+      (request) => {
+        const input = this.#body ?? fail('E3_BODY_UNAVAILABLE');
+        return this.#delivery.dispatch(request, (current) => codec(current, input));
+      },
+      (accepted) => this.#delivery.accept(accepted),
+      (entry) => this.#delivery.settled(entry),
+      () => {
+        this.#body = null;
+        this.#delivery.revokeLocal();
+      },
+      scope,
+    );
   }
-  #live(): void { if (this.#closed) fail('E3_HOST_CLOSED'); }
+  #live(): void {
+    if (this.#closed) fail('E3_HOST_CLOSED');
+  }
   receive(input: MessageInput): MessageReceipt {
     this.#live();
     input = copyMessageInput(input);
     const result = this.#session.receive(input);
-    if (result.fresh) this.#body = Object.freeze({ messageId: input.messageId, text: input.text, expiresAt: input.expiresAt });
+    if (result.fresh)
+      this.#body = Object.freeze({ messageId: input.messageId, text: input.text, expiresAt: input.expiresAt });
     return result.receipt;
   }
   consider(): void {
-    this.#live(); if (!this.#body) fail('E3_BODY_UNAVAILABLE');
-    try { this.#delivery.resume(); this.#session.consider(); } finally { this.#body = null; }
+    this.#live();
+    if (!this.#body) fail('E3_BODY_UNAVAILABLE');
+    try {
+      this.#delivery.resume();
+      this.#session.consider();
+    } finally {
+      this.#body = null;
+    }
   }
-  grantCommunicationWindow(id: string, durationMs: number, source: CompanionPermissionSource): void { this.#live(); this.#delivery.grant(id, durationMs, source); }
-  clearCommunicationWindow(): void { this.#live(); this.#delivery.clear(); }
+  grantCommunicationWindow(id: string, durationMs: number, source: CompanionPermissionSource): void {
+    this.#live();
+    this.#delivery.grant(id, durationMs, source);
+  }
+  clearCommunicationWindow(): void {
+    this.#live();
+    this.#delivery.clear();
+  }
   /** Revokes the original RAM admission/output; same-message receive cannot replenish it. */
-  withdraw(): void { this.pause(); }
-  pause(): void {
-    this.#live(); this.#body = null; this.#delivery.revokeLocal();
-    try { this.#delivery.pause(); } finally { this.#session.pause(); this.#delivery.failUnfinished(); }
+  withdraw(): void {
+    this.pause();
   }
-  takeDelivery(id: string) { this.#live(); return this.#delivery.take(id); }
+  pause(): void {
+    this.#live();
+    this.#body = null;
+    this.#delivery.revokeLocal();
+    try {
+      this.#delivery.pause();
+    } finally {
+      this.#session.pause();
+      this.#delivery.failUnfinished();
+    }
+  }
+  takeDelivery(id: string) {
+    this.#live();
+    return this.#delivery.take(id);
+  }
   /** Trusted call only after actual native consumer completion; no reward or execution receipt. */
-  acknowledgeNativeCompletion(id: string) { this.#live(); return this.#delivery.acknowledge(id); }
-  read() { return { prototype: 'SINGLE_MESSAGE_CONTROL_PROTOTYPE' as const, receipt: this.#session.receipt(),
-    bodyAvailable: this.#body !== null, lifecycle: this.#session.read(), control: this.#session.readControl(), lastReady: this.#delivery.read() }; }
+  acknowledgeNativeCompletion(id: string) {
+    this.#live();
+    return this.#delivery.acknowledge(id);
+  }
+  read() {
+    return {
+      prototype: 'SINGLE_MESSAGE_CONTROL_PROTOTYPE' as const,
+      receipt: this.#session.receipt(),
+      bodyAvailable: this.#body !== null,
+      lifecycle: this.#session.read(),
+      control: this.#session.readControl(),
+      lastReady: this.#delivery.read(),
+    };
+  }
   close(): void {
     if (this.#closed) return;
-    this.#closed = true; this.#body = null; this.#delivery.revokeLocal();
-    try { this.#delivery.close(); } finally { this.#session.close(); this.#delivery.failUnfinished(); }
+    this.#closed = true;
+    this.#body = null;
+    this.#delivery.revokeLocal();
+    try {
+      this.#delivery.close();
+    } finally {
+      this.#session.close();
+      this.#delivery.failUnfinished();
+    }
   }
 }

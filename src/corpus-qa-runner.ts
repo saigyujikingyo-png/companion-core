@@ -1,86 +1,741 @@
-import { accountingSum,corpusResponseDisposition,corpusTransportCompletion } from './corpus-response-policy.ts';
+import { accountingSum, corpusResponseDisposition, corpusTransportCompletion } from './corpus-response-policy.ts';
 import type { RegisterNativeCompletion } from './corpus-response-policy.ts';
 import { setTimeout as delay } from 'node:timers/promises';
 import { bounded } from './runtime.ts';
-import { canonical,copyJson,hash,integer,list,shape,stop,Wf1Error } from './wf1-json.ts';
+import { canonical, copyJson, hash, integer, list, shape, stop, Wf1Error } from './wf1-json.ts';
 import { estimateMicroUsd } from './wf1-contract.ts';
 import { MODELS } from './wf1-types.ts';
 import type { ProviderResult } from './wf1-types.ts';
 import type { ArtifactPort } from './wf1-storage.ts';
 import { TeacherProvider } from './wf1-provider.ts';
-import { auditAttemptPending,auditBinding,auditBody,auditProvider,auditReservation,FACTORY_BASELINE,FACTORY_BASELINE_DIGEST,parseAudit,QA,QA_TARGET_BASELINE,QA_TARGET_BASELINE_DIGEST,validateAuditRubric,validateAuditSelection,validateAuditSpec,validateAuditVerdict,validateAuditRequest,scopedQa } from './corpus-qa-types.ts';
-import type { AuditSpec,AuditAttempt,AuditEvent,AuditItem,AuditRubric,AuditSelection,AuditState,AuditVerdict } from './corpus-qa-types.ts';
+import {
+  auditAttemptPending,
+  auditBinding,
+  auditBody,
+  auditProvider,
+  auditReservation,
+  FACTORY_BASELINE,
+  FACTORY_BASELINE_DIGEST,
+  parseAudit,
+  QA,
+  QA_TARGET_BASELINE,
+  QA_TARGET_BASELINE_DIGEST,
+  validateAuditRubric,
+  validateAuditSelection,
+  validateAuditSpec,
+  validateAuditVerdict,
+  validateAuditRequest,
+  scopedQa,
+} from './corpus-qa-types.ts';
+import type {
+  AuditSpec,
+  AuditAttempt,
+  AuditEvent,
+  AuditItem,
+  AuditRubric,
+  AuditSelection,
+  AuditState,
+  AuditVerdict,
+} from './corpus-qa-types.ts';
 import type { QaSelectedReader } from './corpus-qa-source.ts';
 import type { QualityAuditStore } from './corpus-qa-store.ts';
-import type { CorpusExecution,CorpusExecutionLease } from './corpus-execution.ts';
-import { assembleScopedIndexes,buildScopedIndex } from './corpus-qa-index.ts';
-export type QaTransport=(request:{version?:AuditSpec['version'];operation:'rubric'|'review';index:number;body:string;output:ArtifactPort;registerNativeCompletion?:RegisterNativeCompletion;signal:AbortSignal;authorizeSend:<T>(send:()=>T)=>T})=>Promise<ProviderResult>;
-export const createQaTransport=(credentials:{deepseek:string|null;together:string|null},dependencies:{fetch?:typeof fetch;now?:()=>number;wallNow?:()=>number}={}):QaTransport=>r=>{const provider=new TeacherProvider(credentials,dependencies);if(r.version==='CorpusQualityAudit/0.2')r.registerNativeCompletion?.(()=>provider.nativeOperationSettled);return provider.submit(auditProvider(r.operation),r.body,r.output,r.signal,r.authorizeSend,{operation:r.operation,binding:auditBinding(r.operation,r.index,r.version)});};
-export type QaRunPorts={store:QualityAuditStore;source:QaSelectedReader;selection:AuditSelection;objective:string;transport:QaTransport;signal?:AbortSignal;execution?:CorpusExecution};
-const baseline={factoryBaseline:FACTORY_BASELINE,baselineDigest:FACTORY_BASELINE_DIGEST,auditTargetBaseline:QA_TARGET_BASELINE,auditTargetBaselineDigest:QA_TARGET_BASELINE_DIGEST};
-const code=(error:unknown)=>error instanceof Wf1Error&&error.code.startsWith('CQA_')?error.code:'CQA_INTEGRITY';
-const object=(store:QualityAuditStore,ref:NonNullable<AuditState['rubricRef']>)=>parseAudit(store.read(ref).toString('utf8'));
-function input(source:QaSelectedReader,caseId:string){source.check();const pair=source.read(caseId);return {caseId,inputDigest:hash(canonical({prompt:pair.prompt,response:pair.response})),prompt:pair.prompt,response:pair.response};}
-function native(store:QualityAuditStore,a:AuditAttempt,finalBytes?:Buffer){if(a.result?.outcome!=='COMPLETED'||!a.result.finalRef)stop('CQA_OUTPUT');return parseAudit((finalBytes??store.port(a.bucket).read(a.result.finalRef)).toString('utf8'));}
-function resultFence(a:AuditAttempt,store:QualityAuditStore):string|null{if(store.spec.version==='CorpusQualityAudit/0.2'){const d=corpusResponseDisposition(a.result,auditProvider(a.operation),store.port(a.bucket));if(d.kind==='FENCE')return 'CQA_'+d.code;if(d.kind==='RATE_LIMIT')return a.result!.retryAfterStatus==='INVALID'||(a.result!.retryAfterMs??0)>QA.maxCooldownMs?'CQA_RATE_LIMIT_WAIT':null;return null;}const r=a.result;if(!r||r.outcome==='SUBMIT_UNKNOWN')return 'CQA_SUBMIT_UNKNOWN';if(r.httpStatus===429)return r.retryAfterStatus==='INVALID'||(r.retryAfterMs??0)>QA.maxCooldownMs?'CQA_RATE_LIMIT_WAIT':null;if(!r.usage)return 'CQA_USAGE_UNKNOWN';if(r.usage.input>QA.inputReserve||r.usage.completion>QA.completionReserve)return 'CQA_USAGE_BOUND';if(r.requestedModel!==MODELS[auditProvider(a.operation)]||r.returnedModel!==MODELS[auditProvider(a.operation)]||r.responseFailureCode==='ARTIFACT_WRITE_FAILED')return 'CQA_INTEGRITY';return null;}
-function selected(values:unknown[],caseId:string){const matches=values.filter(v=>v&&typeof v==='object'&&!Array.isArray(v)&&(v as {caseId?:unknown}).caseId===caseId);if(matches.length!==1)stop('CQA_VERDICT');return matches[0];}
-export function qaSummary(state:AuditState,selection:AuditSelection,fence:string|null=null){
-  const v2=state.spec.version==='CorpusQualityAudit/0.2',sum=(values:(number|null)[])=>v2?accountingSum(values):values.some(v=>v===null)?null:values.reduce<number>((n,v)=>n+v!,0);
-  const count=(items:AuditItem[])=>Object.fromEntries(['PENDING','PASS','HOLD','REJECT','UNCERTAIN'].map(status=>[status,items.filter(i=>i.status===status).length]));
-  const partitions=[...new Set(selection.entries.map(e=>e.unit.poolId))].sort().flatMap(poolId=>['train','dev'].map(split=>{const ids=new Set(selection.entries.filter(e=>e.unit.poolId===poolId&&e.unit.split===split).map(e=>e.caseId));return {poolId,split,counts:count(state.items.filter(i=>ids.has(i.caseId)))};}));
-  const actualCosts=state.attempts.map(a=>{const price=state.spec.prices[auditProvider(a.operation)],usage=a.result?.usage;return price&&usage?estimateMicroUsd(usage.input,usage.completion,price):null;});
-  const failures:Record<string,number>={};for(const c of [...state.items.map(i=>i.code),state.code,fence])if(c)failures[c]=(failures[c]??0)+1;
-  return {version:v2?'CorpusQualityAuditSummary/0.2':'CorpusQualityAuditSummary/0.1',status:fence?'FENCED':state.status,counts:count(state.items),partitions,calls:{total:state.attempts.length,coordinator:state.attempts.filter(a=>a.operation==='rubric').length,review:state.attempts.filter(a=>a.operation==='review').length,submitUnknown:state.attempts.filter(a=>!a.result||a.result.outcome==='SUBMIT_UNKNOWN').length,known429:state.attempts.filter(a=>a.result?.httpStatus===429).length,usageUnknown:state.attempts.filter(a=>!a.result?.usage).length,inputTokens:v2?accountingSum(state.attempts.map(a=>a.result?.usage?.input??null)):state.attempts.reduce((n,a)=>n+(a.result?.usage?.input??0),0),completionTokens:v2?accountingSum(state.attempts.map(a=>a.result?.usage?.completion??null)):state.attempts.reduce((n,a)=>n+(a.result?.usage?.completion??0),0)},timing:{wallMs:state.wallMs,serviceMs:v2?accountingSum(state.attempts.map(a=>a.serviceMs)):state.attempts.reduce((n,a)=>n+(a.serviceMs??0),0)},cost:{reservedWorstCaseMicroUsd:sum(state.attempts.map(a=>a.estimatedMicroUsd)),estimatedUsageMicroUsd:sum(actualCosts),knownUsageEstimateMicroUsd:v2?accountingSum(actualCosts.map(c=>c??0)):actualCosts.reduce<number>((n,c)=>n+(c??0),0),invoice:'UNKNOWN',policy:QA.moneyPolicy},failureCodes:failures,manifestCommitted:!!state.manifestRef,indexCommitted:!!state.indexRef,reviewTopology:'DIFFERENT_REQUESTED_MODELS',independence:'SAME_MODEL_OR_ROUTING_UNKNOWN',evidenceClass:'MODEL_OPINION',factualTruth:'UNKNOWN',falseAcceptanceRate:'UNKNOWN',trainingReady:false,trainingJobPolicy:'NOT_AUTHORIZED'};
-}
-export function verifyQualityAudit(store:QualityAuditStore,source:QaSelectedReader){
-  const state=store.snapshot();if(!state)stop('CQA_STATE');const selection=store.selection();if(source.selectionDigest!==state.spec.selectionDigest)stop('CQA_BINDING');source.check();const rubric=state.rubricRef?validateAuditRubric(object(store,state.rubricRef)):null,objective=store.read(state.objectiveRef).toString('utf8');if(hash(objective)!==state.spec.objectiveDigest)stop('CQA_OBJECTIVE');
-  for(const a of state.attempts){if(a.estimatedMicroUsd!==auditReservation(state.spec,a.operation))stop('CQA_ATTEMPT');const body=store.port(a.bucket).read(a.requestRef).toString('utf8');if(hash(body)!==a.bodyHash)stop('CQA_ATTEMPT');validateAuditRequest(auditProvider(a.operation),a.operation,body,auditBinding(a.operation,a.index,state.spec.version));const data=a.operation==='rubric'?{...baseline,currentApprovedObjective:objective}:{...baseline,rubric,rubricDigest:hash(canonical(rubric)),items:a.caseIds.map(id=>input(source,id))};if(body!==auditBody(a.operation,a.index,data,state.spec.version))stop('CQA_ATTEMPT');if(a.result)for(const ref of [a.result.rawRef,a.result.reasoningRef,a.result.finalRef])if(ref)store.port(a.bucket).read(ref);}
-  if(rubric){const attempt=state.attempts.find(a=>a.operation==='rubric');if(!attempt||resultFence(attempt,store)||state.spec.version==='CorpusQualityAudit/0.2'&&corpusResponseDisposition(attempt.result,auditProvider(attempt.operation),store.port(attempt.bucket)).kind!=='CONTENT'||canonical(validateAuditRubric(native(store,attempt)))!==canonical(rubric))stop('CQA_RUBRIC');}
-  for(const item of state.items)if(item.verdictRef){if(!rubric)stop('CQA_RUBRIC');const attempt=state.attempts.find(a=>a.id===item.attemptId);if(!attempt||!attempt.caseIds.includes(item.caseId)||resultFence(attempt,store)||state.spec.version==='CorpusQualityAudit/0.2'&&corpusResponseDisposition(attempt.result,auditProvider(attempt.operation),store.port(attempt.bucket)).kind!=='CONTENT')stop('CQA_VERDICT');const result=shape(native(store,attempt),['version','items']);if(result.version!=='CorpusQualityVerdicts/0.1')stop('CQA_VERDICT');const digest=input(source,item.caseId).inputDigest,verdict=validateAuditVerdict(selected(list(result.items,attempt.caseIds.length),item.caseId),item.caseId,digest,rubric),record=object(store,item.verdictRef);if(canonical(record)!==canonical({version:'CorpusQualityVerdictRecord/0.1',verdict,evidenceClass:'MODEL_OPINION',attemptId:attempt.id,rubricDigest:hash(canonical(rubric)),independence:'SAME_MODEL_OR_ROUTING_UNKNOWN',trainingReady:false})||item.status!==verdict.disposition)stop('CQA_VERDICT');}else if(item.status==='PASS')stop('CQA_VERDICT');
-  if(state.indexRef||state.manifestRef){if(state.status==='ACTIVE'||state.attempts.some(a=>auditAttemptPending(state.spec,a)))stop('CQA_ACTIVE');const index=buildScopedIndex(selection,source,state);if(!state.indexRef||canonical(readQualityIndex(store,state.indexRef))!==canonical(index))stop('CQA_INDEX_CONFLICT');if(state.manifestRef&&canonical(object(store,state.manifestRef))!==canonical(selectionManifest(state,selection,index)))stop('CQA_MANIFEST_CONFLICT');}return {state,selection};
-}
-const activeRuns=new WeakSet<object>();
-export async function runQualityAudit(specInput:unknown,ports:QaRunPorts){if(ports.store.spec.version!=='CorpusQualityAudit/0.2')return runQualityAuditOwned(specInput,ports);if(activeRuns.has(ports.store))stop('CQA_OWNER');activeRuns.add(ports.store);try{return await runQualityAuditOwned(specInput,ports);}finally{activeRuns.delete(ports.store);}}
-async function runQualityAuditOwned(specInput:unknown,ports:QaRunPorts){
-  const spec=validateAuditSpec(specInput),{store,source}=ports,selection=validateAuditSelection(ports.selection);if(canonical(spec)!==canonical(store.spec)||hash(canonical(selection))!==spec.selectionDigest||source.selectionDigest!==spec.selectionDigest||hash(ports.objective)!==spec.objectiveDigest)stop('CQA_BINDING');source.check();if(!store.snapshot())store.initialize(selection,ports.objective);let shadow=verifyQualityAudit(store,source).state;if(store.mode==='inspect'||shadow.status!=='ACTIVE')return qaSummary(shadow,selection);
-  if(ports.execution&&spec.version!=='CorpusQualityAudit/0.2')stop('CQA_EXECUTION_POLICY');
-  let fence:string|null=null;const elapsed=()=>Math.max(shadow.wallMs,Date.now()-spec.createdAt),commit=(kind:AuditEvent['kind'],data:unknown)=>{source.check();if(ports.execution)ports.execution.authorizeCommit(()=>store.apply(kind,data));else store.apply(kind,data);shadow=store.snapshot()!;},finish=(status:'COMPLETED'|'FENCED',c:string|null)=>commit('FINISH',{status,code:c,wallMs:elapsed()}),halt=(c:string)=>{fence??=c;try{finish('FENCED',fence);}catch{}},guard=()=>{if(fence)stop(fence);ports.execution?.check();source.check();store.check();if(ports.signal?.aborted)stop('CQA_ABORTED');if(Date.now()>=spec.expiresAt)stop('CQA_DEADLINE');};
-  const hold=(caseId:string,c:string,attemptId:string|null)=>{const item=shadow.items.find(i=>i.caseId===caseId)!;if(item.status==='PENDING')commit('VERDICT',{item:{...item,status:'HOLD',code:c,attemptId}});};
-  const processResult=(a:AuditAttempt)=>{
-    const disposition=spec.version==='CorpusQualityAudit/0.2'?corpusResponseDisposition(a.result,auditProvider(a.operation),store.port(a.bucket)):null,localCode=disposition?.kind==='ISOLATE'?'CQA_'+disposition.code:disposition?.kind==='RATE_LIMIT'?'CQA_RATE_LIMIT':null;
-    if(disposition?.kind==='FENCE')stop('CQA_'+disposition.code);
-    const finalBytes=disposition?.kind==='CONTENT'?store.port(a.bucket).read(a.result!.finalRef!):undefined;
-    if(a.operation==='rubric'&&localCode){for(const item of shadow.items)hold(item.caseId,localCode,a.id);return;}
-    if(a.operation==='rubric'){if(shadow.rubricRef)return;let rubric:AuditRubric;try{rubric=validateAuditRubric(native(store,a,finalBytes));}catch(error){if(spec.version==='CorpusQualityAudit/0.1')throw error;for(const item of shadow.items)hold(item.caseId,'CQA_RUBRIC_FORMAT',a.id);return;}const ref=store.put(a.bucket,'corpus-qa-rubric',canonical(rubric));commit('RUBRIC',{ref});return;}
-    if(!shadow.rubricRef)stop('CQA_RUBRIC');const rubric=validateAuditRubric(object(store,shadow.rubricRef));let values:unknown[]=[];try{if(localCode)stop(localCode);const result=shape(native(store,a,finalBytes),['version','items']);if(result.version!=='CorpusQualityVerdicts/0.1')stop('CQA_VERDICT');values=list(result.items,a.caseIds.length);}catch{}
-    for(const caseId of a.caseIds){const item=shadow.items.find(i=>i.caseId===caseId)!;if(item.status!=='PENDING')continue;if(fence){hold(caseId,'CQA_LATE_AFTER_FENCE',a.id);continue;}const digest=spec.version==='CorpusQualityAudit/0.2'?input(source,caseId).inputDigest:undefined;let verdict:AuditVerdict;try{verdict=validateAuditVerdict(selected(values,caseId),caseId,digest??input(source,caseId).inputDigest,rubric);}catch{hold(caseId,localCode??(a.result?.httpStatus===429?'CQA_RATE_LIMIT':'CQA_VERDICT_FORMAT'),a.id);continue;}guard();const record={version:'CorpusQualityVerdictRecord/0.1',verdict,evidenceClass:'MODEL_OPINION',attemptId:a.id,rubricDigest:hash(canonical(rubric)),independence:'SAME_MODEL_OR_ROUTING_UNKNOWN',trainingReady:false},verdictRef=store.put(a.bucket,'corpus-qa-verdict',canonical(record));commit('VERDICT',{item:{...item,status:verdict.disposition,attemptId:a.id,verdictRef}});}
+import type { CorpusExecution, CorpusExecutionLease } from './corpus-execution.ts';
+import { assembleScopedIndexes, buildScopedIndex } from './corpus-qa-index.ts';
+export type QaTransport = (request: {
+  version?: AuditSpec['version'];
+  operation: 'rubric' | 'review';
+  index: number;
+  body: string;
+  output: ArtifactPort;
+  registerNativeCompletion?: RegisterNativeCompletion;
+  signal: AbortSignal;
+  authorizeSend: <T>(send: () => T) => T;
+}) => Promise<ProviderResult>;
+export const createQaTransport =
+  (
+    credentials: { deepseek: string | null; together: string | null },
+    dependencies: { fetch?: typeof fetch; now?: () => number; wallNow?: () => number } = {},
+  ): QaTransport =>
+  (r) => {
+    const provider = new TeacherProvider(credentials, dependencies);
+    if (r.version === 'CorpusQualityAudit/0.2') r.registerNativeCompletion?.(() => provider.nativeOperationSettled);
+    return provider.submit(auditProvider(r.operation), r.body, r.output, r.signal, r.authorizeSend, {
+      operation: r.operation,
+      binding: auditBinding(r.operation, r.index, r.version),
+    });
   };
-  if(spec.version==='CorpusQualityAudit/0.2'&&store.mode==='resume')try{for(const a of [...shadow.attempts])if(auditAttemptPending(spec,a))commit('RECOVER_UNKNOWN',{id:a.id,decidedAtMs:elapsed()});}catch(error){halt(code(error));}
-  const oldFence=shadow.attempts.some(a=>auditAttemptPending(spec,a))?'CQA_SUBMIT_UNKNOWN':shadow.attempts.map(a=>resultFence(a,store)).find(c=>c!==null);if(oldFence){halt(oldFence);return qaSummary(shadow,selection,fence);}try{for(const a of [...shadow.attempts])processResult(a);}catch(error){halt(code(error));}
-  const submit=async(operation:'rubric'|'review',index:number,id:string,caseIds:string[],data:unknown)=>{let lease:CorpusExecutionLease|undefined,started=false,sent=false;const completion=spec.version==='CorpusQualityAudit/0.2'?corpusTransportCompletion():null;
-    try{guard();const body=auditBody(operation,index,data,spec.version);if(ports.execution){const route=operation==='rubric'?spec.coordinator:spec.reviewer;lease=await ports.execution.acquire({jobId:spec.auditId,attemptId:id,provider:auditProvider(operation),accountRef:route.accountRef,requestBytes:Buffer.byteLength(body),responseBytes:QA.responseBytes,expiresAt:spec.expiresAt},ports.signal);guard();lease.check();}
-    const bucket='attempt-'+shadow.attempts.length,requestRef=store.port(bucket).put('corpus-qa-request',body),attempt:AuditAttempt={id,operation,index,caseIds,bucket,requestRef,bodyHash:hash(body),consumedAtMs:elapsed(),settledAtMs:null,serviceMs:null,result:null,estimatedMicroUsd:auditReservation(spec,operation)};commit('CONSUME',attempt);lease?.consumed();const start=performance.now();let result:ProviderResult|null=null;const signal=AbortSignal.timeout(Math.max(1,Math.min(QA.requestMs,spec.expiresAt-Date.now())));
-    try{result=await bounded(ports.signal?AbortSignal.any([ports.signal,signal]):signal,QA.requestMs,inner=>{started=true;const request:Parameters<QaTransport>[0]={version:spec.version,operation,index,body,output:store.port(bucket),signal:inner,authorizeSend:send=>{guard();inner.throwIfAborted();if(sent)stop('CQA_ONCE');sent=true;return ports.execution?ports.execution.authorizeSend(()=>store.authorizeSend(send)):store.authorizeSend(send);}};return completion?completion.observe(registerNativeCompletion=>ports.transport({...request,registerNativeCompletion})):ports.transport(request);});copyJson(result);if(!sent)stop('CQA_ONCE');if(spec.version!=='CorpusQualityAudit/0.2'&&result.usage){integer(result.usage.input);integer(result.usage.completion);if(result.usage.reasoning!==null)integer(result.usage.reasoning,0,result.usage.completion);}}catch(error){if(spec.version==='CorpusQualityAudit/0.2'&&error instanceof Wf1Error)throw error;result=null;}
-    lease?.settle({localReleased:completion?.released(sent)??true,remoteUnknown:!result||result.outcome==='SUBMIT_UNKNOWN',httpStatus:result?.httpStatus??null,retryAfterMs:result?.retryAfterMs??null,retryAfterInvalid:result?.retryAfterStatus==='INVALID'});commit('SETTLE',{id,result,serviceMs:Math.ceil(performance.now()-start),settledAtMs:elapsed()});const settled=shadow.attempts.find(a=>a.id===id)!,reason=resultFence(settled,store);if(reason)halt(reason);if(completion&&!completion.released(sent))halt('CQA_TRANSPORT_IN_FLIGHT');if(!fence)processResult(settled);else for(const caseId of caseIds)hold(caseId,'CQA_LATE_AFTER_FENCE',id);
-  }catch(error){try{lease?.abandon(!started||completion?.released(sent)===true);}catch{}halt(code(error));}};
-  if(!fence&&!shadow.rubricRef&&!shadow.attempts.some(a=>a.operation==='rubric'))await submit('rubric',0,'rubric:0',[],{...baseline,currentApprovedObjective:ports.objective});
-  const running=new Map<string,Promise<void>>(),waiting=new Map<string,{caseIds:string[];index:number}>();while(true){
-    if(!fence)try{guard();}catch(error){halt(code(error));}const cooldown=Math.max(0,...shadow.attempts.filter(a=>a.operation==='review'&&a.result?.httpStatus===429).map(a=>(a.settledAtMs??a.consumedAtMs)+(a.result?.retryAfterMs??1000)))-elapsed();
-    if(!fence&&cooldown<=0&&(spec.version==='CorpusQualityAudit/0.1'||shadow.rubricRef))try{const rubric=validateAuditRubric(object(store,shadow.rubricRef!));while(running.size<(spec.version==='CorpusQualityAudit/0.2'?spec.execution!.concurrency:QA.concurrency)){const ready=shadow.items.filter(i=>i.status==='PENDING'&&![...waiting.values()].some(a=>a.caseIds.includes(i.caseId))&&!shadow.attempts.some(a=>a.caseIds.includes(i.caseId)));if(!ready.length)break;const batch=ready.slice(0,QA.reviewRows),index=Math.max(-1,...shadow.attempts.filter(a=>a.operation==='review').map(a=>a.index),...[...waiting.values()].map(a=>a.index))+1;let data:unknown;
-      while(batch.length){data={...baseline,rubric,rubricDigest:hash(canonical(rubric)),items:batch.map(i=>input(source,i.caseId))};try{auditBody('review',index,data,spec.version);break;}catch(error){if(!(error instanceof Wf1Error)||error.code!=='CQA_LENGTH')throw error;batch.pop();}}
-      if(!batch.length){hold(ready[0]!.caseId,'CQA_LENGTH',null);continue;}const caseIds=batch.map(i=>i.caseId),id='review:'+hash(canonical(caseIds));waiting.set(id,{caseIds,index});const promise=submit('review',index,id,caseIds,data).finally(()=>{running.delete(id);waiting.delete(id);});running.set(id,promise);
-    }}catch(error){halt(code(error));}
-    if(running.size){await Promise.race(running.values());continue;}if(!fence&&cooldown>0){await delay(Math.min(1000,cooldown));continue;}break;
+export type QaRunPorts = {
+  store: QualityAuditStore;
+  source: QaSelectedReader;
+  selection: AuditSelection;
+  objective: string;
+  transport: QaTransport;
+  signal?: AbortSignal;
+  execution?: CorpusExecution;
+};
+const baseline = {
+  factoryBaseline: FACTORY_BASELINE,
+  baselineDigest: FACTORY_BASELINE_DIGEST,
+  auditTargetBaseline: QA_TARGET_BASELINE,
+  auditTargetBaselineDigest: QA_TARGET_BASELINE_DIGEST,
+};
+const code = (error: unknown) =>
+  error instanceof Wf1Error && error.code.startsWith('CQA_') ? error.code : 'CQA_INTEGRITY';
+const object = (store: QualityAuditStore, ref: NonNullable<AuditState['rubricRef']>) =>
+  parseAudit(store.read(ref).toString('utf8'));
+function input(source: QaSelectedReader, caseId: string) {
+  source.check();
+  const pair = source.read(caseId);
+  return {
+    caseId,
+    inputDigest: hash(canonical({ prompt: pair.prompt, response: pair.response })),
+    prompt: pair.prompt,
+    response: pair.response,
+  };
+}
+function native(store: QualityAuditStore, a: AuditAttempt, finalBytes?: Buffer) {
+  if (a.result?.outcome !== 'COMPLETED' || !a.result.finalRef) stop('CQA_OUTPUT');
+  return parseAudit((finalBytes ?? store.port(a.bucket).read(a.result.finalRef)).toString('utf8'));
+}
+function resultFence(a: AuditAttempt, store: QualityAuditStore): string | null {
+  if (store.spec.version === 'CorpusQualityAudit/0.2') {
+    const d = corpusResponseDisposition(a.result, auditProvider(a.operation), store.port(a.bucket));
+    if (d.kind === 'FENCE') return 'CQA_' + d.code;
+    if (d.kind === 'RATE_LIMIT')
+      return a.result!.retryAfterStatus === 'INVALID' || (a.result!.retryAfterMs ?? 0) > QA.maxCooldownMs
+        ? 'CQA_RATE_LIMIT_WAIT'
+        : null;
+    return null;
   }
-  if(!fence)try{finish('COMPLETED',null);}catch(error){halt(code(error));}else try{finish('FENCED',fence);}catch{}try{return qaSummary(verifyQualityAudit(store,source).state,selection,fence);}catch(error){return qaSummary(shadow,selection,fence??code(error));}
+  const r = a.result;
+  if (!r || r.outcome === 'SUBMIT_UNKNOWN') return 'CQA_SUBMIT_UNKNOWN';
+  if (r.httpStatus === 429)
+    return r.retryAfterStatus === 'INVALID' || (r.retryAfterMs ?? 0) > QA.maxCooldownMs ? 'CQA_RATE_LIMIT_WAIT' : null;
+  if (!r.usage) return 'CQA_USAGE_UNKNOWN';
+  if (r.usage.input > QA.inputReserve || r.usage.completion > QA.completionReserve) return 'CQA_USAGE_BOUND';
+  if (
+    r.requestedModel !== MODELS[auditProvider(a.operation)] ||
+    r.returnedModel !== MODELS[auditProvider(a.operation)] ||
+    r.responseFailureCode === 'ARTIFACT_WRITE_FAILED'
+  )
+    return 'CQA_INTEGRITY';
+  return null;
+}
+function selected(values: unknown[], caseId: string) {
+  const matches = values.filter(
+    (v) => v && typeof v === 'object' && !Array.isArray(v) && (v as { caseId?: unknown }).caseId === caseId,
+  );
+  if (matches.length !== 1) stop('CQA_VERDICT');
+  return matches[0];
+}
+export function qaSummary(state: AuditState, selection: AuditSelection, fence: string | null = null) {
+  const v2 = state.spec.version === 'CorpusQualityAudit/0.2',
+    sum = (values: (number | null)[]) =>
+      v2 ? accountingSum(values) : values.some((v) => v === null) ? null : values.reduce<number>((n, v) => n + v!, 0);
+  const count = (items: AuditItem[]) =>
+    Object.fromEntries(
+      ['PENDING', 'PASS', 'HOLD', 'REJECT', 'UNCERTAIN'].map((status) => [
+        status,
+        items.filter((i) => i.status === status).length,
+      ]),
+    );
+  const partitions = [...new Set(selection.entries.map((e) => e.unit.poolId))].sort().flatMap((poolId) =>
+    ['train', 'dev'].map((split) => {
+      const ids = new Set(
+        selection.entries.filter((e) => e.unit.poolId === poolId && e.unit.split === split).map((e) => e.caseId),
+      );
+      return { poolId, split, counts: count(state.items.filter((i) => ids.has(i.caseId))) };
+    }),
+  );
+  const actualCosts = state.attempts.map((a) => {
+    const price = state.spec.prices[auditProvider(a.operation)],
+      usage = a.result?.usage;
+    return price && usage ? estimateMicroUsd(usage.input, usage.completion, price) : null;
+  });
+  const failures: Record<string, number> = {};
+  for (const c of [...state.items.map((i) => i.code), state.code, fence]) if (c) failures[c] = (failures[c] ?? 0) + 1;
+  return {
+    version: v2 ? 'CorpusQualityAuditSummary/0.2' : 'CorpusQualityAuditSummary/0.1',
+    status: fence ? 'FENCED' : state.status,
+    counts: count(state.items),
+    partitions,
+    calls: {
+      total: state.attempts.length,
+      coordinator: state.attempts.filter((a) => a.operation === 'rubric').length,
+      review: state.attempts.filter((a) => a.operation === 'review').length,
+      submitUnknown: state.attempts.filter((a) => !a.result || a.result.outcome === 'SUBMIT_UNKNOWN').length,
+      known429: state.attempts.filter((a) => a.result?.httpStatus === 429).length,
+      usageUnknown: state.attempts.filter((a) => !a.result?.usage).length,
+      inputTokens: v2
+        ? accountingSum(state.attempts.map((a) => a.result?.usage?.input ?? null))
+        : state.attempts.reduce((n, a) => n + (a.result?.usage?.input ?? 0), 0),
+      completionTokens: v2
+        ? accountingSum(state.attempts.map((a) => a.result?.usage?.completion ?? null))
+        : state.attempts.reduce((n, a) => n + (a.result?.usage?.completion ?? 0), 0),
+    },
+    timing: {
+      wallMs: state.wallMs,
+      serviceMs: v2
+        ? accountingSum(state.attempts.map((a) => a.serviceMs))
+        : state.attempts.reduce((n, a) => n + (a.serviceMs ?? 0), 0),
+    },
+    cost: {
+      reservedWorstCaseMicroUsd: sum(state.attempts.map((a) => a.estimatedMicroUsd)),
+      estimatedUsageMicroUsd: sum(actualCosts),
+      knownUsageEstimateMicroUsd: v2
+        ? accountingSum(actualCosts.map((c) => c ?? 0))
+        : actualCosts.reduce<number>((n, c) => n + (c ?? 0), 0),
+      invoice: 'UNKNOWN',
+      policy: QA.moneyPolicy,
+    },
+    failureCodes: failures,
+    manifestCommitted: !!state.manifestRef,
+    indexCommitted: !!state.indexRef,
+    reviewTopology: 'DIFFERENT_REQUESTED_MODELS',
+    independence: 'SAME_MODEL_OR_ROUTING_UNKNOWN',
+    evidenceClass: 'MODEL_OPINION',
+    factualTruth: 'UNKNOWN',
+    falseAcceptanceRate: 'UNKNOWN',
+    trainingReady: false,
+    trainingJobPolicy: 'NOT_AUTHORIZED',
+  };
+}
+export function verifyQualityAudit(store: QualityAuditStore, source: QaSelectedReader) {
+  const state = store.snapshot();
+  if (!state) stop('CQA_STATE');
+  const selection = store.selection();
+  if (source.selectionDigest !== state.spec.selectionDigest) stop('CQA_BINDING');
+  source.check();
+  const rubric = state.rubricRef ? validateAuditRubric(object(store, state.rubricRef)) : null,
+    objective = store.read(state.objectiveRef).toString('utf8');
+  if (hash(objective) !== state.spec.objectiveDigest) stop('CQA_OBJECTIVE');
+  for (const a of state.attempts) {
+    if (a.estimatedMicroUsd !== auditReservation(state.spec, a.operation)) stop('CQA_ATTEMPT');
+    const body = store.port(a.bucket).read(a.requestRef).toString('utf8');
+    if (hash(body) !== a.bodyHash) stop('CQA_ATTEMPT');
+    validateAuditRequest(
+      auditProvider(a.operation),
+      a.operation,
+      body,
+      auditBinding(a.operation, a.index, state.spec.version),
+    );
+    const data =
+      a.operation === 'rubric'
+        ? { ...baseline, currentApprovedObjective: objective }
+        : {
+            ...baseline,
+            rubric,
+            rubricDigest: hash(canonical(rubric)),
+            items: a.caseIds.map((id) => input(source, id)),
+          };
+    if (body !== auditBody(a.operation, a.index, data, state.spec.version)) stop('CQA_ATTEMPT');
+    if (a.result)
+      for (const ref of [a.result.rawRef, a.result.reasoningRef, a.result.finalRef])
+        if (ref) store.port(a.bucket).read(ref);
+  }
+  if (rubric) {
+    const attempt = state.attempts.find((a) => a.operation === 'rubric');
+    if (
+      !attempt ||
+      resultFence(attempt, store) ||
+      (state.spec.version === 'CorpusQualityAudit/0.2' &&
+        corpusResponseDisposition(attempt.result, auditProvider(attempt.operation), store.port(attempt.bucket)).kind !==
+          'CONTENT') ||
+      canonical(validateAuditRubric(native(store, attempt))) !== canonical(rubric)
+    )
+      stop('CQA_RUBRIC');
+  }
+  for (const item of state.items)
+    if (item.verdictRef) {
+      if (!rubric) stop('CQA_RUBRIC');
+      const attempt = state.attempts.find((a) => a.id === item.attemptId);
+      if (
+        !attempt ||
+        !attempt.caseIds.includes(item.caseId) ||
+        resultFence(attempt, store) ||
+        (state.spec.version === 'CorpusQualityAudit/0.2' &&
+          corpusResponseDisposition(attempt.result, auditProvider(attempt.operation), store.port(attempt.bucket))
+            .kind !== 'CONTENT')
+      )
+        stop('CQA_VERDICT');
+      const result = shape(native(store, attempt), ['version', 'items']);
+      if (result.version !== 'CorpusQualityVerdicts/0.1') stop('CQA_VERDICT');
+      const digest = input(source, item.caseId).inputDigest,
+        verdict = validateAuditVerdict(
+          selected(list(result.items, attempt.caseIds.length), item.caseId),
+          item.caseId,
+          digest,
+          rubric,
+        ),
+        record = object(store, item.verdictRef);
+      if (
+        canonical(record) !==
+          canonical({
+            version: 'CorpusQualityVerdictRecord/0.1',
+            verdict,
+            evidenceClass: 'MODEL_OPINION',
+            attemptId: attempt.id,
+            rubricDigest: hash(canonical(rubric)),
+            independence: 'SAME_MODEL_OR_ROUTING_UNKNOWN',
+            trainingReady: false,
+          }) ||
+        item.status !== verdict.disposition
+      )
+        stop('CQA_VERDICT');
+    } else if (item.status === 'PASS') stop('CQA_VERDICT');
+  if (state.indexRef || state.manifestRef) {
+    if (state.status === 'ACTIVE' || state.attempts.some((a) => auditAttemptPending(state.spec, a))) stop('CQA_ACTIVE');
+    const index = buildScopedIndex(selection, source, state);
+    if (!state.indexRef || canonical(readQualityIndex(store, state.indexRef)) !== canonical(index))
+      stop('CQA_INDEX_CONFLICT');
+    if (
+      state.manifestRef &&
+      canonical(object(store, state.manifestRef)) !== canonical(selectionManifest(state, selection, index))
+    )
+      stop('CQA_MANIFEST_CONFLICT');
+  }
+  return { state, selection };
+}
+const activeRuns = new WeakSet<object>();
+export async function runQualityAudit(specInput: unknown, ports: QaRunPorts) {
+  if (ports.store.spec.version !== 'CorpusQualityAudit/0.2') return runQualityAuditOwned(specInput, ports);
+  if (activeRuns.has(ports.store)) stop('CQA_OWNER');
+  activeRuns.add(ports.store);
+  try {
+    return await runQualityAuditOwned(specInput, ports);
+  } finally {
+    activeRuns.delete(ports.store);
+  }
+}
+async function runQualityAuditOwned(specInput: unknown, ports: QaRunPorts) {
+  const spec = validateAuditSpec(specInput),
+    { store, source } = ports,
+    selection = validateAuditSelection(ports.selection);
+  if (
+    canonical(spec) !== canonical(store.spec) ||
+    hash(canonical(selection)) !== spec.selectionDigest ||
+    source.selectionDigest !== spec.selectionDigest ||
+    hash(ports.objective) !== spec.objectiveDigest
+  )
+    stop('CQA_BINDING');
+  source.check();
+  if (!store.snapshot()) store.initialize(selection, ports.objective);
+  let shadow = verifyQualityAudit(store, source).state;
+  if (store.mode === 'inspect' || shadow.status !== 'ACTIVE') return qaSummary(shadow, selection);
+  if (ports.execution && spec.version !== 'CorpusQualityAudit/0.2') stop('CQA_EXECUTION_POLICY');
+  let fence: string | null = null;
+  const elapsed = () => Math.max(shadow.wallMs, Date.now() - spec.createdAt),
+    commit = (kind: AuditEvent['kind'], data: unknown) => {
+      source.check();
+      if (ports.execution) ports.execution.authorizeCommit(() => store.apply(kind, data));
+      else store.apply(kind, data);
+      shadow = store.snapshot()!;
+    },
+    finish = (status: 'COMPLETED' | 'FENCED', c: string | null) =>
+      commit('FINISH', { status, code: c, wallMs: elapsed() }),
+    halt = (c: string) => {
+      fence ??= c;
+      try {
+        finish('FENCED', fence);
+      } catch {}
+    },
+    guard = () => {
+      if (fence) stop(fence);
+      ports.execution?.check();
+      source.check();
+      store.check();
+      if (ports.signal?.aborted) stop('CQA_ABORTED');
+      if (Date.now() >= spec.expiresAt) stop('CQA_DEADLINE');
+    };
+  const hold = (caseId: string, c: string, attemptId: string | null) => {
+    const item = shadow.items.find((i) => i.caseId === caseId)!;
+    if (item.status === 'PENDING') commit('VERDICT', { item: { ...item, status: 'HOLD', code: c, attemptId } });
+  };
+  const processResult = (a: AuditAttempt) => {
+    const disposition =
+        spec.version === 'CorpusQualityAudit/0.2'
+          ? corpusResponseDisposition(a.result, auditProvider(a.operation), store.port(a.bucket))
+          : null,
+      localCode =
+        disposition?.kind === 'ISOLATE'
+          ? 'CQA_' + disposition.code
+          : disposition?.kind === 'RATE_LIMIT'
+            ? 'CQA_RATE_LIMIT'
+            : null;
+    if (disposition?.kind === 'FENCE') stop('CQA_' + disposition.code);
+    const finalBytes = disposition?.kind === 'CONTENT' ? store.port(a.bucket).read(a.result!.finalRef!) : undefined;
+    if (a.operation === 'rubric' && localCode) {
+      for (const item of shadow.items) hold(item.caseId, localCode, a.id);
+      return;
+    }
+    if (a.operation === 'rubric') {
+      if (shadow.rubricRef) return;
+      let rubric: AuditRubric;
+      try {
+        rubric = validateAuditRubric(native(store, a, finalBytes));
+      } catch (error) {
+        if (spec.version === 'CorpusQualityAudit/0.1') throw error;
+        for (const item of shadow.items) hold(item.caseId, 'CQA_RUBRIC_FORMAT', a.id);
+        return;
+      }
+      const ref = store.put(a.bucket, 'corpus-qa-rubric', canonical(rubric));
+      commit('RUBRIC', { ref });
+      return;
+    }
+    if (!shadow.rubricRef) stop('CQA_RUBRIC');
+    const rubric = validateAuditRubric(object(store, shadow.rubricRef));
+    let values: unknown[] = [];
+    try {
+      if (localCode) stop(localCode);
+      const result = shape(native(store, a, finalBytes), ['version', 'items']);
+      if (result.version !== 'CorpusQualityVerdicts/0.1') stop('CQA_VERDICT');
+      values = list(result.items, a.caseIds.length);
+    } catch {}
+    for (const caseId of a.caseIds) {
+      const item = shadow.items.find((i) => i.caseId === caseId)!;
+      if (item.status !== 'PENDING') continue;
+      if (fence) {
+        hold(caseId, 'CQA_LATE_AFTER_FENCE', a.id);
+        continue;
+      }
+      const digest = spec.version === 'CorpusQualityAudit/0.2' ? input(source, caseId).inputDigest : undefined;
+      let verdict: AuditVerdict;
+      try {
+        verdict = validateAuditVerdict(
+          selected(values, caseId),
+          caseId,
+          digest ?? input(source, caseId).inputDigest,
+          rubric,
+        );
+      } catch {
+        hold(caseId, localCode ?? (a.result?.httpStatus === 429 ? 'CQA_RATE_LIMIT' : 'CQA_VERDICT_FORMAT'), a.id);
+        continue;
+      }
+      guard();
+      const record = {
+          version: 'CorpusQualityVerdictRecord/0.1',
+          verdict,
+          evidenceClass: 'MODEL_OPINION',
+          attemptId: a.id,
+          rubricDigest: hash(canonical(rubric)),
+          independence: 'SAME_MODEL_OR_ROUTING_UNKNOWN',
+          trainingReady: false,
+        },
+        verdictRef = store.put(a.bucket, 'corpus-qa-verdict', canonical(record));
+      commit('VERDICT', { item: { ...item, status: verdict.disposition, attemptId: a.id, verdictRef } });
+    }
+  };
+  if (spec.version === 'CorpusQualityAudit/0.2' && store.mode === 'resume')
+    try {
+      for (const a of [...shadow.attempts])
+        if (auditAttemptPending(spec, a)) commit('RECOVER_UNKNOWN', { id: a.id, decidedAtMs: elapsed() });
+    } catch (error) {
+      halt(code(error));
+    }
+  const oldFence = shadow.attempts.some((a) => auditAttemptPending(spec, a))
+    ? 'CQA_SUBMIT_UNKNOWN'
+    : shadow.attempts.map((a) => resultFence(a, store)).find((c) => c !== null);
+  if (oldFence) {
+    halt(oldFence);
+    return qaSummary(shadow, selection, fence);
+  }
+  try {
+    for (const a of [...shadow.attempts]) processResult(a);
+  } catch (error) {
+    halt(code(error));
+  }
+  const submit = async (
+    operation: 'rubric' | 'review',
+    index: number,
+    id: string,
+    caseIds: string[],
+    data: unknown,
+  ) => {
+    let lease: CorpusExecutionLease | undefined,
+      started = false,
+      sent = false;
+    const completion = spec.version === 'CorpusQualityAudit/0.2' ? corpusTransportCompletion() : null;
+    try {
+      guard();
+      const body = auditBody(operation, index, data, spec.version);
+      if (ports.execution) {
+        const route = operation === 'rubric' ? spec.coordinator : spec.reviewer;
+        lease = await ports.execution.acquire(
+          {
+            jobId: spec.auditId,
+            attemptId: id,
+            provider: auditProvider(operation),
+            accountRef: route.accountRef,
+            requestBytes: Buffer.byteLength(body),
+            responseBytes: QA.responseBytes,
+            expiresAt: spec.expiresAt,
+          },
+          ports.signal,
+        );
+        guard();
+        lease.check();
+      }
+      const bucket = 'attempt-' + shadow.attempts.length,
+        requestRef = store.port(bucket).put('corpus-qa-request', body),
+        attempt: AuditAttempt = {
+          id,
+          operation,
+          index,
+          caseIds,
+          bucket,
+          requestRef,
+          bodyHash: hash(body),
+          consumedAtMs: elapsed(),
+          settledAtMs: null,
+          serviceMs: null,
+          result: null,
+          estimatedMicroUsd: auditReservation(spec, operation),
+        };
+      commit('CONSUME', attempt);
+      lease?.consumed();
+      const start = performance.now();
+      let result: ProviderResult | null = null;
+      const signal = AbortSignal.timeout(Math.max(1, Math.min(QA.requestMs, spec.expiresAt - Date.now())));
+      try {
+        result = await bounded(
+          ports.signal ? AbortSignal.any([ports.signal, signal]) : signal,
+          QA.requestMs,
+          (inner) => {
+            started = true;
+            const request: Parameters<QaTransport>[0] = {
+              version: spec.version,
+              operation,
+              index,
+              body,
+              output: store.port(bucket),
+              signal: inner,
+              authorizeSend: (send) => {
+                guard();
+                inner.throwIfAborted();
+                if (sent) stop('CQA_ONCE');
+                sent = true;
+                return ports.execution
+                  ? ports.execution.authorizeSend(() => store.authorizeSend(send))
+                  : store.authorizeSend(send);
+              },
+            };
+            return completion
+              ? completion.observe((registerNativeCompletion) =>
+                  ports.transport({ ...request, registerNativeCompletion }),
+                )
+              : ports.transport(request);
+          },
+        );
+        copyJson(result);
+        if (!sent) stop('CQA_ONCE');
+        if (spec.version !== 'CorpusQualityAudit/0.2' && result.usage) {
+          integer(result.usage.input);
+          integer(result.usage.completion);
+          if (result.usage.reasoning !== null) integer(result.usage.reasoning, 0, result.usage.completion);
+        }
+      } catch (error) {
+        if (spec.version === 'CorpusQualityAudit/0.2' && error instanceof Wf1Error) throw error;
+        result = null;
+      }
+      lease?.settle({
+        localReleased: completion?.released(sent) ?? true,
+        remoteUnknown: !result || result.outcome === 'SUBMIT_UNKNOWN',
+        httpStatus: result?.httpStatus ?? null,
+        retryAfterMs: result?.retryAfterMs ?? null,
+        retryAfterInvalid: result?.retryAfterStatus === 'INVALID',
+      });
+      commit('SETTLE', { id, result, serviceMs: Math.ceil(performance.now() - start), settledAtMs: elapsed() });
+      const settled = shadow.attempts.find((a) => a.id === id)!,
+        reason = resultFence(settled, store);
+      if (reason) halt(reason);
+      if (completion && !completion.released(sent)) halt('CQA_TRANSPORT_IN_FLIGHT');
+      if (!fence) processResult(settled);
+      else for (const caseId of caseIds) hold(caseId, 'CQA_LATE_AFTER_FENCE', id);
+    } catch (error) {
+      try {
+        lease?.abandon(!started || completion?.released(sent) === true);
+      } catch {}
+      halt(code(error));
+    }
+  };
+  if (!fence && !shadow.rubricRef && !shadow.attempts.some((a) => a.operation === 'rubric'))
+    await submit('rubric', 0, 'rubric:0', [], { ...baseline, currentApprovedObjective: ports.objective });
+  const running = new Map<string, Promise<void>>(),
+    waiting = new Map<string, { caseIds: string[]; index: number }>();
+  while (true) {
+    if (!fence)
+      try {
+        guard();
+      } catch (error) {
+        halt(code(error));
+      }
+    const cooldown =
+      Math.max(
+        0,
+        ...shadow.attempts
+          .filter((a) => a.operation === 'review' && a.result?.httpStatus === 429)
+          .map((a) => (a.settledAtMs ?? a.consumedAtMs) + (a.result?.retryAfterMs ?? 1000)),
+      ) - elapsed();
+    if (!fence && cooldown <= 0 && (spec.version === 'CorpusQualityAudit/0.1' || shadow.rubricRef))
+      try {
+        const rubric = validateAuditRubric(object(store, shadow.rubricRef!));
+        while (
+          running.size < (spec.version === 'CorpusQualityAudit/0.2' ? spec.execution!.concurrency : QA.concurrency)
+        ) {
+          const ready = shadow.items.filter(
+            (i) =>
+              i.status === 'PENDING' &&
+              ![...waiting.values()].some((a) => a.caseIds.includes(i.caseId)) &&
+              !shadow.attempts.some((a) => a.caseIds.includes(i.caseId)),
+          );
+          if (!ready.length) break;
+          const batch = ready.slice(0, QA.reviewRows),
+            index =
+              Math.max(
+                -1,
+                ...shadow.attempts.filter((a) => a.operation === 'review').map((a) => a.index),
+                ...[...waiting.values()].map((a) => a.index),
+              ) + 1;
+          let data: unknown;
+          while (batch.length) {
+            data = {
+              ...baseline,
+              rubric,
+              rubricDigest: hash(canonical(rubric)),
+              items: batch.map((i) => input(source, i.caseId)),
+            };
+            try {
+              auditBody('review', index, data, spec.version);
+              break;
+            } catch (error) {
+              if (!(error instanceof Wf1Error) || error.code !== 'CQA_LENGTH') throw error;
+              batch.pop();
+            }
+          }
+          if (!batch.length) {
+            hold(ready[0]!.caseId, 'CQA_LENGTH', null);
+            continue;
+          }
+          const caseIds = batch.map((i) => i.caseId),
+            id = 'review:' + hash(canonical(caseIds));
+          waiting.set(id, { caseIds, index });
+          const promise = submit('review', index, id, caseIds, data).finally(() => {
+            running.delete(id);
+            waiting.delete(id);
+          });
+          running.set(id, promise);
+        }
+      } catch (error) {
+        halt(code(error));
+      }
+    if (running.size) {
+      await Promise.race(running.values());
+      continue;
+    }
+    if (!fence && cooldown > 0) {
+      await delay(Math.min(1000, cooldown));
+      continue;
+    }
+    break;
+  }
+  if (!fence)
+    try {
+      finish('COMPLETED', null);
+    } catch (error) {
+      halt(code(error));
+    }
+  else
+    try {
+      finish('FENCED', fence);
+    } catch {}
+  try {
+    return qaSummary(verifyQualityAudit(store, source).state, selection, fence);
+  } catch (error) {
+    return qaSummary(shadow, selection, fence ?? code(error));
+  }
 }
 /** Trusted assembly port; the CLI only exposes aggregate counts. */
-export function readQualityIndex(store:QualityAuditStore,ref:NonNullable<AuditState['indexRef']>){const index=shape(object(store,ref),['version','scope','entries']);if(index.version!=='CorpusScopedDedupIndexChunks/0.1')stop('CQA_INDEX');const entries=list(index.entries,6,1).flatMap(ref=>list(object(store,scopedQa(ref)),32,1));return {version:'CorpusScopedDedupIndex/0.1',scope:index.scope,entries} as ReturnType<typeof buildScopedIndex>;}
-function selectionManifest(state:AuditState,selection:AuditSelection,index:ReturnType<typeof buildScopedIndex>){const indexDigest=hash(canonical(index)),assembly=assembleScopedIndexes([index],[indexDigest]),eligible=new Set(assembly.rows.filter(r=>r.eligibleForNextExport).map(r=>r.unitId));return {version:'CorpusQualitySelectionManifest/0.1',auditId:state.spec.auditId,selectionDigest:state.spec.selectionDigest,populationDigest:state.spec.populationDigest,selectionRef:state.selectionRef,source:selection.source,baselineDigest:state.spec.baselineDigest,auditTargetBaselineDigest:state.spec.auditTargetBaselineDigest,studentTargetDigest:state.spec.studentTargetDigest,purposeDigest:state.spec.purposeDigest,readGrantDigest:state.spec.readGrantDigest,rubricRef:state.rubricRef,indexRef:state.indexRef,indexDigest,rows:selection.entries.filter(e=>eligible.has(e.unit.unitId)).map(e=>({caseId:e.caseId,verdictRef:state.items.find(i=>i.caseId===e.caseId)!.verdictRef})),evidenceClass:'MODEL_OPINION',independence:'SAME_MODEL_OR_ROUTING_UNKNOWN',factualTruth:'UNKNOWN',packing:'OFF',trainingReady:false,trainingJobPolicy:'NOT_AUTHORIZED'};}
-export function exportQualityAudit(store:QualityAuditStore,source:QaSelectedReader){
-  store.check();const {state,selection}=verifyQualityAudit(store,source);if(state.status==='ACTIVE'||state.attempts.some(a=>auditAttemptPending(state.spec,a)))stop('CQA_ACTIVE');const index=buildScopedIndex(selection,source,state);
-  if(!state.indexRef){const entries=[];for(let i=0;i<index.entries.length;i+=32)entries.push(store.put('meta','corpus-qa-index-chunk',canonical(index.entries.slice(i,i+32))));const ref=store.put('meta','corpus-qa-dedup-index',canonical({version:'CorpusScopedDedupIndexChunks/0.1',scope:index.scope,entries}));store.apply('INDEX',{ref});}
-  const current=store.snapshot()!,manifest=selectionManifest(current,selection,index);
-  if(current.manifestRef){if(canonical(object(store,current.manifestRef))!==canonical(manifest))stop('CQA_MANIFEST_CONFLICT');}else{const ref=store.put('meta','corpus-qa-selection-manifest',canonical(manifest));store.apply('MANIFEST',{ref});}
-  const eligible=new Set(manifest.rows.map(r=>r.caseId));return {...qaSummary(store.snapshot()!,selection),export:{eligibleRows:eligible.size,heldRows:selection.entries.length-eligible.size,comparison:'EXACT_NORMALIZED_PROMPT_ONLY',partitions:[...new Set(selection.entries.map(e=>e.unit.poolId))].sort().flatMap(poolId=>['train','dev'].map(split=>{const rows=selection.entries.filter(e=>eligible.has(e.caseId)&&e.unit.poolId===poolId&&e.unit.split===split);return {poolId,split,rows:rows.length,studentInputTokens:rows.reduce((n,r)=>n+Number(r.measurement.studentInputTokens),0),studentLossTokens:rows.reduce((n,r)=>n+Number(r.measurement.studentLossTokens),0)};}))}};
+export function readQualityIndex(store: QualityAuditStore, ref: NonNullable<AuditState['indexRef']>) {
+  const index = shape(object(store, ref), ['version', 'scope', 'entries']);
+  if (index.version !== 'CorpusScopedDedupIndexChunks/0.1') stop('CQA_INDEX');
+  const entries = list(index.entries, 6, 1).flatMap((ref) => list(object(store, scopedQa(ref)), 32, 1));
+  return { version: 'CorpusScopedDedupIndex/0.1', scope: index.scope, entries } as ReturnType<typeof buildScopedIndex>;
+}
+function selectionManifest(state: AuditState, selection: AuditSelection, index: ReturnType<typeof buildScopedIndex>) {
+  const indexDigest = hash(canonical(index)),
+    assembly = assembleScopedIndexes([index], [indexDigest]),
+    eligible = new Set(assembly.rows.filter((r) => r.eligibleForNextExport).map((r) => r.unitId));
+  return {
+    version: 'CorpusQualitySelectionManifest/0.1',
+    auditId: state.spec.auditId,
+    selectionDigest: state.spec.selectionDigest,
+    populationDigest: state.spec.populationDigest,
+    selectionRef: state.selectionRef,
+    source: selection.source,
+    baselineDigest: state.spec.baselineDigest,
+    auditTargetBaselineDigest: state.spec.auditTargetBaselineDigest,
+    studentTargetDigest: state.spec.studentTargetDigest,
+    purposeDigest: state.spec.purposeDigest,
+    readGrantDigest: state.spec.readGrantDigest,
+    rubricRef: state.rubricRef,
+    indexRef: state.indexRef,
+    indexDigest,
+    rows: selection.entries
+      .filter((e) => eligible.has(e.unit.unitId))
+      .map((e) => ({ caseId: e.caseId, verdictRef: state.items.find((i) => i.caseId === e.caseId)!.verdictRef })),
+    evidenceClass: 'MODEL_OPINION',
+    independence: 'SAME_MODEL_OR_ROUTING_UNKNOWN',
+    factualTruth: 'UNKNOWN',
+    packing: 'OFF',
+    trainingReady: false,
+    trainingJobPolicy: 'NOT_AUTHORIZED',
+  };
+}
+export function exportQualityAudit(store: QualityAuditStore, source: QaSelectedReader) {
+  store.check();
+  const { state, selection } = verifyQualityAudit(store, source);
+  if (state.status === 'ACTIVE' || state.attempts.some((a) => auditAttemptPending(state.spec, a))) stop('CQA_ACTIVE');
+  const index = buildScopedIndex(selection, source, state);
+  if (!state.indexRef) {
+    const entries = [];
+    for (let i = 0; i < index.entries.length; i += 32)
+      entries.push(store.put('meta', 'corpus-qa-index-chunk', canonical(index.entries.slice(i, i + 32))));
+    const ref = store.put(
+      'meta',
+      'corpus-qa-dedup-index',
+      canonical({ version: 'CorpusScopedDedupIndexChunks/0.1', scope: index.scope, entries }),
+    );
+    store.apply('INDEX', { ref });
+  }
+  const current = store.snapshot()!,
+    manifest = selectionManifest(current, selection, index);
+  if (current.manifestRef) {
+    if (canonical(object(store, current.manifestRef)) !== canonical(manifest)) stop('CQA_MANIFEST_CONFLICT');
+  } else {
+    const ref = store.put('meta', 'corpus-qa-selection-manifest', canonical(manifest));
+    store.apply('MANIFEST', { ref });
+  }
+  const eligible = new Set(manifest.rows.map((r) => r.caseId));
+  return {
+    ...qaSummary(store.snapshot()!, selection),
+    export: {
+      eligibleRows: eligible.size,
+      heldRows: selection.entries.length - eligible.size,
+      comparison: 'EXACT_NORMALIZED_PROMPT_ONLY',
+      partitions: [...new Set(selection.entries.map((e) => e.unit.poolId))].sort().flatMap((poolId) =>
+        ['train', 'dev'].map((split) => {
+          const rows = selection.entries.filter(
+            (e) => eligible.has(e.caseId) && e.unit.poolId === poolId && e.unit.split === split,
+          );
+          return {
+            poolId,
+            split,
+            rows: rows.length,
+            studentInputTokens: rows.reduce((n, r) => n + Number(r.measurement.studentInputTokens), 0),
+            studentLossTokens: rows.reduce((n, r) => n + Number(r.measurement.studentLossTokens), 0),
+          };
+        }),
+      ),
+    },
+  };
 }

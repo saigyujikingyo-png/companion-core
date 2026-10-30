@@ -7,17 +7,27 @@ const batch = `
  SELECT fanout_tx(),fanout_phase(),fanout_asof()
  WHERE NOT EXISTS(SELECT 1 FROM fanout_batches WHERE tx_id=fanout_tx());
 `;
-function change(table: string, type: string, scope: string, entity: string, related: string, columns: string[]): string {
-  return ['INSERT','UPDATE','DELETE'].map(op => {
-    const row = op === 'DELETE' ? 'OLD' : 'NEW';
-    const subst = (s: string) => s.replaceAll('$', row);
-    const when = op === 'UPDATE' ? ` WHEN ${columns.map(column => `OLD.${column} IS NOT NEW.${column}`).join(' OR ')}` : '';
-    return `CREATE TRIGGER fanout_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${when} BEGIN
+function change(
+  table: string,
+  type: string,
+  scope: string,
+  entity: string,
+  related: string,
+  columns: string[],
+): string {
+  return ['INSERT', 'UPDATE', 'DELETE']
+    .map((op) => {
+      const row = op === 'DELETE' ? 'OLD' : 'NEW';
+      const subst = (s: string) => s.replaceAll('$', row);
+      const when =
+        op === 'UPDATE' ? ` WHEN ${columns.map((column) => `OLD.${column} IS NOT NEW.${column}`).join(' OR ')}` : '';
+      return `CREATE TRIGGER fanout_${table}_${op.toLowerCase()} AFTER ${op} ON ${table}${when} BEGIN
  ${batch}
  INSERT INTO fanout_items(batch_seq,scope_id,kind,entity_id,related_id,operation)
  SELECT seq,${subst(scope)},'${type}',${subst(entity)},${subst(related)},'${op.toLowerCase()}' FROM fanout_batches WHERE tx_id=fanout_tx();
 END;`;
-  }).join('\n');
+    })
+    .join('\n');
 }
 export const SCHEMA_V2_ADDITION = `
 CREATE TABLE fanout_state (
@@ -57,9 +67,9 @@ CREATE TRIGGER fanout_scopes_identity BEFORE UPDATE ON scopes
 CREATE TRIGGER fanout_dependencies_identity BEFORE UPDATE ON dependencies
  WHEN OLD.child_id IS NOT NEW.child_id OR OLD.parent_id IS NOT NEW.parent_id
  BEGIN SELECT RAISE(ABORT,'FANOUT_IMMUTABLE_IDENTITY'); END;
-${change('nodes','node','$.scope_id','$.id','NULL', ['id','scope_id','type','revision','generation','consent_revision','status','body','search_text','created_at','valid_from','valid_to','projection_visible'])}
-${change('scopes','scope','$.id','$.id','NULL', ['id','identity','generation','consent_revision','learning_allowed','runtime_epoch'])}
-${change('dependencies','edge','(SELECT scope_id FROM nodes WHERE id=$.child_id)','$.child_id','$.parent_id', ['child_id','parent_id','parent_revision'])}
+${change('nodes', 'node', '$.scope_id', '$.id', 'NULL', ['id', 'scope_id', 'type', 'revision', 'generation', 'consent_revision', 'status', 'body', 'search_text', 'created_at', 'valid_from', 'valid_to', 'projection_visible'])}
+${change('scopes', 'scope', '$.id', '$.id', 'NULL', ['id', 'identity', 'generation', 'consent_revision', 'learning_allowed', 'runtime_epoch'])}
+${change('dependencies', 'edge', '(SELECT scope_id FROM nodes WHERE id=$.child_id)', '$.child_id', '$.parent_id', ['child_id', 'parent_id', 'parent_revision'])}
 CREATE TRIGGER fanout_batches_no_update BEFORE UPDATE ON fanout_batches WHEN OLD.complete=1
  BEGIN SELECT RAISE(ABORT,'FANOUT_IMMUTABLE_BATCH'); END;
 CREATE TRIGGER fanout_batches_no_delete BEFORE DELETE ON fanout_batches WHEN fanout_phase()!='prune'

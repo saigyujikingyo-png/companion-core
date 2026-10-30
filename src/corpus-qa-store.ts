@@ -1,54 +1,502 @@
-import { closeSync,existsSync,fsyncSync,lstatSync,mkdirSync,openSync,readFileSync,readdirSync,statSync,writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { canonical,copyJson,hash,id,integer,shape,stop } from './wf1-json.ts';
-import { createArtifactBroker,HostAuthority } from './wf1-storage.ts';
+import { canonical, copyJson, hash, id, integer, shape, stop } from './wf1-json.ts';
+import { createArtifactBroker, HostAuthority } from './wf1-storage.ts';
 import type { ArtifactPort } from './wf1-storage.ts';
 import { requireTrainingBinding } from './wf2-training-root.ts';
-import { auditAttemptPending,auditReservation,parseAudit,QA,requireAuditAdmission,scopedQa,validateAuditSelection,validateAuditSpec } from './corpus-qa-types.ts';
-import type { AuditAdmission,AuditAttempt,AuditEvent,AuditItem,AuditSelection,AuditSpec,AuditState } from './corpus-qa-types.ts';
+import {
+  auditAttemptPending,
+  auditReservation,
+  parseAudit,
+  QA,
+  requireAuditAdmission,
+  scopedQa,
+  validateAuditSelection,
+  validateAuditSpec,
+} from './corpus-qa-types.ts';
+import type {
+  AuditAdmission,
+  AuditAttempt,
+  AuditEvent,
+  AuditItem,
+  AuditSelection,
+  AuditSpec,
+  AuditState,
+} from './corpus-qa-types.ts';
 import type { ScopedRef } from './corpus-production-types.ts';
-export type AuditStoreOptions={approvedTrainingRoot:string;runtimeRoot:string;authorityPath:string;spec:AuditSpec;key:Uint8Array;mode:'create'|'resume'|'inspect';admission:()=>AuditAdmission;sourceCheck:()=>void;now?:()=>number};
-const SCHEMA=['CREATE TABLE events(sequence INTEGER PRIMARY KEY, previous TEXT NOT NULL, ref TEXT NOT NULL, digest TEXT NOT NULL)','CREATE TABLE metadata(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)','CREATE TABLE attempts(id TEXT PRIMARY KEY, data TEXT NOT NULL)','CREATE TABLE cases(id TEXT PRIMARY KEY, data TEXT NOT NULL)'];
-function plain(path:string,max=67108864){const s=lstatSync(path);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.size>max)stop('CQA_FILE');return s;}
-function createFile(path:string){const fd=openSync(path,'wx',0o600);try{fsyncSync(fd);}finally{closeSync(fd);}}
-const metadata=(s:AuditState)=>{const {attempts:_,items:__,...rest}=s;return rest;};
-function reduce(current:AuditState|null,event:AuditEvent,spec:AuditSpec):AuditState{
-  shape(event,['version','kind','data']);if(event.version!=='CorpusQualityAuditEvent/0.1')stop('CQA_EVENT');const d=event.data as Record<string,unknown>;
-  if(event.kind==='INIT'){if(current)stop('CQA_EXISTS');const s=copyJson(d) as unknown as AuditState;if(s.version!=='CorpusQualityAuditState/0.1'||canonical(s.spec)!==canonical(spec)||s.status!=='ACTIVE'||s.items.length!==spec.rowCount||s.attempts.length||s.rubricRef||s.manifestRef||s.indexRef)stop('CQA_STATE');return s;}
-  if(!current)stop('CQA_STATE');const s=structuredClone(current);
-  if(event.kind==='CONSUME'){const a=d as unknown as AuditAttempt;if(s.status!=='ACTIVE'||spec.version==='CorpusQualityAudit/0.1'&&s.attempts.length>=1+spec.rowCount||s.attempts.some(p=>p.id===a.id)||a.result!==null||a.serviceMs!==null||a.settledAtMs!==null||a.estimatedMicroUsd!==auditReservation(spec,a.operation))stop('CQA_ONCE');id(a.id);integer(a.index,0,spec.rowCount);if(a.operation==='rubric'){if(s.attempts.length||a.caseIds.length||a.id!=='rubric:0'||a.index!==0)stop('CQA_ONCE');}else if(a.operation==='review'){if(!s.rubricRef||a.caseIds.length<1||a.caseIds.length>QA.reviewRows||new Set(a.caseIds).size!==a.caseIds.length||a.caseIds.some(caseId=>s.items.find(i=>i.caseId===caseId)?.status!=='PENDING'||s.attempts.some(old=>old.caseIds.includes(caseId))))stop('CQA_ONCE');}else stop('CQA_OPERATION');s.attempts.push(a);}
-  else if(event.kind==='RECOVER_UNKNOWN'){shape(d,['id','decidedAtMs']);const a=s.attempts.find(a=>a.id===d.id);if(spec.version!=='CorpusQualityAudit/0.2'||!a||!auditAttemptPending(spec,a)||a.result!==null)stop('CQA_CAS');a.settledAtMs=integer(d.decidedAtMs,a.consumedAtMs);a.serviceMs=null;a.settlementSource='RECOVERY_UNKNOWN';
-  }else if(event.kind==='SETTLE'){shape(d,['id','result','serviceMs','settledAtMs']);const a=s.attempts.find(a=>a.id===d.id);if(!a||!auditAttemptPending(spec,a))stop('CQA_CAS');integer(d.serviceMs);integer(d.settledAtMs,a.consumedAtMs);a.result=d.result as AuditAttempt['result'];a.serviceMs=Number(d.serviceMs);a.settledAtMs=Number(d.settledAtMs);}
-  else if(event.kind==='RUBRIC'){shape(d,['ref']);if(s.status!=='ACTIVE'||s.rubricRef)stop('CQA_CAS');s.rubricRef=scopedQa(d.ref);}
-  else if(event.kind==='VERDICT'){shape(d,['item']);const item=d.item as AuditItem,old=s.items.find(i=>i.caseId===item.caseId);if(!old||old.status!=='PENDING'||!['PASS','HOLD','REJECT','UNCERTAIN'].includes(item.status)||item.status==='PASS'&&s.status!=='ACTIVE')stop('CQA_CAS');Object.assign(old,item);}
-  else if(event.kind==='FINISH'){shape(d,['status','code','wallMs']);if(!['COMPLETED','FENCED'].includes(String(d.status))||s.status==='FENCED'&&d.status!=='FENCED'||d.status==='COMPLETED'&&(s.items.some(i=>i.status==='PENDING')||s.attempts.some(a=>auditAttemptPending(spec,a))))stop('CQA_STATE');s.status=d.status as AuditState['status'];s.code=d.code as string|null;s.wallMs=integer(d.wallMs);}
-  else if(event.kind==='MANIFEST'||event.kind==='INDEX'){shape(d,['ref']);if(s.status==='ACTIVE'||s.attempts.some(a=>auditAttemptPending(spec,a)))stop('CQA_ACTIVE');const field=event.kind==='MANIFEST'?'manifestRef':'indexRef';if(s[field])stop('CQA_CAS');s[field]=scopedQa(d.ref);}
-  else stop('CQA_EVENT');return s;
+export type AuditStoreOptions = {
+  approvedTrainingRoot: string;
+  runtimeRoot: string;
+  authorityPath: string;
+  spec: AuditSpec;
+  key: Uint8Array;
+  mode: 'create' | 'resume' | 'inspect';
+  admission: () => AuditAdmission;
+  sourceCheck: () => void;
+  now?: () => number;
+};
+const SCHEMA = [
+  'CREATE TABLE events(sequence INTEGER PRIMARY KEY, previous TEXT NOT NULL, ref TEXT NOT NULL, digest TEXT NOT NULL)',
+  'CREATE TABLE metadata(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)',
+  'CREATE TABLE attempts(id TEXT PRIMARY KEY, data TEXT NOT NULL)',
+  'CREATE TABLE cases(id TEXT PRIMARY KEY, data TEXT NOT NULL)',
+];
+function plain(path: string, max = 67108864) {
+  const s = lstatSync(path);
+  if (!s.isFile() || s.isSymbolicLink() || s.nlink !== 1 || s.size > max) stop('CQA_FILE');
+  return s;
+}
+function createFile(path: string) {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+const metadata = (s: AuditState) => {
+  const { attempts: _, items: __, ...rest } = s;
+  return rest;
+};
+function reduce(current: AuditState | null, event: AuditEvent, spec: AuditSpec): AuditState {
+  shape(event, ['version', 'kind', 'data']);
+  if (event.version !== 'CorpusQualityAuditEvent/0.1') stop('CQA_EVENT');
+  const d = event.data as Record<string, unknown>;
+  if (event.kind === 'INIT') {
+    if (current) stop('CQA_EXISTS');
+    const s = copyJson(d) as unknown as AuditState;
+    if (
+      s.version !== 'CorpusQualityAuditState/0.1' ||
+      canonical(s.spec) !== canonical(spec) ||
+      s.status !== 'ACTIVE' ||
+      s.items.length !== spec.rowCount ||
+      s.attempts.length ||
+      s.rubricRef ||
+      s.manifestRef ||
+      s.indexRef
+    )
+      stop('CQA_STATE');
+    return s;
+  }
+  if (!current) stop('CQA_STATE');
+  const s = structuredClone(current);
+  if (event.kind === 'CONSUME') {
+    const a = d as unknown as AuditAttempt;
+    if (
+      s.status !== 'ACTIVE' ||
+      (spec.version === 'CorpusQualityAudit/0.1' && s.attempts.length >= 1 + spec.rowCount) ||
+      s.attempts.some((p) => p.id === a.id) ||
+      a.result !== null ||
+      a.serviceMs !== null ||
+      a.settledAtMs !== null ||
+      a.estimatedMicroUsd !== auditReservation(spec, a.operation)
+    )
+      stop('CQA_ONCE');
+    id(a.id);
+    integer(a.index, 0, spec.rowCount);
+    if (a.operation === 'rubric') {
+      if (s.attempts.length || a.caseIds.length || a.id !== 'rubric:0' || a.index !== 0) stop('CQA_ONCE');
+    } else if (a.operation === 'review') {
+      if (
+        !s.rubricRef ||
+        a.caseIds.length < 1 ||
+        a.caseIds.length > QA.reviewRows ||
+        new Set(a.caseIds).size !== a.caseIds.length ||
+        a.caseIds.some(
+          (caseId) =>
+            s.items.find((i) => i.caseId === caseId)?.status !== 'PENDING' ||
+            s.attempts.some((old) => old.caseIds.includes(caseId)),
+        )
+      )
+        stop('CQA_ONCE');
+    } else stop('CQA_OPERATION');
+    s.attempts.push(a);
+  } else if (event.kind === 'RECOVER_UNKNOWN') {
+    shape(d, ['id', 'decidedAtMs']);
+    const a = s.attempts.find((a) => a.id === d.id);
+    if (spec.version !== 'CorpusQualityAudit/0.2' || !a || !auditAttemptPending(spec, a) || a.result !== null)
+      stop('CQA_CAS');
+    a.settledAtMs = integer(d.decidedAtMs, a.consumedAtMs);
+    a.serviceMs = null;
+    a.settlementSource = 'RECOVERY_UNKNOWN';
+  } else if (event.kind === 'SETTLE') {
+    shape(d, ['id', 'result', 'serviceMs', 'settledAtMs']);
+    const a = s.attempts.find((a) => a.id === d.id);
+    if (!a || !auditAttemptPending(spec, a)) stop('CQA_CAS');
+    integer(d.serviceMs);
+    integer(d.settledAtMs, a.consumedAtMs);
+    a.result = d.result as AuditAttempt['result'];
+    a.serviceMs = Number(d.serviceMs);
+    a.settledAtMs = Number(d.settledAtMs);
+  } else if (event.kind === 'RUBRIC') {
+    shape(d, ['ref']);
+    if (s.status !== 'ACTIVE' || s.rubricRef) stop('CQA_CAS');
+    s.rubricRef = scopedQa(d.ref);
+  } else if (event.kind === 'VERDICT') {
+    shape(d, ['item']);
+    const item = d.item as AuditItem,
+      old = s.items.find((i) => i.caseId === item.caseId);
+    if (
+      !old ||
+      old.status !== 'PENDING' ||
+      !['PASS', 'HOLD', 'REJECT', 'UNCERTAIN'].includes(item.status) ||
+      (item.status === 'PASS' && s.status !== 'ACTIVE')
+    )
+      stop('CQA_CAS');
+    Object.assign(old, item);
+  } else if (event.kind === 'FINISH') {
+    shape(d, ['status', 'code', 'wallMs']);
+    if (
+      !['COMPLETED', 'FENCED'].includes(String(d.status)) ||
+      (s.status === 'FENCED' && d.status !== 'FENCED') ||
+      (d.status === 'COMPLETED' &&
+        (s.items.some((i) => i.status === 'PENDING') || s.attempts.some((a) => auditAttemptPending(spec, a))))
+    )
+      stop('CQA_STATE');
+    s.status = d.status as AuditState['status'];
+    s.code = d.code as string | null;
+    s.wallMs = integer(d.wallMs);
+  } else if (event.kind === 'MANIFEST' || event.kind === 'INDEX') {
+    shape(d, ['ref']);
+    if (s.status === 'ACTIVE' || s.attempts.some((a) => auditAttemptPending(spec, a))) stop('CQA_ACTIVE');
+    const field = event.kind === 'MANIFEST' ? 'manifestRef' : 'indexRef';
+    if (s[field]) stop('CQA_CAS');
+    s[field] = scopedQa(d.ref);
+  } else stop('CQA_EVENT');
+  return s;
 }
 export class QualityAuditStore {
-  readonly spec:AuditSpec;readonly mode:AuditStoreOptions['mode'];#o:AuditStoreOptions;#key:Buffer;#host:HostAuthority;#db!:DatabaseSync;#owner!:DatabaseSync;#state:AuditState|null=null;#seq=0;#head='0'.repeat(64);#stamp='';#closed=false;#broken=false;#loading=true;#recoverable=new Set<string>();#ports=new Map<string,ArtifactPort>();
-  constructor(o:AuditStoreOptions){if(!(o.key instanceof Uint8Array)||o.key.length!==32)stop('CQA_KEY');this.#key=Buffer.from(o.key);try{this.#o={...o,key:this.#key};this.mode=o.mode;this.spec=validateAuditSpec(o.spec);requireTrainingBinding(o.approvedTrainingRoot,o.runtimeRoot,this.spec.storageBindingDigest,o.authorityPath);const now=o.now??Date.now;this.#host=new HostAuthority(o.authorityPath,this.spec.auditId,now);const a=this.#host.read(now(),o.mode!=='inspect');requireAuditAdmission(this.spec,o.admission(),now());o.sourceCheck();if(o.mode!=='inspect'&&(a.runtimeId!==this.spec.runtimeId||a.revision!==this.spec.authorityRevision||now()<this.spec.createdAt||now()>=this.spec.expiresAt))stop('CQA_AUTHORITY');
-    const file=join(o.runtimeRoot,'corpus-qa.sqlite'),owner=join(o.runtimeRoot,'corpus-qa-owner.sqlite');if(o.mode==='create'){if(a.head!==null||readdirSync(o.runtimeRoot).length)stop('CQA_EXISTS');mkdirSync(join(o.runtimeRoot,'objects'));createFile(owner);createFile(file);}plain(owner,4096);plain(file);this.#owner=new DatabaseSync(owner,{timeout:0});this.#owner.exec('PRAGMA trusted_schema=OFF; BEGIN IMMEDIATE');
-    for(const suffix of ['-wal','-shm'])if(existsSync(file+suffix))stop('CQA_INTEGRITY');if(existsSync(file+'-journal')&&statSync(file+'-journal').size>0)stop('CQA_COMMIT_UNKNOWN');this.#db=new DatabaseSync(file,{readOnly:o.mode==='inspect',timeout:0});this.#db.exec('PRAGMA trusted_schema=OFF');
-    if(o.mode==='create')this.#db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; BEGIN IMMEDIATE; PRAGMA application_id=1129406769; PRAGMA user_version=1; '+SCHEMA.join(';')+'; COMMIT;');else{const schema=this.#db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r=>r.sql);if(this.#db.prepare('PRAGMA application_id').get()!.application_id!==1129406769||this.#db.prepare('PRAGMA user_version').get()!.user_version!==1||canonical(schema)!==canonical([...SCHEMA].sort((a,b)=>a.split(' ')[2]!<b.split(' ')[2]!?-1:1)))stop('CQA_SCHEMA');}
-    this.#stamp=this.#fileStamp();integer(this.#db.prepare('SELECT count(*) AS n FROM events').get()!.n,0,2048);for(const [index,row]of this.#db.prepare('SELECT * FROM events ORDER BY sequence').all().entries()){if(row.sequence!==index+1||row.previous!==this.#head||typeof row.ref!=='string'||row.ref.length>2048||row.digest!==hash(this.#head+'\n'+row.ref))stop('CQA_CHAIN');const ref=scopedQa(parseAudit(row.ref));if(canonical(ref)!==row.ref||ref.ref.kind!=='corpus-qa-event')stop('CQA_CHAIN');this.#state=reduce(this.#state,parseAudit(this.read(ref).toString('utf8')) as unknown as AuditEvent,this.spec);this.#head=String(row.digest);this.#seq=index+1;}
-    if(o.mode!=='create'&&(!this.#state||a.head!==this.#head))stop('CQA_HEAD');if(this.#state)this.#verifyProjection();if(o.mode==='resume'&&this.spec.version==='CorpusQualityAudit/0.2')for(const a of this.#state?.attempts??[])if(auditAttemptPending(this.spec,a))this.#recoverable.add(a.id);this.#loading=false;this.check(o.mode!=='inspect');
-  }catch(error){try{this.#db?.close();}catch{}try{this.#owner?.close();}catch{}this.#key.fill(0);throw error;}}
-  #fileStamp(){const path=join(this.#o.runtimeRoot,'corpus-qa.sqlite');plain(path);const s=statSync(path,{bigint:true});return [s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs].join(':');}
-  check(active=true){if(this.#closed||this.#broken)stop('CQA_CLOSED');requireTrainingBinding(this.#o.approvedTrainingRoot,this.#o.runtimeRoot,this.spec.storageBindingDigest,this.#o.authorityPath);const now=this.#o.now?.()??Date.now();requireAuditAdmission(this.spec,this.#o.admission(),now);this.#o.sourceCheck();const a=this.#host.read(now,active);if(this.#stamp!==this.#fileStamp()||!this.#loading&&a.head!==(this.#seq?this.#head:null))stop('CQA_HEAD');if(active&&(this.mode==='inspect'||a.runtimeId!==this.spec.runtimeId||a.revision!==this.spec.authorityRevision||now>=this.spec.expiresAt))stop('CQA_AUTHORITY');return a;}
-  port(bucket:string):ArtifactPort{if(!/^(meta|event-\d+|attempt-\d+)$/.test(bucket))stop('CQA_BUCKET');let port=this.#ports.get(bucket);if(port)return port;const root=join(this.#o.runtimeRoot,'objects',bucket);if(!existsSync(root)){this.check();mkdirSync(root);}const s=lstatSync(root);if(!s.isDirectory()||s.isSymbolicLink())stop('CQA_FILE');const raw=createArtifactBroker(root,this.spec.auditId+':'+bucket,this.#key,()=>this.check(false)).train;port={read:raw.read,put:(kind,bytes)=>{this.check();return raw.put(kind,bytes);}};this.#ports.set(bucket,port);return port;}
-  put(bucket:string,kind:string,bytes:string|Uint8Array):ScopedRef{const ref={bucket,ref:this.port(bucket).put(kind,bytes)};if(!this.read(ref).equals(Buffer.from(bytes)))stop('CQA_READBACK');return ref;}
-  read(input:ScopedRef){const ref=scopedQa(input);return this.port(ref.bucket).read(ref.ref);}
-  snapshot(){this.check(false);return this.#state?structuredClone(this.#state):null;}
-  selection():AuditSelection{const s=this.snapshot();if(!s)stop('CQA_STATE');const index=shape(parseAudit(this.read(s.selectionRef).toString('utf8')),['version','header','entries']);if(index.version!=='CorpusQualitySelectionChunks/0.1'||!Array.isArray(index.entries)||index.entries.length>6)stop('CQA_SELECTION');const entries=index.entries.flatMap(ref=>{const values=parseAudit(this.read(scopedQa(ref)).toString('utf8'));if(!Array.isArray(values)||values.length>32)stop('CQA_SELECTION');return values;});const result=validateAuditSelection({...index.header as object,entries});if(hash(canonical(result))!==this.spec.selectionDigest)stop('CQA_SELECTION');return result;}
-  initialize(selectionInput:AuditSelection,objective:string){this.check();if(this.#state)stop('CQA_EXISTS');const selection=validateAuditSelection(selectionInput);if(hash(canonical(selection))!==this.spec.selectionDigest||selection.populationDigest!==this.spec.populationDigest||selection.entries.length!==this.spec.rowCount||hash(objective)!==this.spec.objectiveDigest||this.#o.admission().readGrant.sourcePurposeDigest!==selection.source.purposeDigest)stop('CQA_BINDING');const {entries,...header}=selection,refs=[];for(let i=0;i<entries.length;i+=32)refs.push(this.put('meta','corpus-qa-selection-chunk',canonical(entries.slice(i,i+32))));const selectionRef=this.put('meta','corpus-qa-selection',canonical({version:'CorpusQualitySelectionChunks/0.1',header,entries:refs})),objectiveRef=this.put('meta','corpus-qa-objective',objective);
-    this.apply('INIT',{version:'CorpusQualityAuditState/0.1',spec:this.spec,status:'ACTIVE',code:null,selectionRef,objectiveRef,rubricRef:null,attempts:[],items:entries.map(e=>({caseId:e.caseId,status:'PENDING',code:null,attemptId:null,verdictRef:null})),manifestRef:null,indexRef:null,wallMs:0});
+  readonly spec: AuditSpec;
+  readonly mode: AuditStoreOptions['mode'];
+  #o: AuditStoreOptions;
+  #key: Buffer;
+  #host: HostAuthority;
+  #db!: DatabaseSync;
+  #owner!: DatabaseSync;
+  #state: AuditState | null = null;
+  #seq = 0;
+  #head = '0'.repeat(64);
+  #stamp = '';
+  #closed = false;
+  #broken = false;
+  #loading = true;
+  #recoverable = new Set<string>();
+  #ports = new Map<string, ArtifactPort>();
+  constructor(o: AuditStoreOptions) {
+    if (!(o.key instanceof Uint8Array) || o.key.length !== 32) stop('CQA_KEY');
+    this.#key = Buffer.from(o.key);
+    try {
+      this.#o = { ...o, key: this.#key };
+      this.mode = o.mode;
+      this.spec = validateAuditSpec(o.spec);
+      requireTrainingBinding(o.approvedTrainingRoot, o.runtimeRoot, this.spec.storageBindingDigest, o.authorityPath);
+      const now = o.now ?? Date.now;
+      this.#host = new HostAuthority(o.authorityPath, this.spec.auditId, now);
+      const a = this.#host.read(now(), o.mode !== 'inspect');
+      requireAuditAdmission(this.spec, o.admission(), now());
+      o.sourceCheck();
+      if (
+        o.mode !== 'inspect' &&
+        (a.runtimeId !== this.spec.runtimeId ||
+          a.revision !== this.spec.authorityRevision ||
+          now() < this.spec.createdAt ||
+          now() >= this.spec.expiresAt)
+      )
+        stop('CQA_AUTHORITY');
+      const file = join(o.runtimeRoot, 'corpus-qa.sqlite'),
+        owner = join(o.runtimeRoot, 'corpus-qa-owner.sqlite');
+      if (o.mode === 'create') {
+        if (a.head !== null || readdirSync(o.runtimeRoot).length) stop('CQA_EXISTS');
+        mkdirSync(join(o.runtimeRoot, 'objects'));
+        createFile(owner);
+        createFile(file);
+      }
+      plain(owner, 4096);
+      plain(file);
+      this.#owner = new DatabaseSync(owner, { timeout: 0 });
+      this.#owner.exec('PRAGMA trusted_schema=OFF; BEGIN IMMEDIATE');
+      for (const suffix of ['-wal', '-shm']) if (existsSync(file + suffix)) stop('CQA_INTEGRITY');
+      if (existsSync(file + '-journal') && statSync(file + '-journal').size > 0) stop('CQA_COMMIT_UNKNOWN');
+      this.#db = new DatabaseSync(file, { readOnly: o.mode === 'inspect', timeout: 0 });
+      this.#db.exec('PRAGMA trusted_schema=OFF');
+      if (o.mode === 'create')
+        this.#db.exec(
+          'PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; BEGIN IMMEDIATE; PRAGMA application_id=1129406769; PRAGMA user_version=1; ' +
+            SCHEMA.join(';') +
+            '; COMMIT;',
+        );
+      else {
+        const schema = this.#db
+          .prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name")
+          .all()
+          .map((r) => r.sql);
+        if (
+          this.#db.prepare('PRAGMA application_id').get()!.application_id !== 1129406769 ||
+          this.#db.prepare('PRAGMA user_version').get()!.user_version !== 1 ||
+          canonical(schema) !== canonical([...SCHEMA].sort((a, b) => (a.split(' ')[2]! < b.split(' ')[2]! ? -1 : 1)))
+        )
+          stop('CQA_SCHEMA');
+      }
+      this.#stamp = this.#fileStamp();
+      integer(this.#db.prepare('SELECT count(*) AS n FROM events').get()!.n, 0, 2048);
+      for (const [index, row] of this.#db.prepare('SELECT * FROM events ORDER BY sequence').all().entries()) {
+        if (
+          row.sequence !== index + 1 ||
+          row.previous !== this.#head ||
+          typeof row.ref !== 'string' ||
+          row.ref.length > 2048 ||
+          row.digest !== hash(this.#head + '\n' + row.ref)
+        )
+          stop('CQA_CHAIN');
+        const ref = scopedQa(parseAudit(row.ref));
+        if (canonical(ref) !== row.ref || ref.ref.kind !== 'corpus-qa-event') stop('CQA_CHAIN');
+        this.#state = reduce(
+          this.#state,
+          parseAudit(this.read(ref).toString('utf8')) as unknown as AuditEvent,
+          this.spec,
+        );
+        this.#head = String(row.digest);
+        this.#seq = index + 1;
+      }
+      if (o.mode !== 'create' && (!this.#state || a.head !== this.#head)) stop('CQA_HEAD');
+      if (this.#state) this.#verifyProjection();
+      if (o.mode === 'resume' && this.spec.version === 'CorpusQualityAudit/0.2')
+        for (const a of this.#state?.attempts ?? []) if (auditAttemptPending(this.spec, a)) this.#recoverable.add(a.id);
+      this.#loading = false;
+      this.check(o.mode !== 'inspect');
+    } catch (error) {
+      try {
+        this.#db?.close();
+      } catch {}
+      try {
+        this.#owner?.close();
+      } catch {}
+      this.#key.fill(0);
+      throw error;
+    }
   }
-  apply(kind:AuditEvent['kind'],data:unknown){this.check();if(kind==='RECOVER_UNKNOWN'){const id=(data as {id:string}).id;if(this.mode!=='resume'||!this.#recoverable.delete(id))stop('CQA_RECOVERY_OWNER');}if(this.#seq>=2048)stop('CQA_LIMIT');const event:AuditEvent={version:'CorpusQualityAuditEvent/0.1',kind,data:copyJson(data)},next=reduce(this.#state,event,this.spec),ref=this.put('event-'+Math.floor(this.#seq/128),'corpus-qa-event',canonical(event)),body=canonical(ref),head=hash(this.#head+'\n'+body);try{this.#db.exec('BEGIN IMMEDIATE');this.#db.prepare('INSERT INTO events VALUES (?,?,?,?)').run(this.#seq+1,this.#head,body,head);this.#db.prepare('INSERT OR REPLACE INTO metadata VALUES (1,?)').run(canonical(metadata(next)));if(kind==='INIT')for(const item of next.items)this.#db.prepare('INSERT INTO cases VALUES (?,?)').run(item.caseId,canonical(item));if(kind==='CONSUME'||kind==='SETTLE'||kind==='RECOVER_UNKNOWN'){const id=(data as {id:string}).id;this.#db.prepare('INSERT OR REPLACE INTO attempts VALUES (?,?)').run(id,canonical(next.attempts.find(a=>a.id===id)));}if(kind==='VERDICT'){const item=(data as {item:AuditItem}).item;this.#db.prepare('UPDATE cases SET data=? WHERE id=?').run(canonical(item),item.caseId);}this.#db.exec('COMMIT');this.#host.commitHead(this.#seq?this.#head:null,head);this.#head=head;this.#seq++;this.#state=next;this.#stamp=this.#fileStamp();this.check();}catch{this.#broken=true;stop('CQA_COMMIT_UNKNOWN');}}
-  #verifyProjection(){const s=this.#state!;if(this.#db.prepare('SELECT count(*) AS n FROM metadata').get()!.n!==1||this.#db.prepare('SELECT data FROM metadata WHERE id=1').get()?.data!==canonical(metadata(s)))stop('CQA_PROJECTION');for(const [table,values]of [['cases',s.items.map(i=>[i.caseId,canonical(i)])],['attempts',s.attempts.map(a=>[a.id,canonical(a)])]] as const){const actual=this.#db.prepare('SELECT id,data FROM '+table+' ORDER BY id').all().map(r=>[r.id,r.data]);if(canonical(actual)!==canonical([...values].sort((a,b)=>a[0]!<b[0]!?-1:1)))stop('CQA_PROJECTION');}}
-  authorizeSend<T>(send:()=>T){this.check();return this.#host.dispatch(this.#head,()=>{this.check();return send();});}
-  control(status:'PAUSED'|'REVOKED'){this.check();this.#host.control(status);}
-  close(){if(this.#closed)return;this.#closed=true;try{this.#db.close();}finally{try{this.#owner.close();}finally{this.#key.fill(0);this.#ports.clear();}}}
+  #fileStamp() {
+    const path = join(this.#o.runtimeRoot, 'corpus-qa.sqlite');
+    plain(path);
+    const s = statSync(path, { bigint: true });
+    return [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].join(':');
+  }
+  check(active = true) {
+    if (this.#closed || this.#broken) stop('CQA_CLOSED');
+    requireTrainingBinding(
+      this.#o.approvedTrainingRoot,
+      this.#o.runtimeRoot,
+      this.spec.storageBindingDigest,
+      this.#o.authorityPath,
+    );
+    const now = this.#o.now?.() ?? Date.now();
+    requireAuditAdmission(this.spec, this.#o.admission(), now);
+    this.#o.sourceCheck();
+    const a = this.#host.read(now, active);
+    if (this.#stamp !== this.#fileStamp() || (!this.#loading && a.head !== (this.#seq ? this.#head : null)))
+      stop('CQA_HEAD');
+    if (
+      active &&
+      (this.mode === 'inspect' ||
+        a.runtimeId !== this.spec.runtimeId ||
+        a.revision !== this.spec.authorityRevision ||
+        now >= this.spec.expiresAt)
+    )
+      stop('CQA_AUTHORITY');
+    return a;
+  }
+  port(bucket: string): ArtifactPort {
+    if (!/^(meta|event-\d+|attempt-\d+)$/.test(bucket)) stop('CQA_BUCKET');
+    let port = this.#ports.get(bucket);
+    if (port) return port;
+    const root = join(this.#o.runtimeRoot, 'objects', bucket);
+    if (!existsSync(root)) {
+      this.check();
+      mkdirSync(root);
+    }
+    const s = lstatSync(root);
+    if (!s.isDirectory() || s.isSymbolicLink()) stop('CQA_FILE');
+    const raw = createArtifactBroker(root, this.spec.auditId + ':' + bucket, this.#key, () => this.check(false)).train;
+    port = {
+      read: raw.read,
+      put: (kind, bytes) => {
+        this.check();
+        return raw.put(kind, bytes);
+      },
+    };
+    this.#ports.set(bucket, port);
+    return port;
+  }
+  put(bucket: string, kind: string, bytes: string | Uint8Array): ScopedRef {
+    const ref = { bucket, ref: this.port(bucket).put(kind, bytes) };
+    if (!this.read(ref).equals(Buffer.from(bytes))) stop('CQA_READBACK');
+    return ref;
+  }
+  read(input: ScopedRef) {
+    const ref = scopedQa(input);
+    return this.port(ref.bucket).read(ref.ref);
+  }
+  snapshot() {
+    this.check(false);
+    return this.#state ? structuredClone(this.#state) : null;
+  }
+  selection(): AuditSelection {
+    const s = this.snapshot();
+    if (!s) stop('CQA_STATE');
+    const index = shape(parseAudit(this.read(s.selectionRef).toString('utf8')), ['version', 'header', 'entries']);
+    if (
+      index.version !== 'CorpusQualitySelectionChunks/0.1' ||
+      !Array.isArray(index.entries) ||
+      index.entries.length > 6
+    )
+      stop('CQA_SELECTION');
+    const entries = index.entries.flatMap((ref) => {
+      const values = parseAudit(this.read(scopedQa(ref)).toString('utf8'));
+      if (!Array.isArray(values) || values.length > 32) stop('CQA_SELECTION');
+      return values;
+    });
+    const result = validateAuditSelection({ ...(index.header as object), entries });
+    if (hash(canonical(result)) !== this.spec.selectionDigest) stop('CQA_SELECTION');
+    return result;
+  }
+  initialize(selectionInput: AuditSelection, objective: string) {
+    this.check();
+    if (this.#state) stop('CQA_EXISTS');
+    const selection = validateAuditSelection(selectionInput);
+    if (
+      hash(canonical(selection)) !== this.spec.selectionDigest ||
+      selection.populationDigest !== this.spec.populationDigest ||
+      selection.entries.length !== this.spec.rowCount ||
+      hash(objective) !== this.spec.objectiveDigest ||
+      this.#o.admission().readGrant.sourcePurposeDigest !== selection.source.purposeDigest
+    )
+      stop('CQA_BINDING');
+    const { entries, ...header } = selection,
+      refs = [];
+    for (let i = 0; i < entries.length; i += 32)
+      refs.push(this.put('meta', 'corpus-qa-selection-chunk', canonical(entries.slice(i, i + 32))));
+    const selectionRef = this.put(
+        'meta',
+        'corpus-qa-selection',
+        canonical({ version: 'CorpusQualitySelectionChunks/0.1', header, entries: refs }),
+      ),
+      objectiveRef = this.put('meta', 'corpus-qa-objective', objective);
+    this.apply('INIT', {
+      version: 'CorpusQualityAuditState/0.1',
+      spec: this.spec,
+      status: 'ACTIVE',
+      code: null,
+      selectionRef,
+      objectiveRef,
+      rubricRef: null,
+      attempts: [],
+      items: entries.map((e) => ({
+        caseId: e.caseId,
+        status: 'PENDING',
+        code: null,
+        attemptId: null,
+        verdictRef: null,
+      })),
+      manifestRef: null,
+      indexRef: null,
+      wallMs: 0,
+    });
+  }
+  apply(kind: AuditEvent['kind'], data: unknown) {
+    this.check();
+    if (kind === 'RECOVER_UNKNOWN') {
+      const id = (data as { id: string }).id;
+      if (this.mode !== 'resume' || !this.#recoverable.delete(id)) stop('CQA_RECOVERY_OWNER');
+    }
+    if (this.#seq >= 2048) stop('CQA_LIMIT');
+    const event: AuditEvent = { version: 'CorpusQualityAuditEvent/0.1', kind, data: copyJson(data) },
+      next = reduce(this.#state, event, this.spec),
+      ref = this.put('event-' + Math.floor(this.#seq / 128), 'corpus-qa-event', canonical(event)),
+      body = canonical(ref),
+      head = hash(this.#head + '\n' + body);
+    try {
+      this.#db.exec('BEGIN IMMEDIATE');
+      this.#db.prepare('INSERT INTO events VALUES (?,?,?,?)').run(this.#seq + 1, this.#head, body, head);
+      this.#db.prepare('INSERT OR REPLACE INTO metadata VALUES (1,?)').run(canonical(metadata(next)));
+      if (kind === 'INIT')
+        for (const item of next.items)
+          this.#db.prepare('INSERT INTO cases VALUES (?,?)').run(item.caseId, canonical(item));
+      if (kind === 'CONSUME' || kind === 'SETTLE' || kind === 'RECOVER_UNKNOWN') {
+        const id = (data as { id: string }).id;
+        this.#db
+          .prepare('INSERT OR REPLACE INTO attempts VALUES (?,?)')
+          .run(id, canonical(next.attempts.find((a) => a.id === id)));
+      }
+      if (kind === 'VERDICT') {
+        const item = (data as { item: AuditItem }).item;
+        this.#db.prepare('UPDATE cases SET data=? WHERE id=?').run(canonical(item), item.caseId);
+      }
+      this.#db.exec('COMMIT');
+      this.#host.commitHead(this.#seq ? this.#head : null, head);
+      this.#head = head;
+      this.#seq++;
+      this.#state = next;
+      this.#stamp = this.#fileStamp();
+      this.check();
+    } catch {
+      this.#broken = true;
+      stop('CQA_COMMIT_UNKNOWN');
+    }
+  }
+  #verifyProjection() {
+    const s = this.#state!;
+    if (
+      this.#db.prepare('SELECT count(*) AS n FROM metadata').get()!.n !== 1 ||
+      this.#db.prepare('SELECT data FROM metadata WHERE id=1').get()?.data !== canonical(metadata(s))
+    )
+      stop('CQA_PROJECTION');
+    for (const [table, values] of [
+      ['cases', s.items.map((i) => [i.caseId, canonical(i)])],
+      ['attempts', s.attempts.map((a) => [a.id, canonical(a)])],
+    ] as const) {
+      const actual = this.#db
+        .prepare('SELECT id,data FROM ' + table + ' ORDER BY id')
+        .all()
+        .map((r) => [r.id, r.data]);
+      if (canonical(actual) !== canonical([...values].sort((a, b) => (a[0]! < b[0]! ? -1 : 1)))) stop('CQA_PROJECTION');
+    }
+  }
+  authorizeSend<T>(send: () => T) {
+    this.check();
+    return this.#host.dispatch(this.#head, () => {
+      this.check();
+      return send();
+    });
+  }
+  control(status: 'PAUSED' | 'REVOKED') {
+    this.check();
+    this.#host.control(status);
+  }
+  close() {
+    if (this.#closed) return;
+    this.#closed = true;
+    try {
+      this.#db.close();
+    } finally {
+      try {
+        this.#owner.close();
+      } finally {
+        this.#key.fill(0);
+        this.#ports.clear();
+      }
+    }
+  }
 }
-export const openQualityAudit=(options:AuditStoreOptions)=>new QualityAuditStore(options);
+export const openQualityAudit = (options: AuditStoreOptions) => new QualityAuditStore(options);
