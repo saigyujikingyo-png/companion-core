@@ -1,5 +1,7 @@
 # Dedicated DSH coupled session
 
+**历史宿主定位（2026-10-30）：** DSH 指 DeepSeek Harness，本仓于 2026-10-25 的 `0c9d5e3` 接入其聊天／Agent 宿主做原型验证；这不是正式社交窗口的选型结论。正式通信目标、旧入口限制与待接线事项见[主体通信架构与现状](SUBJECT-COMMUNICATION.md)。下列历史回执及部署边界保留，不由本次说明迁移或重新验收。
+
 New optional source mode: [M2a encrypted restart boundary](M2-DURABLE.md). With `launcher.persistence`, a vault lock and durable quota replace only the new mode's one-shot boot claim; startup requires explicit native resume. `nativeSessionMode` explicitly selects create or resume, and the identity-scoped provider avoids the RAM provider name. Native `companion-feedback` selects current-binding feedback for the next real input; `companion-revoke` commits source revocation. Private `companion-inspect` adds safe request/ref/score JSON metadata; `companion-status` retains its short compatible text. The RAM behavior and actual desktop checkpoint below describe the preserved historical deployment; this source change does not update or qualify that live snapshot.
 
 ## Historical RAM native status acceptance

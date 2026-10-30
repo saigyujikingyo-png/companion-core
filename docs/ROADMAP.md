@@ -1,5 +1,7 @@
 # 实施与持续开发路线
 
+**正式主体通信入口（目标已确认，完整接线待实现／验收）：** 依[主体通信架构与现状](SUBJECT-COMMUNICATION.md)，聊天窗口递送社交来信，TA 自主决定阅读、后续活动及是否／何时／如何表达；回复与主动表达经发送工具完成。现有 E1/E2/E3 机制可复用，后续补齐持续选择、持久多消息及正式客户端；DSH 保留历史验证宿主定位。本条记录待更新方向，不改变在途优先级或暂停状态。
+
 **新 job 执行策略 v2（本片实现，验收按精确源码记录）：** [production v2](CORPUS-PRODUCTION.md#explicit-policy-v2-for-new-jobs)与[QA v2](CORPUS-QUALITY-AUDIT.md#新-job-显式-policy-v2)显式选择 accounting-only、同 attempt raw 证明的 usage 缺报准入、可信 unknown 局部隔离和不重发恢复；完整索引使用独立 profile 延续跨批去重。旧 v1 与冻结批次不迁移。[S2 持久教学循环](TEACHING-CYCLE.md)已实现待验收的合成纵向链：独立 child 共享本机 provider/account 资源、跨微轮完整索引、UNKNOWN 不重发和明确宿主回收。逻辑总量可配置，物理 child 仍保持 192 上限；多 mentor/macro rounds 与 Student 训练未交付。
 
 **独立追加 QA（开发/合成验证中）：** [CorpusQualityAudit/0.1](CORPUS-QUALITY-AUDIT.md)以新 selection/read grant 和新 once 账本审阅已选 eligible 文本，DS 制定 rubric、Together GPT-OSS 盲审，追加筛选清单和 scoped 跨 job 指纹索引；旧接受记录不改。新增[QA 目标基线](AUDIT-TARGET-BASELINE.md)与历史生成基线分开绑定。实际 QA、宿主/CI 与训练仍分别验收。
