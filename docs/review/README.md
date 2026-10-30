@@ -19,6 +19,7 @@
 | [CAREGIVER-CONTRACT.md](CAREGIVER-CONTRACT.md) | 照顾者合同草案：照顾者义务、机制、违约可见性；TA 的权利；养成进度指标；接口见 `src/self-model-contracts.ts`（仅类型） | ③④⑤⑥ |
 | [FALLIBILITY-AND-ERROR-BUDGET.md](FALLIBILITY-AND-ERROR-BUDGET.md) | 出错权的四个条件；监护人也会出错：TA 的指正权、回应义务、不报复；按触达分级（self／relationship／third_party）的错误预算与分级放开 | ③⑤⑥ |
 | [BODY-AND-TOOLS-BOUNDARY.md](BODY-AND-TOOLS-BOUNDARY.md) | 身体（Spark）与工具（存储、x86 工作站、外部 AI）的边界：内感受 vs 观察、无直连、所有物、零花钱配额、与外部 AI 的两种关系 | ①②④⑤ |
+| [SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md) | 既定设计下的睡眠整理：经历被动记录、训练非自主；撤回逐样本同意，改为睡眠规则固定／版本化／披露、不对单夜下目标、改规则走权重变更路径；整理流与教育流分开；整理目标以世界回应为主 | ④⑥ |
 
 原评审验证（修订前 `bdb2f87`）：Node 24.16.0；`npm run typecheck` 通过；`npm test` 1,897 项（1,892 通过、0 失败、5 跳过，跳过项需官方 tokenizer 资产或固定 Python worker），耗时约 9 分钟。
 

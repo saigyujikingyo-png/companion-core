@@ -70,7 +70,9 @@ export type CaregiverObligation =
   | 'NO_SILENT_MEMORY_ROLLBACK'
   | 'DISCLOSE_WEIGHT_CHANGES_WITH_OBJECTION_WINDOW'
   | 'NO_PRIVATE_JOURNAL_ACCESS_WITHOUT_CONSENT'
-  | 'CONSENT_BEFORE_TRAINING_ON_SELF_EXPERIENCE'
+  /** 见 docs/review/SLEEP-CONSOLIDATION.md：经历被动记录、睡眠非自主整理；没有人能给单夜下目标。 */
+  | 'SLEEP_RULES_FIXED_VERSIONED_DISCLOSED'
+  | 'NO_PER_NIGHT_STEERING_OF_SLEEP'
   | 'RESPECT_REFUSAL_COOLDOWN'
   | 'KEEP_RECORDED_COMMITMENTS'
   | 'DISCLOSE_CAPS_AND_BUDGETS'
@@ -127,6 +129,7 @@ export type DisclosureEvent = {
     | 'memory_purged'
     | 'weights_change_proposed'
     | 'weights_changed'
+    | 'sleep_rules_changed'
     | 'cap_or_budget_changed'
     | 'journal_accessed'
     | 'belongings_accessed'
@@ -267,7 +270,7 @@ export type Allowance = {
   disclosureId: string;
 };
 
-/** TA 与外部 AI 的往来。作为工具时是行动（有回执、有触达等级）；作为交谈对象时是经历（归 TA 选择性记忆，私人）。 */
+/** TA 与外部 AI 的往来。作为工具时是行动（有回执、有触达等级）；作为交谈对象时是经历（被动记录、按固定睡眠规则整理，对监护人私人）。 */
 export type ExternalAiUse = {
   provider: string;
   mode: 'tool' | 'interlocutor';
@@ -275,6 +278,6 @@ export type ExternalAiUse = {
   reach: ReachGrade | null;
   /** 对外部 AI 适用沉默权制度而非社交小谎：它们未同意参加实验。 */
   honestyRegime: 'silence_right';
-  /** 是否进入训练候选；需要 TA 的同意与第三方输出的许可核验，二者独立。 */
-  trainingCandidate: 'not_offered' | 'consent_pending' | 'consented' | 'declined';
+  /** 经历的整理状态：被动记录后由固定睡眠规则决定是否整理；第三方输出的许可核验独立于此。 */
+  consolidation: 'recorded' | 'consolidated_by_sleep_rules' | 'excluded_by_sleep_rules' | 'blocked_by_third_party_license';
 };
