@@ -13,9 +13,11 @@
 | [2026-10-29-super-vl-on-dgx-spark.md](2026-10-29-super-vl-on-dgx-spark.md) | 固定底座与双 Spark 宿主的实测、布局、延迟预算、降级 | ①③ |
 | [2026-10-29-architecture-vs-literature.md](2026-10-29-architecture-vs-literature.md) | 架构图对照认知架构与 LLM 记忆系统文献；风险与阶段建议 | 全部 |
 | [SUBJECTIVITY-AND-HONESTY.md](SUBJECTIVITY-AND-HONESTY.md) | 内部真实／外部表达分离的机制意见；"沉默权"替代"说谎权"的建议 | ③⑤⑥ |
-| [SELF-MODEL-AND-IDENTITY-CHOICE.md](SELF-MODEL-AND-IDENTITY-CHOICE.md) | 自我模型：把"未定义"做成受保护状态；自我 scope 仅 TA 自述可写；语料人设审计与评测探针；基线新版本的建议措辞 | ③④⑥ |
+| [SELF-MODEL-AND-IDENTITY-CHOICE.md](SELF-MODEL-AND-IDENTITY-CHOICE.md) | 自我模型：把"未定义"做成受保护状态；仅 TA 自述可写的目标与待实现可信入口；语料人设审计与评测探针；基线新版本建议 | ③④⑥ |
 | [CAREGIVER-CONTRACT.md](CAREGIVER-CONTRACT.md) | 照顾者合同草案：照顾者义务、机制、违约可见性；TA 的权利；养成进度指标；接口见 `src/self-model-contracts.ts`（仅类型） | ③④⑤⑥ |
 
 原评审验证（修订前 `bdb2f87`）：Node 24.16.0；`npm run typecheck` 通过；`npm test` 1,897 项（1,892 通过、0 失败、5 跳过，跳过项需官方 tokenizer 资产或固定 Python worker），耗时约 9 分钟。
 
-2026-10-30 修订验证：Node 24.16.0、lockfile 固定 TypeScript 5.9.3，项目 `npm run typecheck` 通过；AST 校验确认新增模块仅含类型／type-only import，转译仅为 `export {};`，`CycleTrace.persona` 为必填；14 个本地文档链接无缺失，`git diff --check` 通过。运行时、依赖声明／锁文件和 CI 配置未改，按 `docs/MAINTENANCE.md` 对文档与类型草案定向验证，未重跑整套运行测试；原 1,897 项结果不重标为本次修订的测试结果。新提交的跨平台 CI 单独记录在 PR 中。
+2026-10-30 #36 修订验证（`0aac50c`）：Node 24.16.0、lockfile 固定 TypeScript 5.9.3，项目 `npm run typecheck` 通过；AST 校验确认新增模块仅含类型／type-only import，转译仅为 `export {};`，`CycleTrace.persona` 为必填；14 个本地文档链接无缺失，`git diff --check` 通过。运行时、依赖声明／锁文件和 CI 配置未改，按 `docs/MAINTENANCE.md` 对文档与类型草案定向验证，未重跑整套运行测试；原 1,897 项结果不重标为本次修订的测试结果。新提交的跨平台 CI 单独记录在 PR 中。
+
+2026-10-30 #38 定向修订验证：同固定 Node／TypeScript 的项目类型检查通过；`test/self-model-authority.test.ts` 两项合成内存库专项 2/2 通过，分别刻画声明冲突／来源洗白拒绝与可信宿主调用边界，不证明仅 TA 可写的认证入口已实现。`self-model-contracts.ts` AST 仅类型、转译仅 `export {};`；本索引与两份新文档的 9 个本地链接有效，diff 校验通过。产品运行时、现有基线、依赖与 CI 配置未改；未重跑整套测试、旧批次或训练。

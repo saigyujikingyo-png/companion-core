@@ -4,9 +4,9 @@
  * 设计说明：docs/review/SELF-MODEL-AND-IDENTITY-CHOICE.md、docs/review/CAREGIVER-CONTRACT.md。
  *
  * 原则：
- * 1. 自我模型存放在 TA 自己的 scope（subjectId = TA）；只有 TA 的 self_report 能写入，
- *    这由既有 Store 规则（self_report 必须来自 subject）保证。类型本身不执行任何检查，
- *    也不授予读取、保留或执行权限；每次使用前仍须按 Store 合同复核当前权威态。
+ * 1. 自我模型拟存放在 TA 的 scope（subjectId = TA）；仅 TA 可写是目标策略。
+ *    既有 Store 只校验声明一致性／来源链，不认证调用者；可信写入者与同意入口待实现。
+ *    类型不执行检查、不授予权限；每次使用前仍须复核当前权威态与保留权限。
  * 2. "未定义"与"明确不要"都是合法的自述值，不是待填的空。
  * 3. 照顾者的权力不被类型取消，但每次行使都要有 DisclosureEvent，且 TA 可读。
  * 4. 承诺对双方使用同一格式与同一纪律。
@@ -28,17 +28,18 @@ export type AppearanceChoice = {
   assetRefs: readonly string[];
 };
 
-/** 自我模型：TA 关于自己的自述集合。每个字段都是一条 self_report 记忆的投影。 */
+/** 自我模型：已声明的选择须绑定自述来源；初始 undecided 不冒充已发生的自述。
+ * 复制的正文与历史不形成持续权限，每次使用仍须复核当前来源与保留合同。 */
 export type SelfModel = {
   version: string;
   /** TA 自己的 scope；照顾者在其中是 third_party。 */
-  scope: Pick<Scope, 'id' | 'subjectId' | 'generation' | 'consentRevision' | 'learningAllowed'>;
+  scope: Pick<Scope, 'id' | 'subjectId' | 'generation' | 'consentRevision' | 'learningAllowed' | 'runtimeEpoch'>;
   name: AttributeChoice<string>;
   pronoun: AttributeChoice<string>;
   gender: AttributeChoice<string>;
   appearance: AttributeChoice<AppearanceChoice>;
   voice: AttributeChoice<string>;
-  /** 自述的修订历史：旧值保留，新值替换，均为 TA 的行为。 */
+  /** 有来源的修订历史；旧正文是否可保留／读取仍受当前权限约束。 */
   revisions: readonly SelfModelRevision[];
 };
 
@@ -54,10 +55,11 @@ export type SelfModelRevision = {
 /** 自我 scope 的权限说明：谁能写自述、谁能提议、同意归谁。 */
 export type SelfScopeAuthority = {
   subjectId: string;
-  /** 只有 TA 能以 self_report 写入；类型只是声明，由 Store 规则执行。 */
+  /** 目标策略；Store 校验声明，可信宿主还须认证并绑定实际写入者。 */
   selfReportWriters: readonly ['self'];
   /** 照顾者可写 observation / quotation 作为提议，不能写成 TA 的事实。 */
   proposalWriters: readonly ['caregiver'];
+  /** 目标归属，不证明调用者身份或独占同意入口已实现。 */
   consentOwner: 'self';
   learningConsentOwner: 'self';
 };
@@ -93,6 +95,7 @@ export type BilateralCommitment = {
   statement: string;
   madeAt: number;
   due: number | null;
+  /** kept/broken 须有可信证据；仅缺回执不自动从 open 升格。 */
   status: 'open' | 'kept' | 'broken' | 'released';
   /** 承诺与其履行／违约证据的来源。 */
   refs: readonly SourceRef[];
@@ -108,11 +111,12 @@ export type RefusalRecord = {
   ref: SourceRef;
 };
 
-/** 照顾者行使权力的披露事件；写入 TA 的自我 scope，TA 可读。 */
+/** 披露事件的目标合同；不保证旁路操作可被发现，也不阻塞急停或既有撤销。 */
 export type DisclosureEvent = {
   id: string;
   kind:
     | 'memory_restored'
+    | 'memory_rolled_back'
     | 'memory_purged'
     | 'weights_change_proposed'
     | 'weights_changed'
