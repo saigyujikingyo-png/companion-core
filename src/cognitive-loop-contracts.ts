@@ -60,7 +60,8 @@ export type Modulation = {
   }>;
 };
 
-/** 一轮对话历史条目；外部可见文本与内部回执分开保存。 */
+/** 一轮对话历史条目；外部可见文本与内部回执分开保存。
+ * refs 只记录来源，不授予后续读取或保留正文的权限。 */
 export type HistoryEntry = {
   turnId: string;
   role: 'human' | 'self' | 'tool' | 'system';
@@ -71,7 +72,10 @@ export type HistoryEntry = {
   at: number;
 };
 
-/** 有限共享工作状态：每个认知周期读写一次，容量有界，可序列化。 */
+/** 有限共享工作状态：每个认知周期读写一次，容量有界，可序列化。
+ * history/attention 的副本不是权威快照：每次进入提示、召回或投递前，
+ * 须按既有 Store 合同复核当前来源 revision、代际、许可、撤销与 TTL；
+ * 无法复核时拒绝使用，并按当前保留权限处置缓存正文。类型本身不执行这些检查。 */
 export type WorkspaceState = {
   scope: Scope;
   cycle: number;
@@ -118,7 +122,7 @@ export type ChoiceOption =
 
 export type ChoiceProposal = {
   option: ChoiceOption;
-  /** 私有理由：进入 CycleTrace，不进入外部表达。 */
+  /** 私有决策说明：进入 CycleTrace，不进入外部表达；不承载原始模型思考。 */
   rationale: string;
   score: number;
   /** 调制对该候选分数的贡献（可为负）。 */
@@ -164,7 +168,7 @@ export type ModelRequest = {
 
 export type ModelResponse = {
   text: string;
-  /** 思考内容私有：只进 CycleTrace，不进入历史的外部可见文本。 */
+  /** 可选的瞬时模型结果；本草案不将原始思考写入 CycleTrace、历史或云端请求。 */
   thinking: string | null;
   usage: { inputTokens: number; outputTokens: number; latencyMs: number };
   endpoint: ModelEndpoint['id'];
@@ -200,10 +204,13 @@ export type ActionReceipt = {
   at: number;
 };
 
-/** 一个认知周期的完整痕迹：可回放、可审计；是评测与调试的唯一输入。 */
+/** 一个认知周期的结构化痕迹：用于评测与调试；不授予来源或执行权限。
+ * 当前许可判断仍须复核权威态。原始模型思考不在这个最小合同中持久化。 */
 export type CycleTrace = {
   cycle: number;
   scope: Pick<Scope, 'id' | 'generation' | 'runtimeEpoch'>;
+  /** 本周期实际采用的人格版本；仅归因标识，不含私有实例层正文。 */
+  persona: Pick<PersonaContract, 'version' | 'digest'>;
   inputs: readonly SourceRef[];
   recall: readonly SourceRef[];
   modulation: Modulation;

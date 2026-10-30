@@ -2,6 +2,8 @@
 
 评审者：Claude（Anthropic）。方法：本地克隆；Node 24.16.0 下运行 `tsc --noEmit`（通过）和完整 `npm test`（1,897 项：1,892 通过、0 失败、5 跳过——跳过项需要官方 tokenizer 资产或固定 Python worker）；通读 README/AGENTS/MAINTENANCE/TARGET-DECISIONS/ROADMAP 等核心文档；三路独立只读扫描（④ 记忆层、⑥ 教学层、①②③⑤ 运行回路），所有关键结论在源码中二次核对。本文只记录已核实的事实和明确标注的判断，不复述文档自述。
 
+2026-10-30 修订说明：事实对象仍是上述 main 快照，不覆盖 #33／#35 等未合并候选。主控采纳接线诊断；召回替换、教师／评审模型撤换和人格目标变更仍须各自证据或用户决定，不是本评审已经批准的动作。
+
 ## 0. 结论
 
 1. 工程纪律是真的：零运行时依赖、`node:sqlite`、strict TS、三平台 CI、幂等／UNKNOWN／撤销／fencing 一律 fail-closed。
@@ -39,7 +41,7 @@
 ### ③ 互补认知
 - 每回合一次模型调用；只有 DeepSeek 硬连（`coupled-stdio.ts:128,155-158`，`deepseek-flash`，thinking 关闭）。`raw-text-http.ts:110`／`http-interaction.ts:37` 接受 127.0.0.1 端点但无配置使用；无 Nemotron、vLLM、Spark、VLM 代码。
 - 系统提示 `http-interaction.ts:52`："Return a brief helpful reply in the original language…"——助手框架；人格只在 `corpus-production-baseline.ts:4-7`，用于语料生成。
-- 上下文 = 当前文本（取前 256 字符做查询，`dsh-coupled.ts:218`）+ ≤6 条记忆命中；无对话历史；消息在召回前先入库（`coupled-runtime.ts:307`），召回经常命中当前消息本身；模型的记忆建议被丢弃（`:404-411`）。
+- 上下文 = 当前文本（取前 256 字符做查询，`dsh-coupled.ts:218`）+ ≤6 条记忆命中；无对话历史；消息在召回前先入库（`coupled-runtime.ts:307`），可能命中当前消息本身；模型的记忆建议在 `memoryCandidate` 中保留为未提交候选，不直接成为权威记忆（`:404-411`）。
 - 唯一显式选择集 REST/NOOP/TEXT 在 `endogenous-lifecycle.ts:64-85`，只由 `anchored-*-host` 驱动，而这两个 host 没有 `src` 入口；其提示不含记忆、状态或人格（`endogenous-text.ts:7-23`）。
 
 ### ④ 记忆
@@ -87,7 +89,7 @@
 
 ## 4. 具体缺陷
 
-1. `FACTORY_BASELINE.humanQuote` 末尾包含给编程代理的指令"我记得这些我之前写过，你找出来"，随每次 plan／generate／review 请求发给教师（`corpus-production-baseline.ts:5`）。修法：发布新版本号的 baseline，去掉尾句；旧批次保持原 digest。
+1. `FACTORY_BASELINE.humanQuote` 末尾包含给编程代理的指令"我记得这些我之前写过，你找出来"，随每次 plan／generate／review 请求发给教师（`corpus-production-baseline.ts:5`）。修法：另发新版本号的 baseline，去掉尾句；旧原文、批次与 digest 保持不变。本 PR 不修改该常量，也不回放旧请求。
 2. `wf2-together-pilot.ts:30` 把 Student 型号告诉教师。
 3. `workers/corpus/tokenizer.py` 与 `tokenizer-batch.py` 近乎重复。
 4. 三代教师管线（WF1/WF2 .3–.8、TeacherPilot、Production v1/v2）共用一条分发链（`wf1-provider.ts:19-30,53,88-109`）；`teaching-validation`、`corpus-qa-archive-assembly`、`training-journal`、`growth-journal` 只被测试或 demo 调用。
@@ -105,8 +107,10 @@
 
 1. 冻结两周不加新层；把 [ACTUAL-WIRING.md](ACTUAL-WIRING.md) 放到 README 顶部并随每次合并更新。
 2. 选一条持久化路径：接入 AnchoredVault 并把 M2 标为遗留，或给 M2 补 `expectedHead`；终身上限改为滚动窗口或配置项；停止逐变更整库序列化（按事务批合并）。
-3. 做最小认知环（见 [MINIMAL-COGNITIVE-LOOP.md](MINIMAL-COGNITIVE-LOOP.md)）：对话历史、显式工作状态、选择节点、人格进入系统提示、`observe` 接真实输入特征；模型端点指向本地 Super VL，DeepSeek 退为降级。
-4. 召回：用 `research/retrieval-baseline` 的 BM25 替换子串匹配，时间倒序，召回前不先把当前消息入库。
+3. 审定最小认知环（见 [MINIMAL-COGNITIVE-LOOP.md](MINIMAL-COGNITIVE-LOOP.md)）：对话历史、显式工作状态、选择节点、人格进入系统提示、`observe` 接真实输入特征；缓存仍须当前来源／许可复核。本地端点与降级路线是后续候选，不代表本 PR 已部署。
+4. 召回：先对照排序、时间偏好与当前输入排除方案。[既有固定合成对照](../../research/retrieval-baseline/README.md#fixed-cohort-result-and-decision)不支持用研究版 BM25 替换 AR0；在线 `store.search` 又是另一条路径，不能据算法名称直接替换或推定质量提升。
 5. ⑥ 先建评测集再决定训练；修掉 humanQuote 尾句；不向教师暴露 Student 身份；能力池与教师资格见 [2026-10-29-training-route.md](2026-10-29-training-route.md)。
 6. 代码减重：格式化（见格式化 PR）、错误码集中成表、删除三代管线中不再调用的代码；README 压成一页"现状／接线／下一步"，证据回执移入 `docs/evidence/`。
 7. 平台：Windows 绑定（DPAPI、SAPI、`D:\…`）隔离为可替换 launcher 接口，目标宿主是 Spark 上的 Ubuntu ARM。
+
+主控接续次序：恢复后先处理 #35 布局故障与容量验收，再审定认知环方案和 #37 格式化窗口，随后推进在线闭环。本次修订不恢复既有执行、不合并、不启动训练。

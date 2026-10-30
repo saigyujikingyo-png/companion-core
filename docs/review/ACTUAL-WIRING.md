@@ -64,7 +64,7 @@ flowchart TB
     delivery["表达<br/>WIRED(文本) / LIB(Windows SAPI 语音) / NONE(3D)"]
     tools["个人工具网关<br/>NONE — 模型工具调用被拒绝"]
     edge["具身终端<br/>NONE"]
-    experience["经历返回<br/>PARTIAL — ACK/反馈消费 WIRED；模型的记忆建议被丢弃"]
+    experience["经历返回<br/>PARTIAL — ACK/反馈消费 WIRED；记忆建议保留为未提交候选"]
   end
 
   subgraph learning["⑥ 慢循环"]
@@ -103,7 +103,7 @@ flowchart TB
 | 自主节律 | PARTIAL | `coupled-runtime.ts:463-483` 单次 `setTimeout`；withdrawal 意图返回 null（`:351`） |
 | 身份合同 | NONE(运行时) | 系统提示 `http-interaction.ts:52` "Return a brief helpful reply…"；人格只在 `corpus-production-baseline.ts:4-7` |
 | 可替换模型 | WIRED | `coupled-stdio.ts:128,155-158` DeepSeek `deepseek-flash`；`raw-text-http.ts:110`/`http-interaction.ts:37` 接受 127.0.0.1 但无配置 |
-| L / 工作状态 / R | NONE | 每回合上下文 = 当前文本 + ≤6 条记忆（`dsh-coupled.ts:218` 取前 256 字符做查询）；无历史；模型记忆建议丢弃（`coupled-runtime.ts:404-411`） |
+| L / 工作状态 / R | NONE | 每回合上下文 = 当前文本 + ≤6 条记忆（`dsh-coupled.ts:218` 取前 256 字符做查询）；无历史；模型记忆建议保留为未提交候选，不自动入权威记忆（`coupled-runtime.ts:404-411`） |
 | 下一步选择 | PARTIAL | REST/NOOP/TEXT 只在 `endogenous-lifecycle.ts:64-85`，由 `anchored-*-host` 驱动，无 `src` 入口 |
 | AEMC 底座 | WIRED | `store.ts:195-229`（代际/同意/祖先核验）、`:720-772`（撤销级联） |
 | 持久化 | WIRED(M2) | `coupled-stdio.ts:143-150` 构造 `DurableMemory`，无 `expectedHead`；`store.ts:155` 每次变更 `serialize()` 整库 |
