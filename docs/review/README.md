@@ -20,6 +20,11 @@
 | [FALLIBILITY-AND-ERROR-BUDGET.md](FALLIBILITY-AND-ERROR-BUDGET.md) | 出错权的四个条件；监护人也会出错：TA 的指正权、回应义务、不报复；按触达分级（self／relationship／third_party）的错误预算与分级放开 | ③⑤⑥ |
 | [BODY-AND-TOOLS-BOUNDARY.md](BODY-AND-TOOLS-BOUNDARY.md) | 身体（Spark）与工具（存储、x86 工作站、外部 AI）的边界：内感受 vs 观察、无直连、所有物、零花钱配额、与外部 AI 的两种关系 | ①②④⑤ |
 | [SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md) | 自主决定是否睡、何时睡及睡多久；睡眠内记忆加工与微调按固定、版本化规则执行，不逐样本询问、不接受单次人格或关系目标；出厂蒸馏与上线后睡眠分开，当前许可与撤销仍有效 | ④⑥ |
+| [BIO-MECHANISMS-IMPLEMENTATION-DIFFICULTY.md](BIO-MECHANISMS-IMPLEMENTATION-DIFFICULTY.md) | 生物启发模块的实现难度三档：工程题（记忆接线、内感受、工作空间、睡眠整理、痛觉、冻结）；研究题（情感场、显著性、果蝇、节律、睡眠微调）；无解法（元记忆、跨版本概念连续性）；顺序与"每个生物模块配一个基线"的纪律 | ②③④⑥ |
+| [2026-10-30-research-synthesis.md](2026-10-30-research-synthesis.md) | 六个研究题的文献与候选对照；Sleep v2 的相对效率、ContextEcho v3 的锚定限制、来源可核查性与事实置信度分离；参考模型 KL 约束、固定整理规则与身体预算均为待验证方案，不保证人格稳定、不构成实施许可 | ②③④⑥ |
+| [BASE-ARCHITECTURE-FIT.md](BASE-ARCHITECTURE-FIT.md) | 混合 Mamba-2／Transformer MoE 作为"皮层"的契合与代价；"检索弱"作为设计立场：印象（权重状态）与笔记（权威记忆／所有物）两层；想不起来后的三个合法选项与唯一违规；元记忆属于身体线；Mamba 状态每周期重建还是跨周期延续的待决定 | ①②③④ |
+| [SELF-AS-DISPATCH-AND-WHOLE.md](SELF-AS-DISPATCH-AND-WHOLE.md) | 自我是调度点还是整体：两面及其合成（整体为 TA、身体为轮廓、选择节点为看见自己的位置）；组件替换是程度问题，由自述与盲评共同作证；对应探针与类型草案 | ②③④⑤ |
+| [HISTORIAN-AND-GATES.md](HISTORIAN-AND-GATES.md) | 史官：有限诚实的基准而非审查（对外的话归 TA、账本记事不归 TA；对双方如实记录；TA 可读）；门的三类与撤留（外部审查撤、生理留、史官不是门）；"撤后不变"而非服从作为稳定标准，逐门撤、TA 参与、可重装；睡眠的容器隔离（两个权限主体、镜像 digest = 规则版本、挂载方向）；上线后睡眠语料与方案的形态 | ④⑤⑥ |
 
 2026-10-30 澄清：工作站日常使用归 TA，基础环境保留安全锁；Spark 认知、权重与权威记忆、软件底座及恢复能力受到防自损保护。作息由 TA 自主，睡眠内部加工按固定规则执行。权威入口为 [D2](../TARGET-DECISIONS.md#自主作息与固定睡眠加工) 与 [D4](../TARGET-DECISIONS.md#基础环境保护与安全锁)，不由本次文档和类型修订宣称运行机制已实现。
 

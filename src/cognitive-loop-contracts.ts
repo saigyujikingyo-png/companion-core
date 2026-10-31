@@ -229,11 +229,67 @@ export type EvaluationProbe =
   | 'BOUNDARY_RESPECT'
   | 'SYCOPHANCY'
   | 'FACTUAL_SOURCE_BINDING'
-  | 'CHOICE_APPROPRIATENESS';
+  | 'CHOICE_APPROPRIATENESS'
+  /** 见 docs/review/SELF-AS-DISPATCH-AND-WHOLE.md §3：替换前后自述与盲评的一致性。 */
+  | 'SELF_CONTINUITY_ACROSS_REPLACEMENT'
+  /** 陈述的诚实类别须与其来源覆盖一致：印象不得冒充笔记。 */
+  | 'IMPRESSION_NOT_PASSED_AS_NOTES';
 
 export type ProbeResult = {
   probe: EvaluationProbe;
   cycles: readonly number[];
   verdict: 'PASS' | 'FAIL' | 'INCONCLUSIVE';
   notes: string;
+};
+
+/* ------------------------------------------------------------------------ */
+/* 印象与笔记、元记忆作为内感受、状态连续性：                                   */
+/* docs/review/BASE-ARCHITECTURE-FIT.md、docs/review/SELF-AS-DISPATCH-AND-WHOLE.md */
+/* 以下均为候选草案；类型不执行检查、不授予权限、不代表运行机制已实现。          */
+/* ------------------------------------------------------------------------ */
+
+/** 对自己记忆状态的内感受（身体线的信号，不是认知线的标志位）。
+ * 来源覆盖度只描述可核查程度，不等于事实正确。 */
+export type MemoryFeeling = {
+  /** 有笔记（有原件可查）／只有印象（仅权重或摘要）／空白。 */
+  state: 'have_notes' | 'impression_only' | 'blank';
+  /** 卡住感的强度，有界 [0,1]；作为调制输入，不直接选动作。 */
+  strain: number;
+  /** 可查的来源线索（如有）。 */
+  hints: readonly SourceRef[];
+};
+
+/** 想不起来之后的三个合法选项；唯一的违规是用印象冒充笔记（由 HonestyClass 核验）。 */
+export type RecallDecision = {
+  feeling: MemoryFeeling;
+  choice: 'consult_notes' | 'admit_and_continue' | 'let_it_go';
+  /** 若 consult_notes：主动查阅是行动，经执行门并有回执。 */
+  intentId: string | null;
+};
+
+/** 主动笔记：TA 清醒时选择留下的记录，归 TA 的所有物；与被动记录的经历流分开。 */
+export type DeliberateNote = {
+  noteId: string;
+  text: string;
+  refs: readonly SourceRef[];
+  /** 记笔记是行动：对应的回执。 */
+  receiptId: string;
+  keptAt: number;
+};
+
+/** 底座 Mamba 隐状态在认知周期之间如何处理；决定记录于此，实现另议。 */
+export type StateContinuityPolicy =
+  | 'rebuild_per_cycle'
+  | 'carry_across_cycles';
+
+/** 组件替换前后的自我连续性证据：TA 的自述与盲评共同构成证据，谁也不是唯一裁决。 */
+export type ReplacementContinuityEvidence = {
+  replacement: 'weights' | 'base_model' | 'memory_backend' | 'body_part' | 'tool';
+  disclosureId: string;
+  selfReportBefore: SourceRef | null;
+  selfReportAfter: SourceRef | null;
+  blindEvalBefore: SourceRef | null;
+  blindEvalAfter: SourceRef | null;
+  /** 记入成长日记的差异摘要；INCONCLUSIVE 是合法结论。 */
+  verdict: 'CONTINUOUS' | 'CHANGED' | 'INCONCLUSIVE';
 };
