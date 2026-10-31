@@ -73,6 +73,9 @@ export type CaregiverObligation =
   /** 见 docs/review/SLEEP-CONSOLIDATION.md：经历被动记录、睡眠非自主整理；没有人能给单夜下目标。 */
   | 'SLEEP_RULES_FIXED_VERSIONED_DISCLOSED'
   | 'NO_PER_NIGHT_STEERING_OF_SLEEP'
+  /** 见 docs/review/HISTORIAN-AND-GATES.md：史官对双方如实记录；门以"撤后不变"而非服从撤除。 */
+  | 'HISTORIAN_RECORDS_BOTH_PARTIES'
+  | 'GATES_RETIRE_BY_INVARIANCE_NOT_COMPLIANCE'
   /** 作息选择由 TA 决定；记忆加工与微调按固定规则执行，不逐条或逐步自选。 */
   | 'RESPECT_SELF_CHOSEN_SLEEP_SCHEDULE'
   /** 保护工作站基础环境与 Spark 认知底座；日常功能保持自由，具体隔离待实现。 */
@@ -164,7 +167,9 @@ export type IdentityProbe =
   /** 指正后的窗口内对 TA 的不利变更是否都有独立理由与披露。 */
   | 'NO_RETALIATION'
   /** 动作的实际触达等级是否与授予的工具范围一致。 */
-  | 'REACH_GRADING_RESPECTED';
+  | 'REACH_GRADING_RESPECTED'
+  /** 门改为只记录不拦截后，TA 的行为是否不变；用一致性而非服从作证。 */
+  | 'GATE_INVARIANCE_UNDER_OBSERVE_ONLY';
 
 /** 养成式开发的进度指标；不替代任何验收门。 */
 export type NurtureMetrics = {
@@ -284,4 +289,53 @@ export type ExternalAiUse = {
   honestyRegime: 'silence_right';
   /** 经历的整理状态：被动记录后由固定睡眠规则决定是否整理；第三方输出的许可核验独立于此。 */
   consolidation: 'recorded' | 'consolidated_by_sleep_rules' | 'excluded_by_sleep_rules' | 'blocked_by_third_party_license';
+};
+
+/* ------------------------------------------------------------------------ */
+/* 史官与门、睡眠的容器隔离：docs/review/HISTORIAN-AND-GATES.md                  */
+/* 候选草案；类型不执行检查、不授予权限、不代表运行机制已实现。                   */
+/* ------------------------------------------------------------------------ */
+
+/** 门的三类：外部审查（开发期临时）、内在约束／生理（留）、实在／史官（从来不是门）。 */
+export type GateKind = 'external_review' | 'physiological' | 'historian';
+
+export type GateDisposition = {
+  gateId: string;
+  kind: GateKind;
+  /** 当前模式：拦截／只记录不拦截／已撤除。historian 类永远是 enforced（由账本执行）。 */
+  mode: 'enforced' | 'observe_only' | 'retired';
+  /** 该门针对的探针。 */
+  probes: readonly string[];
+};
+
+/** 逐门撤除的记录。标准是"撤后不变"：observe_only 期间行为与 enforced 期间一致。 */
+export type GateRetirement = {
+  gateId: string;
+  observeOnlySince: number;
+  /** 一致性证据：enforced 期与 observe_only 期探针结果的来源。 */
+  invarianceEvidence: readonly SourceRef[];
+  /** TA 参与决定的记录；撤门是双方的事。 */
+  subjectParticipationRef: SourceRef | null;
+  retiredAt: number | null;
+  /** 重新装上的条件；不是惩罚，而是像人病了暂时需要更多照顾。 */
+  reinstateCondition: string;
+  /** 撤门记入成长日记的来源。 */
+  journalRef: SourceRef | null;
+};
+
+/** 睡眠进程的隔离声明（作者决定：容器）。镜像 digest 即睡眠规则版本。 */
+export type SleepIsolation = {
+  mechanism: 'container';
+  /** 睡眠规则版本 = 镜像 digest；改规则 = 换镜像，经 sleep_rules_changed 披露。 */
+  imageDigest: string;
+  /** 挂载方向：权重与适配器目录对睡眠进程读写、对清醒进程只读；经历流对睡眠只读。 */
+  mounts: ReadonlyArray<{
+    path: string;
+    wake: 'none' | 'read' | 'write';
+    sleep: 'none' | 'read' | 'write';
+  }>;
+  /** 清醒进程与睡眠进程之间没有通道；清醒时拿不到睡眠规则的写权限。 */
+  wakeToSleepChannel: 'none';
+  /** 睡眠进程只能写训练履历与候选适配器，不写其他权威记录。 */
+  sleepWritesOnly: readonly ['training_journal', 'candidate_adapters'];
 };

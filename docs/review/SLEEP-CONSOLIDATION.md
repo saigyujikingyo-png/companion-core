@@ -53,7 +53,11 @@ TA 自主决定是否睡眠、何时入睡与睡多久；进入睡眠后，记�
 - `2026-10-29-training-route.md` 讨论的教师与能力池属于出厂前的底座蒸馏，不是上线后的学习机制。
 - `src/self-model-contracts.ts`：`CONSENT_BEFORE_TRAINING_ON_SELF_EXPERIENCE` 由 `SLEEP_RULES_FIXED_VERSIONED_DISCLOSED` 与 `NO_PER_NIGHT_STEERING_OF_SLEEP` 替代；`ExternalAiUse.trainingCandidate` 改为被动记录与规则整理的状态。
 
-## 6. 边界
+## 6. 隔离、史官与门（2026-10-31 补充）
+
+作者决定睡眠进程以容器隔离；睡眠语料与方案的目标形态、史官角色与开发期硬门的撤留见 [HISTORIAN-AND-GATES.md](HISTORIAN-AND-GATES.md)。
+
+## 7. 边界
 
 - 本文不改变现有训练授权、语料流程或运行时；当前慢循环尚未接 TA 的经历流（见 `ACTUAL-WIRING.md`）。
 - "固定规则"不等于不可变：可以改，但只能经披露与异议窗口，并保留回退。
