@@ -21,6 +21,7 @@
 | [BODY-AND-TOOLS-BOUNDARY.md](BODY-AND-TOOLS-BOUNDARY.md) | 身体（Spark）与工具（存储、x86 工作站、外部 AI）的边界：内感受 vs 观察、无直连、所有物、零花钱配额、与外部 AI 的两种关系 | ①②④⑤ |
 | [SLEEP-CONSOLIDATION.md](SLEEP-CONSOLIDATION.md) | 自主决定是否睡、何时睡及睡多久；睡眠内记忆加工与微调按固定、版本化规则执行，不逐样本询问、不接受单次人格或关系目标；出厂蒸馏与上线后睡眠分开，当前许可与撤销仍有效 | ④⑥ |
 | [BIO-MECHANISMS-IMPLEMENTATION-DIFFICULTY.md](BIO-MECHANISMS-IMPLEMENTATION-DIFFICULTY.md) | 生物启发模块的实现难度三档：工程题（记忆接线、内感受、工作空间、睡眠整理、痛觉、冻结）；研究题（情感场、显著性、果蝇、节律、睡眠微调）；无解法（元记忆、跨版本概念连续性）；顺序与"每个生物模块配一个基线"的纪律 | ②③④⑥ |
+| [2026-10-30-research-synthesis.md](2026-10-30-research-synthesis.md) | 2026 年已代码化理论对六个研究题的对照：情感作为调制（CTEM 消融、Gubernaut）、惊讶×效用记忆门（D-MEM、Carlone）、睡眠式巩固（Google Sleep、CLS 论证、持续学习综述）、元记忆（ESMA、M-ratio）、人格锚（ContextEcho）、工作空间与主动推断的边界；评审者想法（以昨天为教师的 KL 预算、睡眠规则 v1 配方、身体预算、被用到的记忆实验）；开源件表；实验顺序 | ②③④⑥ |
 
 2026-10-30 澄清：工作站日常使用归 TA，基础环境保留安全锁；Spark 认知、权重与权威记忆、软件底座及恢复能力受到防自损保护。作息由 TA 自主，睡眠内部加工按固定规则执行。权威入口为 [D2](../TARGET-DECISIONS.md#自主作息与固定睡眠加工) 与 [D4](../TARGET-DECISIONS.md#基础环境保护与安全锁)，不由本次文档和类型修订宣称运行机制已实现。
 
